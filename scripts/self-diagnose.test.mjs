@@ -30,7 +30,10 @@ import {
   localServerConcurrencyMismatchInvariant,
   mapGhPrListToCiSnapshots,
   modelCatalogInvariantsHoldInvariant,
+  ORCHESTRATOR_BUDGET_RATIO_FLOOR,
   openhandsImportableAtBootInvariant,
+  orchestratorBudgetMonopolyInvariant,
+  orchestratorDetachedWorkerFinishInvariant,
   parseEtime,
   parseIterationLogLine,
   runInvariants,
@@ -1728,5 +1731,139 @@ describe("localServerConcurrencyMismatchInvariant — slice 1 of `local-server-c
     const inv = localServerConcurrencyMismatchInvariant({ envValue: "8", probe });
     const result = await inv();
     expect(result.ok).toBe(true);
+  });
+});
+
+// claude-orchestrator-local-worker-fanout: cross-layer chaos invariant #1 —
+// the cloud budget must belong to the orchestrator (brain). A worker burning
+// cloud tokens means the MINSKY_ROLE pin is leaking.
+describe("orchestratorBudgetMonopolyInvariant (cloud budget belongs to the brain)", () => {
+  it("passes vacuously when no workers are alive (no separation to violate)", async () => {
+    const inv = orchestratorBudgetMonopolyInvariant({
+      usage: async () => ({
+        orchestratorCloudTokens: 0,
+        workerCloudTokens: 1_000_000,
+        workersAlive: 0,
+      }),
+    });
+    expect((await inv()).ok).toBe(true);
+  });
+
+  it("passes when workers spent 0 cloud tokens (ideal — ratio → ∞)", async () => {
+    const inv = orchestratorBudgetMonopolyInvariant({
+      usage: async () => ({
+        orchestratorCloudTokens: 500,
+        workerCloudTokens: 0,
+        workersAlive: 3,
+      }),
+    });
+    expect((await inv()).ok).toBe(true);
+  });
+
+  it("passes at exactly the ratio floor (≥9.0 with workers alive)", async () => {
+    const inv = orchestratorBudgetMonopolyInvariant({
+      usage: async () => ({
+        orchestratorCloudTokens: 900,
+        workerCloudTokens: 100,
+        workersAlive: 3,
+      }),
+    });
+    expect((await inv()).ok).toBe(true);
+  });
+
+  it("fires when a worker burns enough cloud budget to drop the ratio below 9.0", async () => {
+    const inv = orchestratorBudgetMonopolyInvariant({
+      usage: async () => ({
+        orchestratorCloudTokens: 400,
+        workerCloudTokens: 100,
+        workersAlive: 2,
+      }),
+    });
+    const r = await inv();
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.id).toBe("orchestrator-budget-monopoly");
+    expect(r.actor).toBe("minsky-then-operator");
+    expect(r.evidence).toContain("ratio is 4.00");
+    expect(r.suggestedFix).toContain("MINSKY_ROLE=worker");
+  });
+
+  it("honours a custom ratio floor", async () => {
+    const inv = orchestratorBudgetMonopolyInvariant({
+      ratioFloor: 2.0,
+      usage: async () => ({
+        orchestratorCloudTokens: 300,
+        workerCloudTokens: 100,
+        workersAlive: 1,
+      }),
+    });
+    // ratio 3.0 ≥ floor 2.0 ⇒ passes (would fail under the default 9.0 floor).
+    expect((await inv()).ok).toBe(true);
+  });
+
+  it("exports the documented 9.0 ratio floor (cloud-share ≥0.9)", () => {
+    expect(ORCHESTRATOR_BUDGET_RATIO_FLOOR).toBe(9.0);
+  });
+});
+
+// claude-orchestrator-local-worker-fanout: cross-layer chaos invariant #2 —
+// no zombie workers survive the orchestrator's exit.
+describe("orchestratorDetachedWorkerFinishInvariant (no-zombie-on-orchestrator-kill)", () => {
+  it("passes vacuously when the orchestrator is alive", async () => {
+    const inv = orchestratorDetachedWorkerFinishInvariant({
+      probe: async () => ({
+        orchestratorAlive: true,
+        workers: [{ pid: 4242, busy: true, ageSecSinceOrchestratorExit: 9999 }],
+      }),
+    });
+    expect((await inv()).ok).toBe(true);
+  });
+
+  it("passes when all detached workers have already exited (empty table)", async () => {
+    const inv = orchestratorDetachedWorkerFinishInvariant({
+      probe: async () => ({ orchestratorAlive: false, workers: [] }),
+    });
+    expect((await inv()).ok).toBe(true);
+  });
+
+  it("passes when a busy worker is still inside its grace window (finishing)", async () => {
+    const inv = orchestratorDetachedWorkerFinishInvariant({
+      graceSec: 1800,
+      probe: async () => ({
+        orchestratorAlive: false,
+        workers: [{ pid: 5001, busy: true, ageSecSinceOrchestratorExit: 600 }],
+      }),
+    });
+    expect((await inv()).ok).toBe(true);
+  });
+
+  it("fires when an IDLE worker survives the orchestrator's exit (should have exited immediately)", async () => {
+    const inv = orchestratorDetachedWorkerFinishInvariant({
+      probe: async () => ({
+        orchestratorAlive: false,
+        workers: [{ pid: 5002, busy: false, ageSecSinceOrchestratorExit: 5 }],
+      }),
+    });
+    const r = await inv();
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.id).toBe("orchestrator-detached-worker-finish");
+    expect(r.evidence).toContain("pid 5002");
+    expect(r.evidence).toContain("idle");
+  });
+
+  it("fires when a BUSY worker overruns its grace window (zombie holding the budget)", async () => {
+    const inv = orchestratorDetachedWorkerFinishInvariant({
+      graceSec: 1800,
+      probe: async () => ({
+        orchestratorAlive: false,
+        workers: [{ pid: 5003, busy: true, ageSecSinceOrchestratorExit: 3600 }],
+      }),
+    });
+    const r = await inv();
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.evidence).toContain("pid 5003");
+    expect(r.suggestedFix).toContain("self-terminate");
   });
 });

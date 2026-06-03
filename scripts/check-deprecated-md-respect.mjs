@@ -65,6 +65,16 @@ export const ALLOWLIST = Object.freeze([
   /^test\/integration\/pnpm-minsky-aliases\.test\.ts$/,
   /^scripts\/check-pnpm-minsky-aliases\.mjs$/,
   /^scripts\/check-pnpm-minsky-aliases\.test\.mjs$/,
+  // Same self-referential carve-out: the watch-surface-cap gate + its
+  // test enforce the 3-value Watch invariant by parsing the live
+  // `WATCH_METRIC_IDS` literal out of `novel/dashboard-web/src/watch.ts`
+  // (the live `minsky watch` TUI surface — NOT the deprecated web server).
+  // They MUST name that exact file to read the literal it inspects. The
+  // `novel/dashboard-web` H3 in DEPRECATED.md § 4 covers the web *server*
+  // path; `watch.ts` is the replacement TUI surface that lives under the
+  // same directory. Remove this row only if `watch.ts` relocates.
+  /^scripts\/check-watch-surface-cap\.mjs$/,
+  /^scripts\/check-watch-surface-cap\.test\.mjs$/,
   // Same self-referential carve-out: this regression test pins a
   // specific bug-fix WITHIN setup.sh (the foreign-orphan-plist
   // bootstrap failure surfaced 2026-05-28) — it MUST reference
