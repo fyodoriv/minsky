@@ -600,7 +600,6 @@ export function withWorkerPaused(pauseWorker, fn) {
  */
 function defaultVet(pr) {
   const scratch = mkdtempSync(join(tmpdir(), "minsky-gate-"));
-  writeOwnerPid(scratch);
   const shed = decideLoadShed({
     niceness: VET_NICENESS,
     noWorkerPause: process.env["MINSKY_GATE_NO_WORKER_PAUSE"],
@@ -608,6 +607,12 @@ function defaultVet(pr) {
   try {
     const prep = prepareScratchClone(scratch, pr);
     if (prep) return prep;
+    // Owner-pid sentinel must be written AFTER the clone: `git clone` refuses a
+    // non-empty target, and `mkdtempSync` already gives us a fresh dir, so the
+    // sentinel-before-clone ordering broke every vet ("destination already
+    // exists and is not an empty directory"). The GC's age guard keeps the
+    // young dir alive during the clone window, so writing the hint here is safe.
+    writeOwnerPid(scratch);
     const stdout = withWorkerPaused(shed.pauseWorker, () => runVetNiced(scratch, shed.niceness));
     return { stdout };
   } catch (err) {
