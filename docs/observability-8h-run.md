@@ -111,9 +111,26 @@ crash / unknown.
 `pnpm add -w @sentry/node` and export `SENTRY_DSN=<dsn>` for the daemon. With no
 DSN the file strategy is used — no setup required.
 
-## Minsky vs competitors — *(obs-live-competitive-self-column)*
+## Minsky vs competitors
 
-—
+`scripts/benchmark-run.mjs` maps the run summary onto 5 ledger-derivable
+competitive metrics — `deploy-frequency`, `daemon-stability-pct`,
+`autonomous-merge-rate`, `mean-autonomous-merge-latency`, `cost-per-merged-pr`
+— and emits `.minsky/competitive-scorecard.json`: Minsky's own column plus a
+direction-aware delta vs every competitor in the corpus that publishes the same
+metric.
+
+```bash
+node scripts/benchmark-run.mjs --run latest \
+  | jq '{nonNull: .minsky.nonNullMetrics, competitors: [.competitors[].id]}'
+```
+
+Small-n guard (rule #4): count-sensitive readings (latency, cost) are `null`
+until the run has merged ≥ 5 PRs — an honest "n too small", never a misleading
+point estimate. The curated `competitors/scorecard.md` snapshot is left intact;
+the live head-to-head lives in this JSON and (PR F) the dashboard. The corpus is
+read from `@minsky/competitive-benchmark`'s built `dist` — competitors stay pure
+data (rule #2).
 
 ## The dashboard & browser verification — *(obs-browser-verified-run-dashboard)*
 
