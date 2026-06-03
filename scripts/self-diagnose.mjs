@@ -1358,8 +1358,8 @@ export function stripBranchSuffixes(branch) {
  *
  * Conventions: each iteration emits the live span line
  * `[span] tick-loop.iteration {"iteration.index":N,"iteration.status":...,"task.id":...,"iteration.reason":...}`
- * — the exact shape `novel/dashboard-web/src/activity.ts::parseSpan` and
- * `scripts/llm-provider-throughput.mjs` already consume. `committed` is
+ * — the exact shape `scripts/llm-provider-throughput.mjs` already
+ * consumes. `committed` is
  * derived from `iteration.status === "completed"`. Lines that don't carry
  * the span prefix or don't parse are silently skipped.
  *
@@ -1389,7 +1389,7 @@ async function readIterationsFromLog(logPath) {
 
 /**
  * Live tick-loop span prefix. Mirrors `SPAN_PREFIX` in
- * `novel/dashboard-web/src/activity.ts` and `scripts/llm-provider-throughput.mjs`
+ * `scripts/llm-provider-throughput.mjs`
  * — the single source of truth for the emitter's stdout shape.
  */
 const ITERATION_SPAN_PREFIX = "[span] tick-loop.iteration ";
