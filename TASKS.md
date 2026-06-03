@@ -165,7 +165,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **ID**: obs-browser-verified-run-dashboard
   - **Tags**: p0, observability, dashboard, ui, browser-verified, docs, milestone-m1
   - **Milestone**: M1
-  - **Touches**: `novel/dashboard-web/src/**`, `scripts/verify-dashboard-browser.mjs`, `docs/observability-8h-run.md`
+  - **Touches**: `scripts/render-run-report.mjs`, `scripts/verify-dashboard-browser.mjs`, `docs/observability-8h-run.md`
   - **Competitive-goal**: surfaces every other obs metric (uptime, throughput, cost/task, latency, errors, quality, competitive deltas) in one glanceable place — rule #4 visibility made real.
   - **Hypothesis**: the metrics above are useless if no one can see them at a glance. A single dashboard route rendering `run-summary.json` + the competitive scorecard, proven to render by an agent-browser smoke test, lets an operator (and a reviewer) verify the 8h run's health in one screen.
   - **Success**: a route (e.g. `/run` on the existing dashboard-web server) renders tiles for uptime, tasks-merged, cost/task, mean latency, error count, mean quality, and the Minsky-vs-competitor table; an agent-browser script opens it and asserts each tile shows a value.
@@ -173,7 +173,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `node scripts/verify-dashboard-browser.mjs` (drives agent-browser, asserts the 7 tiles are present + non-empty) exits 0.
   - **Anchor**: Card, Mackinlay, Shneiderman, "Readings in Information Visualization", 1999 (glanceable, overview-first display); rule #4 (visible metrics) + rule #7 (graceful degrade).
   - **Details**: Extend `novel/dashboard-web` (or the static-report fallback) to read `run-summary.json` + `.minsky/competitive-scorecard.json`. Add `scripts/verify-dashboard-browser.mjs` using the `agent-browser` skill to open the page and assert tiles. Write `docs/observability-8h-run.md` as the single runbook: what each metric means, where it is stored, the exact command to view it, and the copy-paste agent-browser verification command.
-  - **Files**: `novel/dashboard-web/src/{server,render}.ts`, `scripts/verify-dashboard-browser.mjs` (new), `docs/observability-8h-run.md` (new — umbrella runbook for the whole suite).
+  - **Files**: `scripts/render-run-report.mjs` (+ `.test.mjs`) (new — static self-contained report), `scripts/verify-dashboard-browser.mjs` (new), `docs/observability-8h-run.md` (umbrella runbook). Static report.html instead of reviving the deprecated dashboard-web SSR (the task's Pivot — stable artifact over flaky server).
   - **Acceptance**: (a) one page with all 7 tiles + competitive table; (b) agent-browser smoke test asserts tiles non-empty and IS the merge gate; (c) `docs/observability-8h-run.md` documents every metric, its storage, view command, and the browser-verification command; (d) graceful-degrade: a missing metric shows `—`, page still renders; (e) the runbook's agent-browser command is copy-pasteable and verified.
 
 - [ ] `local-gate-merge-test-anti-flake` — make `scripts/local-gate-merge.test.mjs` deterministic under host-oversubscription. During parallel delivery waves (many worktree agents at once) its subprocess-heavy cases time out and red the worker's `pnpm pre-pr-lint --stage=full`, causing agents to spuriously self-mark tasks blocked even though CI (a single un-oversubscribed job) passes the same test. Multiple 2026-06 grind agents hit this.

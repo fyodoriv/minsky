@@ -132,6 +132,32 @@ the live head-to-head lives in this JSON and (PR F) the dashboard. The corpus is
 read from `@minsky/competitive-benchmark`'s built `dist` — competitors stay pure
 data (rule #2).
 
-## The dashboard & browser verification — *(obs-browser-verified-run-dashboard)*
+## The dashboard & browser verification
 
-—
+`scripts/render-run-report.mjs` renders ONE self-contained `report.html` for a
+run — 7 tiles: uptime, tasks merged, mean cost/PR, mean latency, error count,
+mean quality, and the Minsky-vs-competitor table — from `run-summary.json`,
+`.minsky/competitive-scorecard.json`, and the run's `errors.jsonl`. A static
+file (openable as `file://`), not a live server: a stable artifact beats a
+flaky SSR (rule #6/#7).
+
+```bash
+node scripts/render-run-report.mjs --run latest   # writes .minsky/runs/<id>/report.html
+```
+
+**Verify it in a browser** (the merge gate):
+
+```bash
+node scripts/verify-dashboard-browser.mjs          # exits 0 when all 7 tiles render
+```
+
+It renders a demo report, asserts all 7 `data-tile` elements are present
+(deterministic structural gate), then drives `agent-browser --auto-connect` to
+actually open the page and confirm every tile is non-empty. The browser step is
+best-effort — on a headless box it warns and the structural gate still holds. To
+eyeball it yourself:
+
+```bash
+agent-browser --auto-connect open "file://$(node scripts/render-run-report.mjs --run latest)"
+agent-browser eval "JSON.stringify([...document.querySelectorAll('[data-tile]')].map(e=>e.getAttribute('data-tile')))"
+```
