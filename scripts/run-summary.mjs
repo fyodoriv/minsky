@@ -66,6 +66,7 @@ const emptySummary = (verdicts, runId = null) => ({
   restartCount: 0,
   tasksAttempted: attemptCount(verdicts),
   tasksMerged: 0,
+  mergedPrs: /** @type {number[]} */ ([]),
 });
 
 /**
@@ -85,12 +86,12 @@ function longestUninterruptedSec(sorted, startMs, endMs) {
   return Math.round(longestMs / 1000);
 }
 
-/** @param {TickLine[]} sorted @returns {number} distinct merged PR count */
-function distinctMergedCount(sorted) {
+/** @param {TickLine[]} sorted @returns {number[]} distinct merged PR numbers, first-seen order */
+function distinctMergedPrs(sorted) {
   /** @type {Set<number>} */
   const merged = new Set();
   for (const l of sorted) for (const n of l.merged ?? []) merged.add(n);
-  return merged.size;
+  return [...merged];
 }
 
 /**
@@ -112,6 +113,7 @@ export function summarizeRun({ ledger = [], verdicts = [], runId = null } = {}) 
 
   const startMs = Date.parse(first.ts);
   const endMs = Date.parse(last.ts);
+  const mergedPrs = distinctMergedPrs(sorted);
   return {
     runId: targetRunId ?? null,
     startedAt: first.ts,
@@ -120,7 +122,79 @@ export function summarizeRun({ ledger = [], verdicts = [], runId = null } = {}) 
     longestUninterruptedSec: longestUninterruptedSec(sorted, startMs, endMs),
     restartCount: sorted.filter((l) => l.healed === true).length,
     tasksAttempted: attemptCount(verdicts),
-    tasksMerged: distinctMergedCount(sorted),
+    tasksMerged: mergedPrs.length,
+    mergedPrs,
+  };
+}
+
+// ── Cost / latency / quality enrichment (tasks obs-cost-and-latency-per-task,
+// obs-result-quality-score) ─────────────────────────────────────────────────
+// Honest roll-ups over the run summary. Per each task's Pivot: latency is the
+// throughput-derived wall-clock-per-merged-PR; cost is session cost AMORTIZED
+// across merged PRs (labeled, never false-precision per-task); quality averages
+// only the signal components actually present. Any input absent → null output
+// (rule #4 — never fabricate a number).
+
+/** @param {number} x @returns {number} clamped to [0,1] */
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+
+/**
+ * Quality of one merged PR from whatever signals are present, in [0,1], or null.
+ * @param {{ ciGreen?: boolean, testsAdded?: boolean, reverted?: boolean, reviewScore?: number }} sig
+ * @returns {number | null}
+ */
+function prQuality(sig) {
+  /** @type {number[]} */
+  const parts = [];
+  // [boolean signal, score-when-true]; reverted scores 0 when true (a revert is bad).
+  /** @type {Array<[boolean | undefined, number]>} */
+  const bools = [
+    [sig.ciGreen, 1],
+    [sig.testsAdded, 1],
+    [sig.reverted, 0],
+  ];
+  for (const [v, whenTrue] of bools) {
+    if (typeof v === "boolean") parts.push(v ? whenTrue : 1 - whenTrue);
+  }
+  if (typeof sig.reviewScore === "number") parts.push(clamp01(sig.reviewScore));
+  return parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : null;
+}
+
+/**
+ * Mean quality across merged PRs that have signals (null if none do).
+ * @param {Record<string, { ciGreen?: boolean, testsAdded?: boolean, reverted?: boolean, reviewScore?: number }>} qualityByPr
+ * @param {number[]} mergedPrs
+ * @returns {number | null}
+ */
+function aggregateQuality(qualityByPr, mergedPrs) {
+  const scores = mergedPrs
+    .map((pr) => prQuality(qualityByPr[String(pr)] ?? {}))
+    .filter((x) => x !== null);
+  if (scores.length === 0) return null;
+  return Number((scores.reduce((a, b) => a + Number(b), 0) / scores.length).toFixed(3));
+}
+
+/**
+ * Augment a run summary with cost / latency / quality roll-ups.
+ * @param {ReturnType<typeof summarizeRun>} summary
+ * @param {{ tokenCostUsd?: number | null, qualityByPr?: Record<string, object> }} [opts]
+ */
+export function enrichSummary(summary, { tokenCostUsd = null, qualityByPr = {} } = {}) {
+  const merged = summary.tasksMerged ?? 0;
+  const meanMergeLatencySec =
+    merged > 0 && summary.totalUptimeSec != null
+      ? Math.round(summary.totalUptimeSec / merged)
+      : null;
+  const meanCostPerMergedPr =
+    typeof tokenCostUsd === "number" && merged > 0
+      ? Number((tokenCostUsd / merged).toFixed(4))
+      : null;
+  return {
+    ...summary,
+    meanMergeLatencySec,
+    meanCostPerMergedPr,
+    costAttribution: typeof tokenCostUsd === "number" ? "amortized" : null,
+    meanQuality: aggregateQuality(qualityByPr, summary.mergedPrs ?? []),
   };
 }
 
@@ -182,10 +256,11 @@ function readLedger() {
 }
 
 /** @typedef {ReturnType<typeof summarizeRun>} Summary */
+/** @typedef {ReturnType<typeof enrichSummary>} EnrichedSummary */
 
 /**
  * Best-effort: write run-summary.json + run.log under `.minsky/runs/<id>/`.
- * @param {Summary} summary @param {TickLine[]} ledger
+ * @param {EnrichedSummary} summary @param {TickLine[]} ledger
  */
 function persistRun(summary, ledger) {
   if (!summary.runId) return;
@@ -200,7 +275,7 @@ function persistRun(summary, ledger) {
   }
 }
 
-/** @param {Summary} summary */
+/** @param {EnrichedSummary} summary */
 function renderPretty(summary) {
   return `${[
     `run-summary (${summary.runId ?? "no active run"})`,
@@ -208,6 +283,9 @@ function renderPretty(summary) {
     `  longest no-restart: ${summary.longestUninterruptedSec ?? "—"}s`,
     `  restarts:           ${summary.restartCount}`,
     `  tasks merged:       ${summary.tasksMerged}`,
+    `  mean latency/PR:    ${summary.meanMergeLatencySec ?? "—"}s`,
+    `  mean cost/PR:       ${summary.meanCostPerMergedPr ?? "—"}${summary.costAttribution ? ` (${summary.costAttribution})` : ""}`,
+    `  mean quality:       ${summary.meanQuality ?? "—"}`,
   ].join("\n")}\n`;
 }
 
@@ -217,8 +295,13 @@ function main() {
   const runArg = runIdx >= 0 ? args[runIdx + 1] : "latest";
   const runId = !runArg || runArg === "latest" ? null : runArg;
 
+  // Total run token-cost (USD) is supplied by the daemon via env when the
+  // token-monitor session data is available; absent → cost stays null (honest).
+  const costEnv = process.env["MINSKY_RUN_TOKEN_COST_USD"];
+  const tokenCostUsd = costEnv && Number.isFinite(Number(costEnv)) ? Number(costEnv) : null;
+
   const ledger = readLedger();
-  const summary = summarizeRun({ ledger, runId });
+  const summary = enrichSummary(summarizeRun({ ledger, runId }), { tokenCostUsd });
   persistRun(summary, ledger);
 
   process.stdout.write(

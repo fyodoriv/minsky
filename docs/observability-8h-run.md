@@ -53,13 +53,32 @@ It graceful-degrades: a missing ledger yields `null` fields, never a crash.
 
 Verify the math: `pnpm vitest run scripts/run-summary.test.mjs`.
 
-## Cost per task & speed — *(obs-cost-and-latency-per-task)*
+## Cost per task & speed
 
-—
+`run-summary.json` carries two roll-ups (via `enrichSummary`):
 
-## Result quality — *(obs-result-quality-score)*
+- `meanMergeLatencySec` — throughput-derived: total run wall-clock ÷ merged PRs.
+- `meanCostPerMergedPr` + `costAttribution: "amortized"` — total run token-cost
+  ÷ merged PRs. Amortized on purpose (a Claude session spans several tasks, so
+  per-task token attribution would be false precision — the task's Pivot). The
+  daemon supplies total run cost via `MINSKY_RUN_TOKEN_COST_USD`; absent → cost
+  stays `null` (never fabricated).
 
-—
+```bash
+node scripts/run-summary.mjs --run latest --json | jq '{meanMergeLatencySec, meanCostPerMergedPr, costAttribution}'
+```
+
+## Result quality
+
+`meanQuality` ∈ [0,1] averages, per merged PR, only the signal components that
+are present: first-push CI green, tests-added, no same-day revert, and (when
+available) the PR self-grade. No signals for any merged PR → `null` (honest,
+not a fake zero). Supplied to `enrichSummary` as `qualityByPr` keyed by PR
+number; the daemon populates it from `gh` + the diff during a run.
+
+```bash
+node scripts/run-summary.mjs --run latest --json | jq '.meanQuality'
+```
 
 ## Full error list & external reporting
 

@@ -4,7 +4,7 @@
 // summary out (Avizienis 2004 — uptime/continuity as a measured dependability
 // attribute). No I/O: the CLI wrapper does the file reads, this tests the math.
 import { describe, expect, it } from "vitest";
-import { buildRunLog, summarizeRun } from "./run-summary.mjs";
+import { buildRunLog, enrichSummary, summarizeRun } from "./run-summary.mjs";
 
 /**
  * Build an orchestrate.jsonl line.
@@ -85,6 +85,54 @@ describe("summarizeRun", () => {
 
   it("buildRunLog returns empty string for no events (never throws)", () => {
     expect(buildRunLog([])).toBe("");
+  });
+});
+
+describe("enrichSummary (cost / latency / quality)", () => {
+  const base = () =>
+    summarizeRun({
+      ledger: [
+        tick("2026-06-03T00:00:00Z", { merged: [10] }),
+        tick("2026-06-03T04:00:00Z", { merged: [11] }),
+      ],
+      runId: "R1",
+    });
+
+  it("derives throughput latency and amortized cost when cost is supplied", () => {
+    const e = enrichSummary(base(), { tokenCostUsd: 4.0 });
+    expect(e.tasksMerged).toBe(2);
+    expect(e.meanMergeLatencySec).toBe((4 * 3600) / 2); // uptime / merged
+    expect(e.meanCostPerMergedPr).toBe(2.0); // 4.00 / 2, amortized
+    expect(e.costAttribution).toBe("amortized");
+  });
+
+  it("leaves cost null (no fabrication) when no cost is supplied", () => {
+    const e = enrichSummary(base());
+    expect(e.meanCostPerMergedPr).toBeNull();
+    expect(e.costAttribution).toBeNull();
+    expect(e.meanMergeLatencySec).not.toBeNull(); // latency still derivable
+  });
+
+  it("averages quality only over the signal components present", () => {
+    const e = enrichSummary(base(), {
+      qualityByPr: {
+        10: { ciGreen: true, testsAdded: true, reverted: false }, // 1.0
+        11: { ciGreen: true, testsAdded: false, reverted: false }, // 2/3
+      },
+    });
+    expect(e.meanQuality).toBeCloseTo((1 + 2 / 3) / 2, 3);
+  });
+
+  it("quality is null when no merged PR has signals", () => {
+    expect(enrichSummary(base()).meanQuality).toBeNull();
+  });
+
+  it("exposes the distinct merged PR numbers", () => {
+    const ledger = [
+      tick("2026-06-03T00:00:00Z", { merged: [5, 6] }),
+      tick("2026-06-03T00:20:00Z", { merged: [6, 7] }),
+    ];
+    expect(summarizeRun({ ledger, runId: "R1" }).mergedPrs).toEqual([5, 6, 7]);
   });
 
   it("with no heals, longest-uninterrupted equals total uptime", () => {
