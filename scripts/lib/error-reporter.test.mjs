@@ -1,7 +1,6 @@
 // @ts-check
-// Deterministic tests for the ErrorReporter adapter (task
-// `obs-error-capture-and-reporter`). No network: the Sentry strategy is
-// exercised only for its dep-missing fallback path.
+// Deterministic tests for the ErrorReporter adapter. No network: the Sentry
+// strategy is exercised only for its dep-missing fallback path.
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
