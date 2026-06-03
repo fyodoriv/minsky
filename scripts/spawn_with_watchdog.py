@@ -27,10 +27,23 @@ stdout / stderr — passthrough. The wrapper inherits stdin/stdout/stderr
 file descriptors so the bash caller can `>"$stdout_log" 2>&1` exactly
 the way it does with `timeout`.
 
+Pre-SIGKILL WIP stash (spawn-strategy-pre-sigkill-stash) — when the
+watchdog fires, the worker's uncommitted implementation is dropped
+because the Stage-0 auto-commit backstop in `bin/minsky-run.sh` runs
+only on exit 0. Before escalating SIGTERM→SIGKILL, the wrapper does a
+bounded, best-effort `git stash push -u` of the spawn cwd so the WIP is
+recoverable via `git stash list`. Controlled by two env vars:
+    MINSKY_TIMEOUT_STASH      — "0" disables (default on, rule #16).
+    MINSKY_TIMEOUT_STASH_DIR  — dir to stash (default cwd); minsky-run.sh
+                                points it at the isolated worktree.
+The stash is skipped cleanly for a non-git cwd and never blocks SIGKILL.
+
 Plan doc: docs/plans/2026-05-24-path-a-aggressive-cut.md § Phase 7
 Anchor:   rule #1 (Python stdlib is the existing solution); rule #6
           (let-it-crash at the right boundary — the iteration, not the
-          whole walker).
+          whole walker); Stevens & Rago, APUE 3rd ed. Ch. 10
+          (SIGTERM-grace-then-SIGKILL — the grace window exists to let
+          the child save work; the stash does that on its behalf).
 """
 
 from __future__ import annotations
@@ -50,11 +63,98 @@ EXIT_CMD_NOT_FOUND = 126
 # Grace period after SIGTERM before we escalate to SIGKILL.
 SIGKILL_GRACE_SECONDS = 2
 
+# Bound on the best-effort pre-SIGKILL `git stash` so a wedged git index
+# can't itself become an unbounded hang inside the watchdog. Stevens & Rago,
+# APUE 3rd ed. Ch. 10: the SIGTERM-grace window is finite; everything we do
+# inside it must be finite too.
+STASH_GIT_TIMEOUT_SECONDS = 10
+
 
 def _die(code: int, message: str) -> NoReturn:
     """Print to stderr and exit with the given code."""
     print(f"spawn_with_watchdog: {message}", file=sys.stderr)
     sys.exit(code)
+
+
+def _stash_dir() -> str:
+    """Resolve the directory whose WIP should be stashed on timeout.
+
+    Defaults to the wrapper's own cwd (the wrapped command inherits it).
+    `bin/minsky-run.sh` sets MINSKY_TIMEOUT_STASH_DIR to the isolated
+    worktree (`--repo "$worktree"`) so the stash captures the tree the
+    agent actually edits, not the bash caller's cwd.
+    """
+    return os.environ.get("MINSKY_TIMEOUT_STASH_DIR") or os.getcwd()
+
+
+def _stash_enabled() -> bool:
+    """Auto-stash is on by default (rule #16); MINSKY_TIMEOUT_STASH=0 disables.
+
+    Burden of proof is "why ISN'T this the default" — losing 1000+ LOC of
+    working WIP on every timeout is the failure this guards against, so the
+    opt-out is the debugging escape hatch, not the steady state.
+    """
+    return os.environ.get("MINSKY_TIMEOUT_STASH", "1") != "0"
+
+
+def _is_git_worktree(cwd: str) -> bool:
+    """True iff `cwd` is inside a git work tree (best-effort, bounded).
+
+    Skips cleanly (returns False) when git is absent, the dir is not a
+    repo, or the probe itself errors — a non-git spawn cwd must never make
+    the watchdog noisy or slow.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603, S607 — fixed argv, no shell
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=STASH_GIT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def _stash_timeout_wip(cwd: str) -> None:
+    """Best-effort `git stash push -u` of the spawn cwd before SIGKILL.
+
+    Bounded (its own subprocess timeout) and fully error-swallowing: a
+    failed stash must never block the SIGKILL escalation that follows.
+    Recoverable afterwards via `git stash list` (label carries an ISO
+    timestamp so the operator can identify the timed-out iteration).
+
+    Hooks are neutralised (`core.hooksPath=/dev/null`) so a global
+    pre-commit / post-* hook on the host can't slow or fail the stash —
+    same neutralise-hooks shape bin/minsky-run.sh uses for supervisor
+    auto-commits.
+
+    Anchor: Stevens & Rago, *Advanced Programming in the UNIX Environment*,
+    3rd ed., Ch. 10 — the canonical graceful-shutdown pattern is
+    SIGTERM-grace-then-SIGKILL; this is the work the grace window exists to
+    let the child save, performed on the child's behalf when it can't.
+    """
+    if not _stash_enabled():
+        return
+    if not _is_git_worktree(cwd):
+        return
+    label = f"minsky-timeout-stash {time.strftime('%Y-%m-%dT%H:%M:%S')}"
+    try:
+        subprocess.run(  # noqa: S603, S607 — fixed argv, no shell
+            ["git", "-c", "core.hooksPath=/dev/null", "stash", "push", "-u", "-m", label],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=STASH_GIT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # Let-it-crash boundary (rule #6): the iteration is already lost to
+        # the timeout. A stash failure degrades gracefully — we proceed to
+        # SIGKILL rather than wedge the watchdog on a broken git index.
+        return
 
 
 def _kill_process_group(pid: int) -> None:
@@ -99,6 +199,11 @@ def run_with_timeout(cmd: list[str], seconds: int) -> int:
     try:
         return proc.wait(timeout=seconds)
     except subprocess.TimeoutExpired:
+        # Preserve the worker's uncommitted WIP BEFORE escalating signals —
+        # the SIGTERM→SIGKILL path never auto-commits (the Stage-0 backstop
+        # in bin/minsky-run.sh runs only on exit 0), so without this the
+        # timed-out iteration's implementation is dropped on the floor.
+        _stash_timeout_wip(_stash_dir())
         _kill_process_group(proc.pid)
         # Drain the process so it doesn't become a zombie.
         try:
