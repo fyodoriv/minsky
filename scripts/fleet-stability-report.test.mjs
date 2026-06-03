@@ -205,6 +205,91 @@ describe("fleet-stability-report.mjs — env-var fallback", () => {
   });
 });
 
+describe("fleet-stability-report.mjs — --html renderer", () => {
+  test("html names both committed fixture hosts and shows a per-host ratio row", () => {
+    const a = resolve(HERE, "..", "tests", "fixtures", "fleet-host-a");
+    const b = resolve(HERE, "..", "tests", "fixtures", "fleet-host-b");
+    const { stdout, status } = run([
+      "--host",
+      a,
+      "--host",
+      b,
+      "--window=7d",
+      "--html",
+      "--now",
+      NOW,
+    ]);
+    expect(status).toBe(0);
+    expect(stdout).toContain("<!doctype html>");
+    // Both fixture host paths appear (the Measurement gate counts these).
+    expect(stdout).toContain("fleet-host-a");
+    expect(stdout).toContain("fleet-host-b");
+    // A per-host ratio row: host-a is 3/4 validated → 75%.
+    expect(stdout).toMatch(/fleet-host-a<\/td>.*<td>3\/4<\/td><td>75%<\/td>/);
+    // host-b is 1/3 validated → 33%.
+    expect(stdout).toMatch(/fleet-host-b<\/td>.*<td>1\/3<\/td><td>33%<\/td>/);
+    // Fleet roll-up row sums to 4/7.
+    expect(stdout).toMatch(/class="fleet">.*<td>4\/7<\/td>/);
+  });
+
+  test("html output matches the --json aggregation (same numbers, two renders)", () => {
+    const a = hostWithRatio(8, 2); // 80%
+    const b = hostWithRatio(2, 8); // 20%
+    const json = run(["--host", a, "--host", b, "--window=7d", "--json", "--now", NOW]);
+    const parsed = JSON.parse(json.stdout);
+    expect(parsed.fleet.window_summary[0].successful_sum).toBe(10);
+    expect(parsed.fleet.window_summary[0].total_sum).toBe(20);
+    const html = run(["--host", a, "--host", b, "--window=7d", "--html", "--now", NOW]);
+    expect(html.status).toBe(0);
+    // Same fleet totals surface in the HTML roll-up (10/20 = 50%).
+    expect(html.stdout).toMatch(/class="fleet">.*<td>10\/20<\/td><td>50%<\/td>/);
+  });
+
+  test("missing host renders an error row, valid host still shown", () => {
+    const valid = hostWithRatio(5, 5);
+    const { stdout, status } = run([
+      "--host",
+      "/nonexistent/html-path",
+      "--host",
+      valid,
+      "--window=7d",
+      "--html",
+      "--now",
+      NOW,
+    ]);
+    expect(status).toBe(0); // ≥1 valid host
+    expect(stdout).toContain('class="host-error"');
+    expect(stdout).toContain("host-not-found");
+    expect(stdout).toContain(valid);
+  });
+
+  test("--json wins when both --json and --html are passed (machine output first)", () => {
+    const host = hostWithRatio(5, 5);
+    const { stdout } = run(["--host", host, "--window=7d", "--json", "--html", "--now", NOW]);
+    // Pure JSON, not HTML — parseable, no doctype.
+    expect(stdout).not.toContain("<!doctype html>");
+    const parsed = JSON.parse(stdout);
+    expect(parsed.fleet.host_count).toBe(1);
+  });
+
+  test("host path with HTML metacharacters is escaped (no markup injection)", () => {
+    // A directory whose name contains `<` and `&` must be rendered escaped.
+    const dir = mkdtempSync(join(tmpdir(), "fleet-stability-evil-"));
+    const evil = join(dir, "host<&'\"x");
+    const storeDir = join(evil, ".minsky", "experiment-store", "cross-repo");
+    mkdirSync(storeDir, { recursive: true });
+    writeFileSync(
+      join(storeDir, "test.jsonl"),
+      `${JSON.stringify({ ts: isoMinusHours(1), verdict: "validated" })}\n`,
+    );
+    const { stdout, status } = run(["--host", evil, "--window=7d", "--html", "--now", NOW]);
+    expect(status).toBe(0);
+    expect(stdout).toContain("&lt;&amp;");
+    // Raw unescaped `host<&` must not appear inside a table cell.
+    expect(stdout).not.toMatch(/<td>[^<]*host<&/);
+  });
+});
+
 describe("fleet-stability-report.mjs — multi-window output shape", () => {
   test("default windows produce four-row window_summary in canonical order", () => {
     const host = hostWithRatio(5, 5);
