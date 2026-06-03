@@ -298,6 +298,63 @@ def test_pick_host_task_returns_none_when_no_eligible_tasks() -> None:
     assert chosen is None
 
 
+# --- Tag/section priority-discipline tests -------------------------------
+# Regression for `daemon-priority-discipline-picktask-bug`: a `p1`-tagged
+# block physically placed in `## P0` was returned ahead of every genuine
+# `p0`-tagged block below it, because the picker walked `PRIORITY_ORDER` by
+# section header only and never consulted `tags`.
+
+TAG_SECTION_MISMATCH_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "picker-tag-section-mismatch.md"
+)
+
+
+def test_pick_host_task_skips_p1_tagged_block_misfiled_in_p0() -> None:
+    content = TAG_SECTION_MISMATCH_FIXTURE.read_text(encoding="utf-8")
+    chosen = pick_task.pick_host_task(content)
+    assert chosen is not None
+    # The misfiled p1-in-P0 block must NOT shadow the genuine p0 block.
+    assert chosen.id != "misplaced-p1-in-p0"
+
+
+def test_pick_host_task_returns_genuine_p0_over_misfiled_p1() -> None:
+    content = TAG_SECTION_MISMATCH_FIXTURE.read_text(encoding="utf-8")
+    chosen = pick_task.pick_host_task(content)
+    assert chosen is not None
+    assert chosen.id == "genuine-p0"
+
+
+def test_tags_match_section_rejects_contradicting_priority_tag() -> None:
+    misfiled = pick_task.ParsedTask(
+        title="x", priority="P0", id="x", tags=["p1", "picker"]
+    )
+    assert not pick_task.tags_match_section(misfiled)
+
+
+def test_tags_match_section_accepts_aligned_priority_tag() -> None:
+    aligned = pick_task.ParsedTask(
+        title="x", priority="P0", id="x", tags=["p0", "picker"]
+    )
+    assert pick_task.tags_match_section(aligned)
+
+
+def test_tags_match_section_accepts_absent_priority_tag() -> None:
+    # Back-compat: a block that omits the redundant priority tag is NOT a
+    # contradiction and stays eligible.
+    untagged = pick_task.ParsedTask(
+        title="x", priority="P0", id="x", tags=["picker"]
+    )
+    assert pick_task.tags_match_section(untagged)
+
+
+def test_tags_match_section_is_case_insensitive() -> None:
+    # `P0` section vs an uppercase `P0` tag both normalise — no false skip.
+    upper = pick_task.ParsedTask(
+        title="x", priority="P0", id="x", tags=["P0", "picker"]
+    )
+    assert pick_task.tags_match_section(upper)
+
+
 # --- findTask parity tests -----------------------------------------------
 
 

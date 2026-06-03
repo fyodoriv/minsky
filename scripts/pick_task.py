@@ -204,6 +204,39 @@ def is_not_blocked(task: ParsedTask) -> bool:
     return task.blocked is None or task.blocked.strip() == ""
 
 
+# The set of priority tags a task may carry (`p0`/`p1`), case-normalised.
+# A task in `## P0` is misfiled when its tags carry a DIFFERENT priority
+# tag from this set — e.g. `p1` while sitting in `## P0`.
+_PRIORITY_TAGS = frozenset(p.lower() for p in PRIORITY_ORDER)
+
+
+def tags_match_section(task: ParsedTask) -> bool:
+    """True unless the task carries a priority tag that contradicts its section.
+
+    Section invariant (Liskov & Wing 1994): a block physically placed in
+    `## P0` must satisfy the P0 contract — and an explicit priority tag IS
+    that contract. A `p1`-tagged block sitting in `## P0` (a misfile) would
+    otherwise shadow every genuine `p0`-tagged block below it, because the
+    picker walks `PRIORITY_ORDER` by section header only. Gating eligibility
+    on tag/section agreement makes the misplaced block ineligible.
+
+    The check is deliberately narrow to stay back-compatible: it rejects a
+    task ONLY when its tags contain a recognised priority token (`p0`/`p1`,
+    case-insensitive) that DISAGREES with the task's section. A task with no
+    priority tag at all is NOT rejected — absence of a declaration is not a
+    contradiction, and many legitimate blocks omit the redundant tag. Tasks
+    in sections outside `PRIORITY_ORDER` pass through (the caller filters on
+    priority afterwards anyway).
+    """
+    section = task.priority.lower()
+    if section not in _PRIORITY_TAGS:
+        return True
+    tag_priorities = {t.strip().lower() for t in task.tags} & _PRIORITY_TAGS
+    if not tag_priorities:
+        return True  # no priority tag declared → not a contradiction
+    return section in tag_priorities
+
+
 # --- Duplicate-PR detection (parity port of decideDuplicate) ---------------
 # Parity port of `novel/tick-loop/src/duplicate-pr-detector.ts` (`decideDuplicate`
 # + `prTitleNamesTask`). Closes the daemon-duplicate-work-detection gap in
@@ -334,6 +367,11 @@ def pick_host_task(
         if not is_rule_9_compliant(t):
             continue
         if not is_not_blocked(t):
+            continue
+        if not tags_match_section(t):
+            # Section invariant: a block in `## P0`/`## P1` whose `**Tags**:`
+            # disagree with its section is a misfile — ineligible, so it can't
+            # shadow genuine same-section work. See `tags_match_section`.
             continue
         if t.id is None:
             continue
