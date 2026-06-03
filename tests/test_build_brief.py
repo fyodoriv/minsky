@@ -688,6 +688,58 @@ def test_build_brief_without_persona_is_unchanged() -> None:
     assert without.startswith("# Task:")
 
 
+def test_clamp_under_persona_preserves_persona_overlay_as_head() -> None:
+    """Pin which section is the always-preserved head when --persona + --max-tokens combine.
+
+    build-brief-clamp-docstring-persona-mode: clamp_brief_to_tokens splits on
+    the FIRST `\\n---\\n`. Under --persona the brief is persona overlay → --- →
+    task block → --- → system overlay, so parts[0] is the PERSONA overlay (the
+    head that is always preserved fully), while the task block + system overlay
+    live in the truncatable tail (parts[1]). This fixes that observed behaviour
+    so a future option-(b) rsplit rewrite must update both code and docstring.
+    """
+    task = _pick_task_from_sample()
+    persona_brief = build_brief.build_brief(task, _host_cfg(), persona="developer")
+    # Force a clamp: budget below the full brief so truncation actually fires.
+    over_budget_tokens = build_brief.MIN_TOKENS_FOR_LOAD_BEARING
+    assert len(persona_brief) > over_budget_tokens * build_brief.BYTES_PER_TOKEN, (
+        "fixture brief must exceed the clamp budget for this test to be meaningful"
+    )
+    clamped = build_brief.clamp_brief_to_tokens(persona_brief, over_budget_tokens)
+    assert len(clamped) <= over_budget_tokens * build_brief.BYTES_PER_TOKEN
+    assert "[truncated by build_brief.py --max-tokens=" in clamped
+
+    # The always-preserved head is parts[0] — the PERSONA overlay, not the task
+    # block. The clamp keeps it verbatim regardless of budget.
+    persona_head = persona_brief.split("\n---\n", 1)[0]
+    assert "# Persona: developer" in persona_head
+    assert clamped.startswith(persona_head)
+    assert "# Persona: developer" in clamped
+
+    # The deepest part of the system-prompt overlay lives at the end of the
+    # truncatable tail and is dropped first — exactly as under the default
+    # (non-persona) shape. What differs under --persona is which head survives,
+    # not that the tail gets cut. The bottom-of-overlay markers are gone.
+    assert "git push -u origin HEAD" not in clamped
+    assert "scope-leak detector" not in clamped
+
+
+def test_clamp_docstring_documents_persona_caveat() -> None:
+    """The clamp_brief_to_tokens docstring must state that under --persona the
+    first `---` section is the persona overlay (not the task block).
+
+    build-brief-clamp-docstring-persona-mode: the docstring previously claimed
+    the task block is always preserved, which is false under --persona. This
+    pins the corrected statement so a refactor can't silently re-introduce the
+    inaccurate doc.
+    """
+    doc = build_brief.clamp_brief_to_tokens.__doc__ or ""
+    assert "--persona" in doc
+    assert "persona overlay" in doc.lower()
+    # Names the load-bearing consequence: rule-9 fields are in the tail.
+    assert "rule-9" in doc.lower()
+
+
 def test_build_brief_persona_cli_smoke(tmp_path: Path) -> None:
     """End-to-end CLI: build_brief.py --persona <role> exits 0 and front-loads
     the persona; an unknown role exits non-zero."""

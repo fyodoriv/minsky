@@ -371,7 +371,13 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
     // `needs:` list. So it appears in `CI_ENV_DEPENDENT_JOBS` (the body-checks
     // allowlist that lifts it into the local stack via appendBodyChecks) but
     // NOT in any bash-gate bucket — bash buckets are scoped to the aggregator.
-    new Set(["pr-self-grade", "pr-security-review", "pattern-index", "skill-rule-cap"]),
+    new Set([
+      "pr-self-grade",
+      "pr-security-review",
+      "pattern-index",
+      "skill-rule-cap",
+      "watch-surface-cap",
+    ]),
   ),
 });
 
@@ -1055,6 +1061,18 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-skill-rule-cap.mjs"],
+  },
+  {
+    // rule #10 enforcement of the calm-tech 3-value Watch invariant
+    // (user-story 005 + vision.md success #6 — wrist dwell). Counts the keys
+    // of `WATCH_METRIC_IDS` in the live `watch.ts` TUI surface and fails
+    // when >3, converting the prose cap into a mechanical gate. Anchor: Card,
+    // Mackinlay, Shneiderman 1999 (glanceable 3-number display); vision.md
+    // rule #10. Source: TASKS.md `ci-lint-watch-surface-cap`.
+    name: "watch-surface-cap",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-watch-surface-cap.mjs"],
   },
   {
     // Every `.claude/skills/<name>/SKILL.md` (and `.devin/skills/<name>/`)

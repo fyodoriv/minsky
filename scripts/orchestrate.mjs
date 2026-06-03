@@ -370,6 +370,128 @@ export function buildProviderModeTransition(ctx) {
 }
 
 /**
+ * The two process roles in the brain-vs-hands fan-out. The orchestrator
+ * (conductor) is the BRAIN: it reviews + merges and spends the scarce cloud
+ * budget. A worker is a HAND: it implements on the cheap local agent. Pinning
+ * the role per-process is what keeps the cloud budget belonging to the brain
+ * (the throughput-per-dollar lever — TASKS.md
+ * `claude-orchestrator-local-worker-fanout`).
+ *
+ * @typedef {"orchestrator" | "worker"} SpawnRole
+ */
+
+/** The env var an operator/runner sets to pin a process's role. */
+export const ROLE_ENV = "MINSKY_ROLE";
+
+/**
+ * Pure: classify a process's role from its `MINSKY_ROLE` env value. Anything
+ * other than the literal `"worker"` resolves to `"orchestrator"` — the
+ * conductor is the DEFAULT (an unlabelled process is the brain), so a worker
+ * must opt IN to the cheap lane (fail-safe: a missing/typo'd label can only
+ * ever make a process MORE conservative on cloud spend, never less — rule #6).
+ *
+ * @param {string | undefined} envValue the raw `MINSKY_ROLE` value
+ * @returns {SpawnRole}
+ */
+export function resolveSpawnRole(envValue) {
+  return envValue === "worker" ? "worker" : "orchestrator";
+}
+
+/**
+ * Pure: pick the (agent, model) a spawn must use for its role. The
+ * orchestrator role gets the configured `cloud_agent` + `cloud_agent_model`
+ * (the brain reviews/merges on the high-quality model); a worker role gets the
+ * configured `local_agent` + `local_agent_model` (the hand implements on the
+ * cheap local agent). An operator hard-pin (`MINSKY_STRATEGIC_PIN_MODEL`) wins
+ * the model slot for EITHER role — the same override the strategic router
+ * honours — so an operator debugging a worker against the cloud model can
+ * still do so explicitly. No I/O: the caller reads config + env and passes the
+ * resolved strings (rule #10 — same input ⇒ same output; rule #2 — the
+ * decision is pure over a seam).
+ *
+ * @param {SpawnRole} role
+ * @param {{
+ *   cloudAgent?: string,
+ *   cloudModel?: string,
+ *   localAgent?: string,
+ *   localModel?: string,
+ *   pinModel?: string,
+ * }} cfg
+ * @returns {{ agent: string, model: string, role: SpawnRole }}
+ */
+export function decideAgentForRole(role, cfg) {
+  const pin = firstNonEmpty(cfg.pinModel);
+  if (role === "worker") {
+    return {
+      agent: firstNonEmpty(cfg.localAgent) ?? "aider",
+      model: pin ?? firstNonEmpty(cfg.localModel) ?? "ollama_chat/qwen3-coder:30b",
+      role,
+    };
+  }
+  return {
+    agent: firstNonEmpty(cfg.cloudAgent) ?? "claude",
+    model: pin ?? firstNonEmpty(cfg.cloudModel) ?? "claude-opus-4-7-max",
+    role,
+  };
+}
+
+/**
+ * Pure: return the string iff it is non-empty, else `undefined` — the
+ * `?? fallback` idiom then supplies the default. Collapses the repeated
+ * `x && x.length > 0 ? x : default` pattern into one testable helper.
+ * @param {string | undefined} s
+ * @returns {string | undefined}
+ */
+function firstNonEmpty(s) {
+  return s && s.length > 0 ? s : undefined;
+}
+
+/**
+ * Pure: decide what a worker process must do when it observes the orchestrator
+ * (its parent brain) has exited. The actor model (Hewitt 1973) says a detached
+ * hand must not become a zombie holding the cloud budget hostage: a worker
+ * mid-iteration FINISHES the in-flight unit of work (so its committed effort
+ * isn't wasted), then self-terminates; an idle worker self-terminates
+ * immediately. This is the steady-state the `chaos-orchestrator-kill` test
+ * asserts and the `orchestrator-detached-worker-finish` self-diagnose
+ * invariant guards (Basiri et al. 2016 — fault = kill the orchestrator;
+ * steady state = zero zombie workers). No I/O — the caller supplies the
+ * observation (rule #10).
+ *
+ * @param {{ orchestratorAlive: boolean, workerBusy: boolean }} obs
+ * @returns {"continue" | "finish-then-exit" | "exit-now"}
+ */
+export function decideDetachedWorkerAction(obs) {
+  if (obs.orchestratorAlive) return "continue";
+  return obs.workerBusy ? "finish-then-exit" : "exit-now";
+}
+
+/**
+ * Pure: build the `--once --json` machine summary line the task's
+ * `**Measurement**` consumes:
+ *   node scripts/orchestrate.mjs --once --json
+ *     → {"merged":[...],"skipped":N,...}
+ * The measurement asserts both `merged` and `skipped` are defined; this helper
+ * makes that contract a pure, testable function rather than an inline object at
+ * the CLI edge (rule #10). `skipped` is the COUNT (matches the ledger line's
+ * shape) so a downstream `j.skipped` is always a number, never an array.
+ *
+ * @param {{merged: {number:number}[], skipped: {number:number}[]}} res
+ * @param {{ts?: string, runId?: string, role?: SpawnRole, sweepError?: string}} [ctx]
+ * @returns {{merged: number[], skipped: number, ts: string, role: SpawnRole, runId?: string, sweepError?: string}}
+ */
+export function buildOnceJsonSummary(res, ctx = {}) {
+  return {
+    ts: ctx.ts ?? new Date().toISOString(),
+    role: ctx.role ?? "orchestrator",
+    merged: res.merged.map((m) => m.number),
+    skipped: res.skipped.length,
+    ...(ctx.runId ? { runId: ctx.runId } : {}),
+    ...(ctx.sweepError ? { sweepError: ctx.sweepError } : {}),
+  };
+}
+
+/**
  * Best-effort append of a single record to `.minsky/orchestrate.jsonl`. Same
  * fail-soft contract as the tick ledger: a missing `.minsky/` or a write
  * error degrades to a blind metric for that transition, never crashes the
@@ -412,6 +534,7 @@ function appendPolicyLedger(records) {
  * is testable without spawning `gh` (rule #2).
  * @param {(s: string) => void} log
  * @param {(opts: {limit: number, log: (s: string) => void}) => {merged: {number:number}[], skipped: {number:number}[]}} [sweepFn]
+ * @returns {{res: {merged: {number:number}[], skipped: {number:number}[]}, sweepError: string}}
  */
 export function tick(log, sweepFn = runGateSweep) {
   const aliveBefore = workerDaemonAlive();
@@ -457,6 +580,7 @@ export function tick(log, sweepFn = runGateSweep) {
       ts: new Date().toISOString(),
     }),
   );
+  return { res, sweepError };
 }
 
 /**
@@ -586,9 +710,25 @@ if (isMain) {
     ? Number(ivArg.split("=")[1])
     : Number(process.env["MINSKY_ORCH_INTERVAL_MS"] ?? 1200000);
   if (args.includes("--once")) {
-    log(`orchestrate: --once tick ${new Date().toISOString()}\n`);
-    tick(log);
-    log("orchestrate: --once done\n");
+    // `--json` switches the human log to stderr and emits a single machine
+    // summary line on stdout (the task's `**Measurement**` pipes stdout into
+    // a node assertion on `merged` + `skipped`). Without `--json`, behaviour is
+    // unchanged: human breadcrumbs on stdout. The role is pinned from
+    // `MINSKY_ROLE` so the summary records which lane vetted (brain by default).
+    const jsonOut = args.includes("--json");
+    const logSink = jsonOut ? (/** @type {string} */ s) => process.stderr.write(s) : log;
+    logSink(`orchestrate: --once tick ${new Date().toISOString()}\n`);
+    const { res, sweepError } = tick(logSink);
+    if (jsonOut) {
+      const summary = buildOnceJsonSummary(res, {
+        ts: new Date().toISOString(),
+        role: resolveSpawnRole(process.env[ROLE_ENV]),
+        runId: RUN_ID,
+        ...(sweepError ? { sweepError } : {}),
+      });
+      process.stdout.write(`${JSON.stringify(summary)}\n`);
+    }
+    logSink("orchestrate: --once done\n");
   } else {
     // Startup self-throttle: the production wire-in of the escalating,
     // capped, reset-on-health backoff (decideStartupThrottle → the same

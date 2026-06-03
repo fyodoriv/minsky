@@ -176,6 +176,9 @@ Flags:
 
 Environment:
   MINSKY_CONFIG             Override config path (default ~/.minsky/config.json)
+  MINSKY_ROLE               "worker" pins this walk to the cheap local agent
+                            (brain-vs-hands fan-out); anything else (or unset)
+                            is the orchestrator role (config-driven cloud agent)
 EOF
       exit 0
       ;;
@@ -727,6 +730,26 @@ iterate_host() {
   local local_llm_enabled
   local_llm_enabled="$(jq -r '.local_llm_enabled // false' "$CONFIG_FILE" 2>/dev/null || echo "false")"
 
+  # ── Role-aware agent selection (brain-vs-hands fan-out, TASKS.md
+  # `claude-orchestrator-local-worker-fanout`). A process pinned
+  # `MINSKY_ROLE=worker` is a HAND: it implements on the cheap configured
+  # `local_agent`/`local_agent_model`, never the cloud model — so the scarce
+  # cloud budget belongs to the orchestrator (the BRAIN). We map the worker
+  # role onto the existing local-mode path (the runner's single "use the local
+  # agent" lever) so the whole downstream spawn shape (brief overlay,
+  # --no-extended-thinking, local model/base-url) follows for free. The
+  # orchestrator role (default — anything other than the literal "worker") keeps
+  # the existing config-driven cloud/dynamic path below. This mirrors the pure
+  # `resolveSpawnRole` / `decideAgentForRole` seam in scripts/orchestrate.mjs
+  # (unit-tested there); the bash only does the env→lever wiring. An operator
+  # hard-pin (MINSKY_STRATEGIC_PIN_MODEL) still wins the model slot downstream.
+  if [[ "${MINSKY_ROLE:-}" == "worker" ]]; then
+    if [[ "$local_llm_enabled" != "true" ]]; then
+      echo "host=$host role=worker → local agent (cloud budget belongs to the orchestrator)" >&2
+    fi
+    local_llm_enabled="true"
+  fi
+
   # Build the brief via scripts/build_brief.py — full TS-parity brief
   # with the task block + system-prompt overlay (constitution + FINAL
   # STEP block). Replaces the 4-line stub. Falls back to a minimal
@@ -1054,6 +1077,14 @@ EOF
   local -x MINSKY_HOST_ROOT="$host/.minsky"
   local -x MINSKY_TASK_ID="$task_id"
   local -x MINSKY_BRANCH_NAME="$branch"
+  # Point the spawn watchdog's pre-SIGKILL WIP stash at the isolated
+  # worktree (where the agent edits via `--repo "$worktree"`), not the
+  # bash caller's cwd. On a timeout (exit 124) the Stage-0 auto-commit
+  # backstop below never runs (it gates on exit 0), so without this stash
+  # the timed-out iteration's uncommitted implementation is dropped —
+  # recoverable afterwards via `git -C "$worktree" stash list`.
+  # See scripts/spawn_with_watchdog.py (spawn-strategy-pre-sigkill-stash).
+  local -x MINSKY_TIMEOUT_STASH_DIR="$worktree"
 
   # Watchdog binary resolution order (rule #1 — prefer existing solutions):
   #   1. Python wrapper at scripts/spawn_with_watchdog.py — POSIX-portable,
@@ -1344,13 +1375,46 @@ print(load_host_config(Path('$host')).default_branch)
     fi
   elif [[ "$exit_code" -eq 124 ]]; then
     # GNU timeout(1) exits 124 when the watchdog fires.
-    verdict="spawn-failed"
-    pr_url=""
-    notes="timeout (${watchdog_s}s); ${duration_ms}ms"
+    #
+    # PR-URL salvage (2026-06-02, runner-records-validated-when-pr-opened-
+    # despite-nonzero-exit): a SIGTERMed-after-PR iteration is NOT a
+    # failure. The watchdog routinely fires AFTER the agent has run
+    # `gh pr create` (it opened+merged the PR, then kept polling CI and
+    # got killed at the timeout). Recording `spawn-failed, pr_url=""`
+    # the instant exit_code != 0 throws away the salvageable PR URL still
+    # sitting in the stdout log, undercounting the ground-truth
+    # cross-repo-pr-rate / agent-merge-rate metrics (every shipped PR
+    # that timed out post-creation reads as a failure). Per rule #17
+    # (proactive healing) + SRE Ch. 6 (every signal must be classified —
+    # a silent spawn-failed eats the PR-opened success signal), salvage
+    # the URL before defaulting to spawn-failed. Graceful-degrade (rule
+    # #7): the script always exits 0; an empty result preserves the
+    # legacy spawn-failed verdict.
+    pr_url="$(python3 "$script_dir/../scripts/extract_pr_url.py" \
+              --stdout-file "$stdout_log" 2>/dev/null || true)"
+    if [[ -n "$pr_url" ]]; then
+      verdict="validated"
+      notes="signaled-but-pr-opened: timeout (${watchdog_s}s) after agent opened PR; ${duration_ms}ms"
+    else
+      verdict="spawn-failed"
+      pr_url=""
+      notes="timeout (${watchdog_s}s); ${duration_ms}ms"
+    fi
   else
-    verdict="spawn-failed"
-    pr_url=""
-    notes="openhands exited $exit_code; ${duration_ms}ms; tail: $(tail -1 "$stdout_log" | tr -d '"' | cut -c1-100)"
+    # Same PR-URL salvage as the timeout branch above: a generic non-zero
+    # exit (e.g. the agent opened a PR then crashed on a follow-up step)
+    # may still have printed a parseable PR URL. Salvage it before
+    # recording spawn-failed so a shipped PR isn't ledgered as a failure.
+    pr_url="$(python3 "$script_dir/../scripts/extract_pr_url.py" \
+              --stdout-file "$stdout_log" 2>/dev/null || true)"
+    if [[ -n "$pr_url" ]]; then
+      verdict="validated"
+      notes="signaled-but-pr-opened: openhands exited $exit_code after agent opened PR; ${duration_ms}ms"
+    else
+      verdict="spawn-failed"
+      pr_url=""
+      notes="openhands exited $exit_code; ${duration_ms}ms; tail: $(tail -1 "$stdout_log" | tr -d '"' | cut -c1-100)"
+    fi
   fi
 
   # Failure capture (Slice 2 of bash-runner observability, 2026-05-25):
