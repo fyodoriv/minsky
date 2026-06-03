@@ -176,6 +176,9 @@ Flags:
 
 Environment:
   MINSKY_CONFIG             Override config path (default ~/.minsky/config.json)
+  MINSKY_ROLE               "worker" pins this walk to the cheap local agent
+                            (brain-vs-hands fan-out); anything else (or unset)
+                            is the orchestrator role (config-driven cloud agent)
 EOF
       exit 0
       ;;
@@ -726,6 +729,26 @@ iterate_host() {
   # render_system_prompt_overlay for the restructure.
   local local_llm_enabled
   local_llm_enabled="$(jq -r '.local_llm_enabled // false' "$CONFIG_FILE" 2>/dev/null || echo "false")"
+
+  # ── Role-aware agent selection (brain-vs-hands fan-out, TASKS.md
+  # `claude-orchestrator-local-worker-fanout`). A process pinned
+  # `MINSKY_ROLE=worker` is a HAND: it implements on the cheap configured
+  # `local_agent`/`local_agent_model`, never the cloud model — so the scarce
+  # cloud budget belongs to the orchestrator (the BRAIN). We map the worker
+  # role onto the existing local-mode path (the runner's single "use the local
+  # agent" lever) so the whole downstream spawn shape (brief overlay,
+  # --no-extended-thinking, local model/base-url) follows for free. The
+  # orchestrator role (default — anything other than the literal "worker") keeps
+  # the existing config-driven cloud/dynamic path below. This mirrors the pure
+  # `resolveSpawnRole` / `decideAgentForRole` seam in scripts/orchestrate.mjs
+  # (unit-tested there); the bash only does the env→lever wiring. An operator
+  # hard-pin (MINSKY_STRATEGIC_PIN_MODEL) still wins the model slot downstream.
+  if [[ "${MINSKY_ROLE:-}" == "worker" ]]; then
+    if [[ "$local_llm_enabled" != "true" ]]; then
+      echo "host=$host role=worker → local agent (cloud budget belongs to the orchestrator)" >&2
+    fi
+    local_llm_enabled="true"
+  fi
 
   # Build the brief via scripts/build_brief.py — full TS-parity brief
   # with the task block + system-prompt overlay (constitution + FINAL

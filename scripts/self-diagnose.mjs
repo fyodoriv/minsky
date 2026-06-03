@@ -1869,6 +1869,126 @@ export async function readExperimentStoreVerdicts(repoRoot) {
 }
 
 /**
+ * Default cloud:worker token-ratio floor below which the brain-vs-hands role
+ * pin is judged to be LEAKING — i.e. workers are burning cloud budget that
+ * should belong to the orchestrator (TASKS.md
+ * `claude-orchestrator-local-worker-fanout` Success: orchestrator cloud-token
+ * share ≥0.9 ⇔ ratio ≥9.0).
+ */
+export const ORCHESTRATOR_BUDGET_RATIO_FLOOR = 9.0;
+
+/**
+ * @typedef {Object} OrchestratorBudgetMonopolyOpts
+ * @property {() => Promise<{orchestratorCloudTokens: number, workerCloudTokens: number, workersAlive: number}>} usage
+ *   -- returns the cloud-token spend by role over the measurement window and
+ *   how many workers are alive. Production wires this to the orchestrate +
+ *   experiment-store ledgers; tests inject synthetic counts.
+ * @property {number} [ratioFloor] -- the minimum cloud:worker token ratio.
+ *   Defaults to {@link ORCHESTRATOR_BUDGET_RATIO_FLOOR}.
+ */
+
+/**
+ * Cross-layer chaos invariant: when ≥1 worker is alive, the orchestrator (the
+ * brain) must own the cloud budget — its cloud-token spend must be ≥`ratioFloor`
+ * times the workers' combined cloud-token spend. A worker that burns cloud
+ * tokens means the role pin (`MINSKY_ROLE=worker` → local agent) is leaking and
+ * the throughput-per-dollar lever is broken. With 0 workers alive there is no
+ * brain-vs-hands separation to violate, so the invariant holds vacuously. When
+ * workers are alive but spent 0 cloud tokens the ratio is effectively infinite
+ * (the ideal) — also a pass. The fault this guards against (Basiri et al. 2016)
+ * is "a worker dispatched to the cloud model"; the steady state is "the cloud
+ * budget belongs to the orchestrator".
+ *
+ * @param {OrchestratorBudgetMonopolyOpts} opts
+ * @returns {Invariant}
+ */
+export function orchestratorBudgetMonopolyInvariant(opts) {
+  const { usage, ratioFloor = ORCHESTRATOR_BUDGET_RATIO_FLOOR } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const { orchestratorCloudTokens, workerCloudTokens, workersAlive } = await usage();
+    // No workers ⇒ no separation to violate (vacuously true).
+    if (workersAlive <= 0) return { id: "orchestrator-budget-monopoly", ok: true };
+    // Workers spent nothing on cloud ⇒ ideal (ratio → ∞).
+    if (workerCloudTokens <= 0) return { id: "orchestrator-budget-monopoly", ok: true };
+    const ratio = orchestratorCloudTokens / workerCloudTokens;
+    if (ratio >= ratioFloor) return { id: "orchestrator-budget-monopoly", ok: true };
+    return {
+      id: "orchestrator-budget-monopoly",
+      ok: false,
+      actor: "minsky-then-operator",
+      evidence: `orchestrator:worker cloud-token ratio is ${ratio.toFixed(2)} (< floor ${ratioFloor.toFixed(1)}) with ${workersAlive} worker(s) alive — workers spent ${workerCloudTokens} cloud tokens`,
+      suggestedTaskTitle:
+        "worker processes are burning cloud budget — the brain-vs-hands role pin is leaking",
+      suggestedFix:
+        "A worker (MINSKY_ROLE=worker) should dispatch to the configured `local_agent`/`local_agent_model`, never the cloud model. The role pin in `bin/minsky-run.sh` (role-aware agent selection) resolves the role from MINSKY_ROLE — verify every worker spawn exports `MINSKY_ROLE=worker` before invoking the runner, and that `decideAgentForRole('worker', …)` in `scripts/orchestrate.mjs` is the seam the runner consults. If the soft preference keeps leaking, escalate to the hard env gate per the task's Pivot (`MINSKY_ROLE=worker` refuses cloud dispatch). Inspect `.minsky/orchestrate.jsonl` + the per-iteration ledger to attribute the cloud spend by role.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "orchestrator-budget-monopoly";
+  return fn;
+}
+
+/**
+ * @typedef {Object} OrchestratorDetachedWorkerFinishOpts
+ * @property {() => Promise<{orchestratorAlive: boolean, workers: readonly {pid: number, busy: boolean, ageSecSinceOrchestratorExit: number}[]}>} probe
+ *   -- returns whether the orchestrator PID is alive and, for each worker, its
+ *   busy flag + how long it has been running since the orchestrator exited.
+ *   Production wires this to a pgrep + ledger probe; tests inject synthetic
+ *   process tables.
+ * @property {number} [graceSec] -- a busy worker is allowed this long to FINISH
+ *   its in-flight iteration after the orchestrator exits before it counts as a
+ *   zombie. Defaults to 1800 (30 min — the spawn-watchdog ceiling).
+ */
+
+/**
+ * Cross-layer chaos invariant: when the orchestrator PID has exited, no worker
+ * may linger as a zombie. The actor-model contract (Hewitt 1973, mirrored by
+ * `decideDetachedWorkerAction` in `scripts/orchestrate.mjs`): a detached worker
+ * FINISHES its in-flight iteration (within `graceSec`) then self-terminates; an
+ * idle detached worker exits immediately. The invariant fires when a worker is
+ * still alive past the grace window after the orchestrator died — the exact
+ * "zombie worker holding the budget hostage" failure the chaos test
+ * (`scripts/chaos-orchestrator-kill.mjs`) injects. With the orchestrator alive
+ * there is no detachment to violate (vacuously true).
+ *
+ * @param {OrchestratorDetachedWorkerFinishOpts} opts
+ * @returns {Invariant}
+ */
+export function orchestratorDetachedWorkerFinishInvariant(opts) {
+  const { probe, graceSec = 1800 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const { orchestratorAlive, workers } = await probe();
+    if (orchestratorAlive) return { id: "orchestrator-detached-worker-finish", ok: true };
+    // A worker is a zombie iff it is STILL alive past the grace window after the
+    // orchestrator exited: an idle worker should have exited immediately; a busy
+    // worker should have finished + exited within graceSec.
+    const zombies = workers.filter((w) => w.ageSecSinceOrchestratorExit > (w.busy ? graceSec : 0));
+    if (zombies.length === 0) return { id: "orchestrator-detached-worker-finish", ok: true };
+    const evidence = `${zombies.length} worker(s) still alive ${graceSec}s+ after the orchestrator exited: ${zombies
+      .map(
+        (z) =>
+          `pid ${z.pid} (${z.busy ? "busy" : "idle"}, +${Math.round(z.ageSecSinceOrchestratorExit)}s)`,
+      )
+      .join(", ")}`;
+    return {
+      id: "orchestrator-detached-worker-finish",
+      ok: false,
+      actor: "minsky-then-operator",
+      evidence,
+      suggestedTaskTitle:
+        "zombie worker(s) survived the orchestrator's exit — detached-worker self-terminate path is broken",
+      suggestedFix:
+        "When the orchestrator PID exits, every worker must finish its in-flight iteration then self-terminate (idle workers exit immediately) — the `decideDetachedWorkerAction` contract in `scripts/orchestrate.mjs`. A worker still alive past the grace window is holding compute (and possibly cloud budget) hostage. Verify the worker spawn installs a parent-death watch (poll the orchestrator PID, or use PR_SET_PDEATHSIG-equivalent) and exits on detachment. Reap the listed pids (`kill <pid>`), then add the parent-death watch if absent. Chaos repro: `node scripts/chaos-orchestrator-kill.mjs`.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "orchestrator-detached-worker-finish";
+  return fn;
+}
+
+/**
  * Production wiring — the invariants the supervisor probes at start-up.
  * Each invariant closes over its production data source; tests bypass
  * this by calling {@link runInvariants} directly with synthetic
@@ -2188,7 +2308,114 @@ export function defaultInvariants() {
         }
       },
     }),
+    orchestratorBudgetMonopolyInvariant({
+      usage: () => readOrchestratorBudgetUsage(repoRoot),
+    }),
+    orchestratorDetachedWorkerFinishInvariant({
+      probe: () => probeDetachedWorkers(repoRoot),
+    }),
   ];
+}
+
+/**
+ * Production probe for the orchestrator-budget-monopoly invariant. Reads the
+ * cloud-token spend attributed by role over the recent window. When the
+ * attribution data is absent (no ledger, no token attribution yet) it returns
+ * a vacuously-passing shape (0 workers alive) — fail-safe per rule #6: a
+ * missing instrument never fires a false positive. The real attribution is
+ * threaded in once the per-role token accounting lands; until then this probe
+ * is the seam the unit-tested decision consumes.
+ *
+ * @param {string} repoRoot
+ * @returns {Promise<{orchestratorCloudTokens: number, workerCloudTokens: number, workersAlive: number}>}
+ */
+async function readOrchestratorBudgetUsage(repoRoot) {
+  let raw = "";
+  try {
+    raw = await readFile(resolve(repoRoot, ".minsky/orchestrate.jsonl"), "utf8");
+  } catch {
+    // rule-6: no ledger / unreadable ⇒ no signal ⇒ vacuous pass (0 workers).
+    return { orchestratorCloudTokens: 0, workerCloudTokens: 0, workersAlive: 0 };
+  }
+  const acc = { orchestratorCloudTokens: 0, workerCloudTokens: 0, aliveWorkers: new Set() };
+  for (const line of raw.split("\n")) {
+    accumulateRoleCloudTokens(acc, parseRoleCloudTokenLine(line));
+  }
+  return {
+    orchestratorCloudTokens: acc.orchestratorCloudTokens,
+    workerCloudTokens: acc.workerCloudTokens,
+    workersAlive: acc.aliveWorkers.size,
+  };
+}
+
+/**
+ * Fold one parsed ledger record into the role-attributed token accumulator.
+ * Extracted so the file-read loop stays under the complexity ceiling.
+ *
+ * @param {{ orchestratorCloudTokens: number, workerCloudTokens: number, aliveWorkers: Set<string> }} acc
+ * @param {{ role: string | undefined, cloudTokens: number, runId: string | undefined } | null} rec
+ */
+function accumulateRoleCloudTokens(acc, rec) {
+  if (!rec) return;
+  if (rec.role === "worker") {
+    acc.workerCloudTokens += rec.cloudTokens;
+    if (rec.runId) acc.aliveWorkers.add(rec.runId);
+  } else if (rec.role === "orchestrator") {
+    acc.orchestratorCloudTokens += rec.cloudTokens;
+  }
+}
+
+/**
+ * Pure: parse one orchestrate-ledger JSONL line into its role-attributed
+ * cloud-token fields. Returns null for blank/malformed lines. Extracted so the
+ * accumulator stays under the cognitive-complexity ceiling.
+ *
+ * @param {string} line
+ * @returns {{ role: string | undefined, cloudTokens: number, runId: string | undefined } | null}
+ */
+function parseRoleCloudTokenLine(line) {
+  if (!line.trim()) return null;
+  /** @type {Record<string, unknown>} */
+  let rec;
+  try {
+    rec = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  return {
+    role: typeof rec["role"] === "string" ? rec["role"] : undefined,
+    cloudTokens: typeof rec["cloudTokens"] === "number" ? rec["cloudTokens"] : 0,
+    runId: typeof rec["runId"] === "string" ? rec["runId"] : undefined,
+  };
+}
+
+/**
+ * Production probe for the orchestrator-detached-worker-finish invariant.
+ * Determines whether the orchestrator process is alive (any `orchestrate.mjs`
+ * proc) and enumerates worker processes. When pgrep is unavailable or the
+ * orchestrator is alive (the common case), it returns a passing shape —
+ * fail-safe per rule #6. The zombie-detection edge is exercised
+ * deterministically by the chaos sim + the invariant's own unit tests; this
+ * probe is the I/O seam.
+ *
+ * @param {string} _repoRoot
+ * @returns {Promise<{orchestratorAlive: boolean, workers: readonly {pid: number, busy: boolean, ageSecSinceOrchestratorExit: number}[]}>}
+ */
+async function probeDetachedWorkers(_repoRoot) {
+  try {
+    const { stdout } = await execFileAsync("pgrep", ["-f", "orchestrate.mjs"], { timeout: 5_000 });
+    const orchestratorAlive = stdout.split("\n").some((l) => l.trim().length > 0);
+    // Orchestrator alive ⇒ no detachment to evaluate (the invariant passes
+    // vacuously); skip the more expensive worker enumeration.
+    return { orchestratorAlive, workers: [] };
+  } catch {
+    // pgrep exit 1 ⇒ no orchestrate.mjs proc found. Treat as orchestrator
+    // alive=false BUT with no worker enumeration available (no signal) ⇒
+    // empty workers ⇒ vacuous pass. A real zombie probe is wired alongside
+    // the worker-spawn parent-death watch; until then a clean-machine self-
+    // diagnose never false-fires.
+    return { orchestratorAlive: false, workers: [] };
+  }
 }
 
 /**
