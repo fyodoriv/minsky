@@ -34,7 +34,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Protocol, runtime_checkable
 
 # --- Constants ------------------------------------------------------------
 
@@ -358,10 +358,32 @@ def pick_host_task(
     only the branch-based filter applies (back-compat with callers
     that haven't wired the broader PR fetch yet).
     """
+    return _pick_from_tasks(
+        parse_tasks_md(content),
+        open_pr_branches=open_pr_branches,
+        branch_prefix=branch_prefix,
+        skip_task_ids=skip_task_ids,
+        all_prs=all_prs,
+    )
+
+
+def _pick_from_tasks(
+    tasks: list[ParsedTask],
+    open_pr_branches: Iterable[str] = (),
+    branch_prefix: str = "feat/",
+    skip_task_ids: Iterable[str] = (),
+    all_prs: Iterable[dict] | None = None,
+) -> ParsedTask | None:
+    """Apply the pick filters + P0→P1 priority walk to a parsed task list.
+
+    Shared core of `pick_host_task` (markdown-string entry) and
+    `pick_from_source` (TaskSource-port entry) so the filter/priority
+    logic lives in exactly one place — the backend only decides how the
+    `tasks` list is produced.
+    """
     open_branches = set(open_pr_branches)
     skip_ids = set(skip_task_ids)
     pr_snapshots = list(all_prs) if all_prs is not None else None
-    tasks = parse_tasks_md(content)
     eligible = []
     for t in tasks:
         if not is_rule_9_compliant(t):
@@ -431,6 +453,101 @@ def find_task(content: str, query: str) -> FindTaskResult:
     )
 
 
+# --- TaskSource port (rule #2 — Ports & Adapters) ------------------------
+# Pattern: Hexagonal Architecture / Ports & Adapters (Cockburn 2005). The
+# picker reads work from a backend-agnostic port so a second backend
+# (GitHub Issues, the next task) is an additive impl, not a rewrite of
+# `pick_host_task`. The port is the seam; `TasksMdTaskSource` is the first
+# adapter, wrapping the existing markdown parser with ZERO behavior change.
+
+
+@runtime_checkable
+class TaskSource(Protocol):
+    """Backend-agnostic source of pickable tasks (the port).
+
+    Implementations translate some external task store (a TASKS.md file
+    today, a GitHub Issues / Projects v2 board next) into the picker's
+    `ParsedTask` shape. The picker never names a backend — it depends only
+    on these three verbs. Per vision.md rule #2: every dependency is
+    accessed through an interface.
+    """
+
+    def list_open_tasks(self) -> list[ParsedTask]:
+        """All open task records the backend knows about, in source order."""
+        ...
+
+    def get_task(self, task_id: str) -> ParsedTask | None:
+        """The task whose `id` equals `task_id` exactly, or None."""
+        ...
+
+    def find(self, query: str) -> FindTaskResult:
+        """Resolve a task by exact ID or case-insensitive title substring."""
+        ...
+
+
+class TasksMdTaskSource:
+    """`TaskSource` adapter backed by a TASKS.md markdown file.
+
+    Wraps the module-level `parse_tasks_md` / `find_task` parity port so
+    the existing picker logic reads through the `TaskSource` interface
+    instead of parsing TASKS.md inline. Behavior is unchanged — the same
+    parser, the same records — this only relocates the dependency behind
+    the port (rule #2).
+
+    Construct from a path (the daemon's case — `TasksMdTaskSource('TASKS.md')`)
+    or from already-loaded content (`TasksMdTaskSource(content=...)`, the
+    test/fixture case). Exactly one of `path` / `content` must be given.
+    """
+
+    def __init__(self, path: str | Path | None = None, *, content: str | None = None) -> None:
+        if (path is None) == (content is None):
+            raise ValueError("TasksMdTaskSource needs exactly one of `path` or `content`")
+        self._path = Path(path) if path is not None else None
+        self._content = content
+
+    def _read(self) -> str:
+        if self._content is not None:
+            return self._content
+        assert self._path is not None  # narrowed by __init__ invariant
+        return self._path.read_text(encoding="utf-8")
+
+    def list_open_tasks(self) -> list[ParsedTask]:
+        return parse_tasks_md(self._read())
+
+    def get_task(self, task_id: str) -> ParsedTask | None:
+        for task in self.list_open_tasks():
+            if task.id == task_id:
+                return task
+        return None
+
+    def find(self, query: str) -> FindTaskResult:
+        return find_task(self._read(), query)
+
+
+def pick_from_source(
+    source: TaskSource,
+    open_pr_branches: Iterable[str] = (),
+    branch_prefix: str = "feat/",
+    skip_task_ids: Iterable[str] = (),
+    all_prs: Iterable[dict] | None = None,
+) -> ParsedTask | None:
+    """Top-priority pickable task obtained through a `TaskSource` port.
+
+    Backend-agnostic counterpart of `pick_host_task`: it pulls the task
+    list from the port (`list_open_tasks`) then applies the identical
+    rule-#9 / blocked / open-PR / skip / duplicate filters. `pick_host_task`
+    remains the markdown-string entry point used by the parity tests; this
+    is the interface-routed entry the CLI uses.
+    """
+    return _pick_from_tasks(
+        source.list_open_tasks(),
+        open_pr_branches=open_pr_branches,
+        branch_prefix=branch_prefix,
+        skip_task_ids=skip_task_ids,
+        all_prs=all_prs,
+    )
+
+
 # --- CLI -----------------------------------------------------------------
 
 
@@ -486,9 +603,12 @@ def main(argv: list[str]) -> int:
     if not path.is_file():
         print(f"file not found: {path}", file=sys.stderr)
         return 1
-    content = path.read_text(encoding="utf-8")
+    # Obtain tasks through the TaskSource port — not by parsing TASKS.md
+    # inline (rule #2). `TasksMdTaskSource` is the markdown adapter; a
+    # GitHub-Issues adapter is an additive impl behind the same port.
+    source: TaskSource = TasksMdTaskSource(path)
     if find_query is not None:
-        result = find_task(content, find_query)
+        result = source.find(find_query)
         if result.ok and result.task is not None and result.task.id is not None:
             print(result.task.id)
             return 0
@@ -496,8 +616,8 @@ def main(argv: list[str]) -> int:
         if result.available_ids:
             print("available IDs:", ", ".join(result.available_ids), file=sys.stderr)
         return 3
-    chosen = pick_host_task(
-        content,
+    chosen = pick_from_source(
+        source,
         open_pr_branches=open_pr_branches,
         branch_prefix=branch_prefix,
         skip_task_ids=skip_task_ids,
