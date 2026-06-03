@@ -1,20 +1,39 @@
 # Story 007 — Agent self-heals catalogued failures within 5 minutes
 
-> **Why this story exists.** MILESTONES.md M1.13 ("agents can self-heal minsky") requires "≥10 catalogued failure modes with automated fixes + MTTR < 5 min". Today the Observer skill's heal catalogue (`skill-plugins/observer/minsky/SKILL.md` §4) lists 10 recipes — most are operator-instructions like "run `rm -f ~/.minsky/daemon.pid` then retry", NOT something an agent does autonomously. This story ships **phase 1 of 2** of the closure: 4 automated heals + an MTTR ledger + reporter + chaos test. Phase 2 (`promote-remaining-heal-recipes`) carries the ≥10-automated target. Plan: `docs/plans/agents-can-self-heal-minsky-m1-13.md` (reviewer-approved round 2).
+> When the background loop hits a known failure, it fixes itself in under 5 minutes — no one has to wake up and type `rm -f`.
+
+**Milestone(s)**: M1.13
 
 ## Story
 
-As a solo developer running minsky overnight, when the daemon fails with a catalogued symptom — stale pid file, missing worktree node_modules after a node version flip, stale .tsbuildinfo from yesterday's node 18, or a shell that polled three times with no output — the agent detects the symptom from its own logs, applies the fix idempotently, verifies the fix worked, and continues. I never have to wake up to type `rm -f`.
+You run Minsky overnight. (Minsky is the background program that picks tasks from a project's to-do list and drives a coding assistant to do them while you sleep.) Sometimes the daemon — the part of Minsky that keeps running in the background — hits a failure it has seen before:
+
+- a stale pid file left by a process that already died,
+- a worktree missing its `node_modules` after a Node version flip,
+- a stale `.tsbuildinfo` build cache from yesterday's Node 18,
+- a shell that polled three times with no output (a stuck command).
+
+When that happens, the agent — the coding assistant Minsky drives — reads its own logs, recognizes the symptom, applies the fix, checks that the fix worked, and keeps going. You never wake up to repair it by hand.
+
+This story ships **phase 1 of 2**: four automated heals, a ledger that records how long each heal took, a reporter, and a chaos test. Phase 2 (`promote-remaining-heal-recipes` in TASKS.md) carries the full "≥10 automated heals" target from milestone M1.13.
+
+**Why this matters now.** MILESTONES.md M1.13 ("agents can self-heal minsky") requires "≥10 catalogued failure modes with automated fixes + MTTR < 5 min". Today the heal catalogue in the Observer skill (`skill-plugins/observer/minsky/SKILL.md` §4) lists 10 recipes — but most are operator instructions like "run `rm -f ~/.minsky/daemon.pid` then retry", not something the agent does on its own. This story turns the first four into automated heals. The full plan is `docs/plans/agents-can-self-heal-minsky-m1-13.md` (reviewer-approved round 2).
+
+Each heal is built from three functions, so the loop can fix a failure safely and prove it worked:
+
+- `detect()` — does this symptom exist right now? Returns `{ present: true }` or `{ present: false }`.
+- `apply()` — make the fix (remove the file, run the install, kill the process). Safe to call twice.
+- `verify()` — did the fix actually work? Returns `{ healed: true }`, or `{ healed: false, residualSignal: ... }` instead of throwing.
 
 ## Acceptance criteria
 
-- Each of 4 catalogued failure modes (stale-pid, missing-node-modules, stale-tsbuildinfo, stuck-command) has a `detect()`/`apply()`/`verify()` heal helper in `novel/observer/heals/`
-- Each helper is idempotent under replay (calling `apply()` twice doesn't break things)
-- Each helper's `verify()` returns `{ healed: false, residualSignal: ... }` (not a throw) when `apply()` didn't fix the underlying symptom
-- An MTTR ledger at `.minsky/heal-events.jsonl` (per-host, append-only JSONL) records every heal attempt
-- The reporter `scripts/heal-mttr-report.mjs` computes multi-window stats (24h / 7d / 30d) and outputs JSON
-- The `mttr-self-heal` metric appears in `METRICS.md` with a real value (not the OTEL-blocked stub) once any helper fires
-- A chaos test injects each catalogued failure and asserts heal + MTTR ≤ 5 min
+- Each of 4 catalogued failure modes (stale-pid, missing-node-modules, stale-tsbuildinfo, stuck-command) has a `detect()`/`apply()`/`verify()` heal helper in `novel/observer/heals/`.
+- Each helper is idempotent under replay (calling `apply()` twice doesn't break things).
+- Each helper's `verify()` returns `{ healed: false, residualSignal: ... }` (not a throw) when `apply()` didn't fix the underlying symptom.
+- An MTTR ledger at `.minsky/heal-events.jsonl` (per-host, append-only JSONL) records every heal attempt.
+- The reporter `scripts/heal-mttr-report.mjs` computes multi-window stats (24h / 7d / 30d) and outputs JSON.
+- The `mttr-self-heal` metric appears in `METRICS.md` with a real value (not the OTEL-blocked stub) once any helper fires.
+- A chaos test injects each catalogued failure and asserts heal + MTTR ≤ 5 min.
 
 ## Metric
 
@@ -39,6 +58,21 @@ As a solo developer running minsky overnight, when the daemon fails with a catal
 - **METRICS.md**: `## mttr-self-heal` section shows a real p95 number, not `(stub)`
 - **vision.md**: pattern-conformance row 90 maps `novel/observer/heals/` to "SRE on-call automation" with citation to Beyer et al. 2016 Ch. 6 + Ch. 11
 - **Test green**: `pnpm vitest run novel/observer/heals novel/observer/test/chaos scripts/heal-mttr-report.test.mjs` exits 0 with ≥15 tests
+
+## Failure modes & chaos verification
+
+Per constitutional rule #7 (`vision.md` § 7, chaos engineering) — the chaos test below IS the rule-#7 substrate for this story.
+
+- **Steady-state hypothesis**: every catalogued automated heal completes `detect → apply → verify` in `< 300_000ms` (5 min) p95 on the fixture host.
+- **Blast radius**: a single heal attempt. Never the whole daemon, never modifies source code, never writes outside `.minsky/` or build artifacts (`.tsbuildinfo`, `node_modules/`). Enforced by the helper's `apply()` write-path lint (deterministic CI check filed alongside).
+- **Operator escape hatch**: disable the heal catalogue via `MINSKY_DISABLE_AUTO_HEAL=1` env (advisory recipe stays in SKILL.md for operator-recipe execution). Per-helper override: comment out the helper's import in `novel/observer/heals/index.mjs` registry.
+
+| # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
+|---|---|---|---|---|
+| 1 | `heal-stale-pid.apply()` race between two agents on same host | Two agents both detect a stale pid at the same time | The lock file at `~/.minsky/heal-locks/stale-pid.lock` prevents the race; second helper sees `present: false` after first's apply | `apply()` × 2 in parallel; assert exactly one heal-event row, no double-unlink error |
+| 2 | `heal-worktree-missing-node-modules.apply()` `pnpm install` fails (network) | Stub `execFn` returns non-zero exit | `verify()` returns `{ healed: false, residualSignal: "pnpm-install-failed" }`; ledger row has `outcome="verified-failed"` | Inject failing stub; assert no throw, ledger row recorded with verified-failed outcome |
+| 3 | `heal-stale-tsbuildinfo.apply()` permission denied | Mock fs `unlinkSync` throws EACCES | `verify()` returns `{ healed: false, residualSignal: "permission-denied" }`; ledger row records the failure | Mock fs throw EACCES; assert helper doesn't crash the daemon |
+| 4 | `heal-stuck-command.apply()` kill races process exit | Process exits naturally just before `kill -9` arrives | `apply()` returns `{ applied: false }` (already gone); `verify()` returns `{ healed: true }` | Spawn fast-exiting process; race `kill`; assert no error and ledger row marks as healed |
 
 ## Given/When/Then scenarios
 
@@ -416,20 +450,27 @@ Per AGENTS.md rule #3 ("Acceptance-scenario gate"): every test file references o
 - **And** total elapsed wall-clock time (start of detect → end of verify) is `< 300_000ms`
 - **And** the fixture host is cleaned up on test teardown (no leaked files in `/tmp/`)
 
-## Failure modes & chaos verification
+## Status
 
-Per constitutional rule #7 (`vision.md` § 7) — the chaos test enumerated above IS the rule-#7 substrate for this story.
+- **Phase**: Phase 1 of 2. Ships 4 automated heals + MTTR ledger + reporter + chaos test.
+- **Phase 2 follow-up**: `promote-remaining-heal-recipes` (in TASKS.md) carries the ≥10-automated-heals target.
+- **Plan**: `docs/plans/agents-can-self-heal-minsky-m1-13.md` (reviewer-approved round 2).
 
-- **Steady-state hypothesis**: every catalogued automated heal completes `detect → apply → verify` in `< 300_000ms` (5 min) p95 on the fixture host.
-- **Blast radius**: a single heal attempt. Never the whole daemon, never modifies source code, never writes outside `.minsky/` or build artifacts (`.tsbuildinfo`, `node_modules/`). Enforced by the helper's `apply()` write-path lint (deterministic CI check filed alongside).
-- **Operator escape hatch**: disable the heal catalogue via `MINSKY_DISABLE_AUTO_HEAL=1` env (advisory recipe stays in SKILL.md for operator-recipe execution). Per-helper override: comment out the helper's import in `novel/observer/heals/index.mjs` registry.
+## Pattern conformance
 
-| # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
-|---|---|---|---|---|
-| 1 | `heal-stale-pid.apply()` race between two agents on same host | Two agents both detect a stale pid at the same time | The lock file at `~/.minsky/heal-locks/stale-pid.lock` prevents the race; second helper sees `present: false` after first's apply | `apply()` × 2 in parallel; assert exactly one heal-event row, no double-unlink error |
-| 2 | `heal-worktree-missing-node-modules.apply()` `pnpm install` fails (network) | Stub `execFn` returns non-zero exit | `verify()` returns `{ healed: false, residualSignal: "pnpm-install-failed" }`; ledger row has `outcome="verified-failed"` | Inject failing stub; assert no throw, ledger row recorded with verified-failed outcome |
-| 3 | `heal-stale-tsbuildinfo.apply()` permission denied | Mock fs `unlinkSync` throws EACCES | `verify()` returns `{ healed: false, residualSignal: "permission-denied" }`; ledger row records the failure | Mock fs throw EACCES; assert helper doesn't crash the daemon |
-| 4 | `heal-stuck-command.apply()` kill races process exit | Process exits naturally just before `kill -9` arrives | `apply()` returns `{ applied: false }` (already gone); `verify()` returns `{ healed: true }` | Spawn fast-exiting process; race `kill`; assert no error and ledger row marks as healed |
+- **Pattern**: SRE on-call automation — the `detect → apply → verify` loop is the troubleshooting loop and MTTR is the SLI. Anchor: Beyer, Jones, Petoff, Murphy, *Site Reliability Engineering*, O'Reilly 2016, Ch. 6 "Effective Troubleshooting" + Ch. 11 "Being On-Call".
+- **Index row**: vision.md "Pattern conformance index" row 90 maps `novel/observer/heals/` to "SRE on-call automation" with the Beyer et al. 2016 citation.
+- **Reliability stance**: heals follow let-it-crash (Armstrong, *Programming Erlang*, 2007) — I/O failures inside `apply()` propagate to the caller and the supervisor restarts, rather than silently retrying (see the `kickFn`/`rebuildFn`/`notifyFn` throw-propagation scenarios above).
+
+## Security & privacy
+
+(Operator directive 2026-05-06 — vision.md rule #13 "Security & privacy — second priority after performance".) Industry-standard primitives only; rule #1 (don't reinvent) applies.
+
+- **Trust boundary**: this story's untrusted inputs are the agent's own stderr buffers and log content (LLM/tool output, treated as untrusted by default per OWASP LLM02) plus the contents of `.minsky/state.json` and `~/.minsky/config.json` on disk. Trusted: the local filesystem and the supervisor's environment. Anything that crosses the boundary (heal-event ledger rows, OTEL span content) passes through the secret-leak scanner (`scripts/scan-secrets.mjs`) and the no-PII span lint.
+- **Secrets**: no API keys, tokens, or `.env` content in heal-event ledger rows, OTEL spans, or `.minsky/` logs. The corrupt-state/partial-config backups (`*.corrupt.<ts>`) stay local to `.minsky/` and are never emitted off-host. Floor: `scan-secrets` pre-commit + `secret-scanning-precommit-and-ci` (TASKS.md P0).
+- **PII**: no email/IP/full-paths-with-username in heal-event rows or OTEL span attributes; `stderrPreview` evidence fields are truncated and scanned before logging. Floor: `otel-no-pii-in-spans-lint` (TASKS.md P0).
+- **Sandbox**: each heal's `apply()` write-path is restricted to `.minsky/` and build artifacts (`.tsbuildinfo`, `node_modules/`) — never source code, never paths outside the host. Floor: `supervisor-sandbox-syscall-restriction` (TASKS.md P0); industry standard via systemd `ProtectSystem=strict` + `PrivateTmp=true` / launchd App Sandbox.
+- **Performance carve-out**: when a security restriction would cost >10% on this story's load-bearing latency metric (`mttr-self-heal`), the trade-off is documented in this section as a declared deviation with a numeric cost figure. Silent trade-offs are forbidden (vision.md rule #13's "performance-first carve-out" clause).
 
 ## References
 

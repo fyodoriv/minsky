@@ -1,6 +1,6 @@
 # Competitor: OpenHands (All-Hands AI)
 
-> The strongest OSS autonomous coding agent — Minsky's most direct head-to-head benchmark in the agent-tier column, and an emerging orchestrator-tier overlap (Agent Control Plane, Automations).
+> An open-source coding assistant you give a task and it writes the code — the strongest such tool in the open-source world, and the one Minsky most directly competes with on raw coding skill.
 
 - **URL**: <https://github.com/OpenHands/OpenHands>
 - **Site**: <https://www.openhands.dev>
@@ -10,17 +10,29 @@
 
 ## What this is
 
-Open-source autonomous software engineering platform (formerly OpenDevin). **Request-response agent framework, not a daemon** — FastAPI backend (`openhands/app_server/app.py`) instantiates a sandbox per conversation, runs a stateless agent loop via the OpenHands Software Agent SDK (separate repo: `github.com/OpenHands/software-agent-sdk`), returns results. Each invocation is fresh with full context passed in; conversation history persists to `~/.openhands/<conversation_id>/` as JSON.
+OpenHands is an open-source coding assistant. You hand it one coding task, it writes and runs code until the task is done, then returns the result. It was formerly called OpenDevin.
 
-**CodeAct paradigm** — the agent writes code, executes it, observes output, iterates. **15+ LLM backends** (Claude 4.5 Opus, GPT-5.x, Gemini 3.x, DeepSeek-3.2-Thinker, Qwen, Llama) via OpenAI-compatible APIs.
+It works one task at a time. Each task is a fresh conversation: you start it, OpenHands does the work, and the conversation ends. There is no background process that keeps picking up new work on its own — when one task finishes, OpenHands stops and waits for the next request. (By contrast, Minsky is a daemon — a background program that keeps running after you start it, surviving terminal close and restarting on crash — that walks a to-do list unattended.)
 
-**Post-Agent-Canvas (June 1, 2026) deployment shapes**: **Agent Canvas** (the new flagship — a single Dockerless agent-server backend that runs on a laptop, in Docker, or on a remote VM, with a visual local-agent-development UI and **bring-your-own-agent** selection across Claude Code, Codex, and the OpenHands SDK); Local GUI (legacy Docker sandbox path, still supported); Cloud SaaS (`app.all-hands.dev`); Enterprise (Kubernetes self-hosted with Agent Control Plane). CLI + SDK remain available, and the self-host-on-VM use case is now first-class rather than an Enterprise-only path. Each invocation is still **request-response and stateless between conversations** — Agent Canvas changed the install and agent-selection surface, not the per-conversation runtime loop, which remains a single-session CodeAct agent (V1 SDK, [arXiv:2511.03690](https://arxiv.org/abs/2511.03690)).
+Under the hood, a web backend (`openhands/app_server/app.py`) starts an isolated workspace for each conversation, runs the agent loop through the OpenHands Software Agent SDK (which lives in its own repo, `github.com/OpenHands/software-agent-sdk`), and returns the result. It then saves the conversation history to `~/.openhands/<conversation_id>/` as JSON. Each new task re-supplies the full context, because nothing carries over between conversations.
+
+It uses the **CodeAct** pattern: the agent writes code, runs it, looks at the output, and tries again. You can plug in any of **15+ language models** (Claude 4.5 Opus, GPT-5.x, Gemini 3.x, DeepSeek-3.2-Thinker, Qwen, Llama) through OpenAI-compatible APIs, so there is no model lock-in.
+
+**Deployment shapes after the Agent Canvas launch (June 1, 2026)**:
+
+- **Agent Canvas** — the new flagship. A single backend that runs without Docker, on a laptop, in Docker, or on a remote VM. It adds a visual UI for local agent development and lets you **bring your own agent** — pick Claude Code, Codex, or the OpenHands SDK per task.
+- **Local GUI** — the legacy Docker-sandbox path, still supported.
+- **Cloud SaaS** — hosted at `app.all-hands.dev`.
+- **Enterprise** — Kubernetes self-hosted, with the Agent Control Plane.
+- **CLI + SDK** — still available; self-hosting on a VM is now a first-class use case, not an Enterprise-only escape hatch.
+
+Agent Canvas changed how you install OpenHands and which agent you pick — not the per-task runtime. Each task is still a single-session CodeAct agent that runs once and ends (V1 SDK reference architecture, [arXiv:2511.03690](https://arxiv.org/abs/2511.03690)).
 
 ## What this is not
 
-- **Not a daemon.** OpenHands is request-response and stateless between conversations; Minsky is the always-on outer loop that walks a `TASKS.md` queue unattended.
-- **Not cross-repo at operator scale.** Even post-Agent-Canvas, self-host runs one agent-server per conversation; multi-repo fleets remain Enterprise-only.
-- **Not operator-machine identity.** Self-host-on-VM provisions a GitHub token into the agent-server rather than inheriting the operator's ambient `~/.config/gh` + `~/.gitconfig` + `~/.ssh`.
+- **Not a daemon.** OpenHands answers one request at a time and remembers nothing between conversations. Minsky is the always-on outer loop that walks a `TASKS.md` queue — the plain-text Markdown to-do list at a project's root — unattended.
+- **Not cross-repo at operator scale.** Even after Agent Canvas, a self-hosted instance runs one task at a time. Working across many repositories (a "fleet") is Enterprise-only. ("Operator" means you — the human who runs the tool.)
+- **Not operator-machine identity.** Self-host-on-VM hands a GitHub token to the OpenHands backend. It does not run as you, inheriting your own `~/.config/gh` + `~/.gitconfig` + `~/.ssh` the way Minsky does.
 
 ## Strengths
 
@@ -33,20 +45,10 @@ Open-source autonomous software engineering platform (formerly OpenDevin). **Req
 - **OpenHands Enterprise Agent Control Plane** (May 2026) — RBAC, cost tracking, audit logs, scheduled/event-driven Automations, cross-repo workflows.
 - **OpenHands Index** (5-task suite, updated quarterly) — issue resolution, greenfield, frontend, testing, info gathering. More comprehensive than SWE-bench alone.
 - **Dockerless install** (Agent Canvas, June 1, 2026) — removes the "Docker required for local GUI" weakness; the single agent-server backend runs directly on a laptop, in Docker, or on a remote VM. Corporate laptops without Docker can now run the full local experience, not just the CLI.
-- **Bring-your-own-agent** (Agent Canvas, June 1, 2026) — the operator picks Claude Code, Codex, or the OpenHands SDK as the per-task agent. Structurally the same shape as Minsky's per-machine `~/.minsky/config.json` agent selection (`claude` / `devin` / `aider`), now shipped in a mainstream OSS competitor.
+- **Bring-your-own-agent** (Agent Canvas, June 1, 2026) — the operator picks Claude Code, Codex, or the OpenHands SDK as the per-task agent. ("Agent" means the coding assistant that does the actual work.) Structurally the same shape as Minsky's per-machine `~/.minsky/config.json` agent selection (`claude` / `devin` / `aider`), now shipped in a mainstream OSS competitor.
 - **Self-host-on-VM as first-class** (Agent Canvas, June 1, 2026) — running the agent-server on an operator-controlled VM is now a documented primary use case, not an Enterprise-tier escape hatch. Narrows the "no operator-controlled long-running deployment" gap.
 
-## Weaknesses vs Minsky's vision
-
-1. **Request-response, not a daemon** — agent is stateless between turns; no 24/7 background process surviving terminal close on the operator's machine. Each invocation re-passes context. **Agent Canvas (June 2026) did NOT change this** — self-host-on-VM is now first-class, but the per-conversation runtime remains a single-session CodeAct loop that terminates when the agent finishes (V1 SDK reference architecture, arXiv:2511.03690). No tick-loop, no continuous queue drain.
-2. **No constitutional rules** — agent behavior is LLM-driven, not policy-driven. No way to enforce "never commit to main", "must add tests", or any deterministic invariant. Pure LLM advisory. Agent Canvas adds an agent-selection UI, not a deterministic rule-enforcement layer; this gap is untouched by the June 2026 launch.
-3. **No MAPE-K self-improvement loop** — OpenHands Index benchmarks models but doesn't auto-tune agent prompts/policies based on observed performance. Static once shipped; operator manually adjusts.
-4. **Cross-repo support is enterprise-only** — Local GUI / Agent Canvas / CLI / SDK work one repo at a time. Enterprise Automations support cross-repo workflows but require the Agent Control Plane license. Agent Canvas's self-host-on-VM mode runs one agent-server per conversation, not a fleet walker across N repos.
-5. **~~Docker dependency in local GUI~~ — RESOLVED June 1, 2026.** The Agent Canvas Initiative shipped Dockerless installation; the single agent-server backend now runs on a laptop with no Docker requirement. This is no longer a Minsky advantage — both products run Dockerless locally. (Minsky still differs in that it never had a Docker step at all; OpenHands now matches the end state.)
-6. **Credential flow still differs from Minsky** — even Dockerless, the operator provisions a GitHub token *into* the agent-server (configured per agent-selection), not the operator's own ambient identity. Agent Canvas's BYO-agent model selects WHICH agent runs, but the credential is still handed to the OpenHands-managed agent-server rather than the agent inheriting the operator's `~/.config/gh` + `~/.gitconfig` + `~/.ssh` directly the way Minsky's operator-machine-identity model does. The Dockerless change removes the sandbox boundary that previously broke `~/.gitconfig` reuse, narrowing — but not closing — this gap. Cloud and Enterprise remain pure SaaS credential vaults.
-7. **No TASKS.md / git-native operator surface** — work is queued via Agent Canvas UI, Web UI, CLI, or Slack/GitHub integrations (Enterprise Automations). No version-controlled markdown queue. Agent Canvas is a visual local-agent-development surface, not a git-native task queue.
-
-## Recent benchmarks (2025–2026)
+### Recent benchmarks (2025–2026)
 
 | Benchmark                     | Score                         | Date       | Source                                                                                                                                          |
 | ----------------------------- | ----------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -58,14 +60,21 @@ Open-source autonomous software engineering platform (formerly OpenDevin). **Req
 
 **Model migration**: Moved beyond Claude 3.5 Sonnet (2024). Now benchmarks Claude 4.5 Opus (Nov 2025), GPT-5.x, Gemini 3.x, open models. Framework is LLM-agnostic; bring-your-own-model via OpenAI-compatible APIs.
 
-## Production architecture
+### Production architecture
 
 - **Local GUI** — FastAPI + React on operator's machine, Docker sandbox per conversation. `~/.openhands/` for state. GitHub token via `~/.openhands/.env` or `GITHUB_TOKEN` env var. SSH keys in `~/.ssh/`.
 - **OpenHands Cloud** — SaaS at `app.all-hands.dev`. Multi-tenant. GitHub/GitLab SSO. Free tier with Minimax model.
 - **OpenHands Enterprise** — Kubernetes via Helm. Agent Control Plane (orchestration, RBAC, cost tracking, audit logs), Automations backend, integrations (Slack, GitHub, Jira, Linear). Requires PostgreSQL + Redis + Keycloak. Polyform Free Trial license (30-day) for `enterprise/` directory.
 - **CLI** — Separate repo, lightweight binary, no Docker required. Runs agent-server directly.
 
-## Roadmap (next 6-12 months)
+### Adoption signals
+
+- GitHub stars: **70,651** (May 2026); forks ~8,900; contributors **495**; releases **102** (latest 1.7.0, May 2026).
+- Funding: **$18.8M Series A** (November 2025, Madrona-led; co-investors Menlo Ventures, Pillar VC, Obvious Ventures, Fujitsu Ventures, Alumni Ventures). Prior $5M seed (Sept 2024).
+- Customer logos (per README.md): TikTok, VMware, Roche, Amazon, C3 AI, Netflix, Mastercard, Red Hat, MongoDB, Apple, NVIDIA, Google.
+- Press / case studies: US Mobile (Sept 2025), C3 AI ("eight billion tokens in two weeks", Dec 2025), OpenHands Enterprise launch (May 2026), monthly product updates.
+
+### Roadmap (next 6–12 months)
 
 **Agent Canvas Initiative — SHIPPED June 1, 2026** (announced May 11, 2026, GitHub issue #14374). Delivered on launch:
 
@@ -82,16 +91,19 @@ Still in flight (not part of the June 1 launch):
 - Agent Skills marketplace.
 - Sub-agent delegation — multi-agent workflows with inline critic/verification.
 
-## Adoption signals
+## Weaknesses vs Minsky's vision
 
-- GitHub stars: **70,651** (May 2026); forks ~8,900; contributors **495**; releases **102** (latest 1.7.0, May 2026).
-- Funding: **$18.8M Series A** (November 2025, Madrona-led; co-investors Menlo Ventures, Pillar VC, Obvious Ventures, Fujitsu Ventures, Alumni Ventures). Prior $5M seed (Sept 2024).
-- Customer logos (per README.md): TikTok, VMware, Roche, Amazon, C3 AI, Netflix, Mastercard, Red Hat, MongoDB, Apple, NVIDIA, Google.
-- Press / case studies: US Mobile (Sept 2025), C3 AI ("eight billion tokens in two weeks", Dec 2025), OpenHands Enterprise launch (May 2026), monthly product updates.
+1. **Request-response, not a daemon** — agent is stateless between turns; no 24/7 background process surviving terminal close on the operator's machine. Each invocation re-passes context. **Agent Canvas (June 2026) did NOT change this** — self-host-on-VM is now first-class, but the per-conversation runtime remains a single-session CodeAct loop that terminates when the agent finishes (V1 SDK reference architecture, arXiv:2511.03690). No tick-loop (one wake-up of the loop on its timer), no continuous queue drain.
+2. **No constitutional rules** — agent behavior is LLM-driven, not policy-driven. ("Constitution" is Minsky's set of numbered, non-negotiable project rules.) No way to enforce "never commit to main", "must add tests", or any deterministic invariant. Pure LLM advisory. Agent Canvas adds an agent-selection UI, not a deterministic rule-enforcement layer; this gap is untouched by the June 2026 launch.
+3. **No MAPE-K self-improvement loop** — the MAPE-K loop is the self-improvement cycle (Monitor, Analyze, Plan, Execute over a Knowledge base). OpenHands Index benchmarks models but doesn't auto-tune agent prompts/policies based on observed performance. Static once shipped; operator manually adjusts.
+4. **Cross-repo support is enterprise-only** — Local GUI / Agent Canvas / CLI / SDK work one repo at a time. ("Host" means one code project — one git repository — Minsky works on.) Enterprise Automations support cross-repo workflows but require the Agent Control Plane license. Agent Canvas's self-host-on-VM mode runs one agent-server per conversation, not a fleet walker across N repos.
+5. **~~Docker dependency in local GUI~~ — RESOLVED June 1, 2026.** The Agent Canvas Initiative shipped Dockerless installation; the single agent-server backend now runs on a laptop with no Docker requirement. This is no longer a Minsky advantage — both products run Dockerless locally. (Minsky still differs in that it never had a Docker step at all; OpenHands now matches the end state.)
+6. **Credential flow still differs from Minsky** — even Dockerless, the operator provisions a GitHub token *into* the agent-server (configured per agent-selection), not the operator's own ambient identity. Agent Canvas's BYO-agent model selects WHICH agent runs, but the credential is still handed to the OpenHands-managed agent-server rather than the agent inheriting the operator's `~/.config/gh` + `~/.gitconfig` + `~/.ssh` directly the way Minsky's operator-machine-identity model does. The Dockerless change removes the sandbox boundary that previously broke `~/.gitconfig` reuse, narrowing — but not closing — this gap. Cloud and Enterprise remain pure SaaS credential vaults.
+7. **No TASKS.md / git-native operator surface** — work is queued via Agent Canvas UI, Web UI, CLI, or Slack/GitHub integrations (Enterprise Automations). No version-controlled markdown queue. Agent Canvas is a visual local-agent-development surface, not a git-native task queue.
 
 ## What we learn / steal
 
-- **Docker sandbox shape** — cleaner isolation than Minsky's scope-leak detector. Consider as an optional M4 sandbox adapter (off by default; operator opts in for untrusted tasks).
+- **Docker sandbox shape** — cleaner isolation than Minsky's scope-leak detector. (A scope-leak is the verdict when the agent changes files outside the ones the task declared.) Consider as an optional M4 sandbox adapter — a small wrapper file that lets Minsky talk to one outside tool through a fixed interface (off by default; operator opts in for untrusted tasks).
 - **OpenHands Index** — 5-task multi-benchmark suite is the right shape for orchestrator-tier evaluation. Minsky's `humaneval-pass-at-1` corpus metric is one number; adding a multi-task suite would be a stronger proof point.
 - **CLI + bring-your-own-agent** — the Agent Canvas Initiative's "operator picks Claude Code, Codex, or OpenHands" framing is structurally identical to Minsky's per-machine agent config. Watch how they communicate this trade-off.
 - **Pluggable sandbox layer** (`openhands/app_server/sandbox/`) — separating sandbox shape from agent loop is a clean architectural choice we should mirror if/when Minsky grows a sandbox abstraction.
@@ -130,7 +142,7 @@ Still in flight (not part of the June 1 launch):
 OpenHands Index (5 per-task dimensions, not one SWE-bench headline) into
 Minsky's metric catalogue. The five dimensions are now registered metrics,
 each pinned to its originating public dataset so a reading is reproducible
-and primary-cited without re-running OpenHands' harness (rule #1):
+and primary-cited without re-running OpenHands' harness (rule #1, don't reinvent):
 
 | Index dimension  | Minsky metric id                    | Dataset (primary citation)                                                  |
 | ---------------- | ----------------------------------- | --------------------------------------------------------------------------- |
@@ -215,7 +227,7 @@ OpenHands is a **request-response agent framework** — the FastAPI app instanti
 ### 2. What lessons can it give to us?
 
 - **The V1 SDK in-process `Agent(...)` instantiation** ([arXiv:2511.03690](https://arxiv.org/abs/2511.03690); `openhands.sdk.agent.Agent`) — a clean, single API that every OpenHands surface (CLI, Local GUI, Cloud, Enterprise) is built on. The lesson for Minsky's Shape A wrap: target the SDK seam, not the CLI surface, so the `openhands` backend behind `~/.minsky/config.json` is a thin in-process call rather than a fragile subprocess-and-parse-stdout adapter.
-- **Native persona primitives at the AgentSkills spec** — OpenHands ships MicroAgents (keyword-triggered markdown skills, *format-identical* to Claude Code skills that agentbrew already syncs), DelegateTool (parallel sub-agents), TaskToolSet (sequential resumable sub-agents), and AgentDefinition (declarative sub-agent specs). The lesson is rule #1 in its purest form: Minsky has **no scope-need to build personas** — the `novel/adapters/persona-spawner/` package is already a deletion candidate (Path-C phase-3 pilot), folded into `.openhands/microagents/` via a mechanical agentbrew sync.
+- **Native persona primitives at the AgentSkills spec** — a persona is a role the agent takes on (researcher, planner, implementer, QA). OpenHands ships MicroAgents (keyword-triggered markdown skills, *format-identical* to Claude Code skills that agentbrew already syncs), DelegateTool (parallel sub-agents), TaskToolSet (sequential resumable sub-agents), and AgentDefinition (declarative sub-agent specs). The lesson is rule #1 in its purest form: Minsky has **no scope-need to build personas** — the `novel/adapters/persona-spawner/` package is already a deletion candidate (Path-C phase-3 pilot), folded into `.openhands/microagents/` via a mechanical agentbrew sync.
 - **The pluggable sandbox layer** (`openhands/app_server/sandbox/` — Docker / Process / Remote) — separating sandbox *shape* from agent *loop* is the clean abstraction Minsky should mirror if/when it grows a sandbox seam; preventive isolation beats Minsky's post-hoc scope-leak detector for untrusted tasks.
 - **The OpenHands Index 5-task suite** (issue resolution + greenfield + frontend + testing + info gathering, quarterly) — a multi-task benchmark is the right shape for orchestrator-tier evaluation; Minsky's single `humaneval-pass-at-1` corpus reading is one number. Cite OpenHands' published 65.8% SWE-bench Verified rather than re-running an equivalent harness (rule #1 — don't reinvent the benchmark).
 

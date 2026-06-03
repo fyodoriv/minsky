@@ -4,53 +4,60 @@
 
 ## Story
 
-I'm at dinner. My phone buzzes — the agent is about to commit something I want to review first. I tap a Shortcut on my iPhone (no laptop, no tunnel-fiddling). Within 30 seconds, the loop pauses cleanly: the in-flight task finishes its current persona step and the system enters a paused state with no new tasks claimed. When I get home, I tap "resume" from the same Shortcut.
+You are at dinner. Your phone buzzes: Minsky — the background program that does coding work for you while you are away — is about to commit something you want to review first. You tap one Apple Shortcut on your iPhone. No laptop. No fiddling with a network tunnel.
+
+Within 30 seconds the loop pauses cleanly. The task already in progress finishes its current step, and Minsky claims no new work. When you get home, you tap "resume" from the same Shortcut.
+
+Two terms used below, defined once here:
+
+- A **persona** is a role the agent takes on — researcher, planner, implementer, or QA. (The **agent** is the coding assistant Minsky drives to do the actual work — Claude Code, Devin, Aider, or OpenHands.) A graceful pause lets the current persona step finish before stopping.
+- The **supervisor** is the outer watchdog that restarts Minsky if it dies and survives reboots. A pause must outlive a supervisor restart, so it is stored as a file on disk, not just in memory.
 
 ## Acceptance criteria
 
-- A single Apple Shortcut (no app to open) can pause the loop
-- A single Apple Shortcut can resume it
-- Pause is graceful: in-flight persona step completes, no half-done state
-- Pause persists across supervisor restarts (the flag file survives)
-- The Watch surface reflects paused state immediately
-- All of this works from anywhere over Tailscale
+- One Apple Shortcut (no app to open) pauses the loop.
+- One Apple Shortcut resumes it.
+- The pause is graceful: the in-flight persona step finishes; no half-done state.
+- The pause survives a supervisor restart, because the flag file on disk survives.
+- The Watch surface shows the paused state right away.
+- All of this works from anywhere, over the encrypted private network (Tailscale).
 
 ## Metric
 
 - **Name**: `pause_latency_p95`
-- **Definition**: 95th-percentile time from "pause Shortcut tapped" to "supervisor reports paused state, no new tick claims"
+- **Definition**: 95th-percentile time from "pause Shortcut tapped" to "supervisor reports paused state, no new tick claims". A **tick** is one wake-up of the loop on its timer.
 - **Threshold**: ≤30 seconds
-- **Source**: `Observability` adapter — span between Shortcut HTTP request and supervisor state-change event
+- **Source**: `Observability` adapter — the span between the Shortcut HTTP request and the supervisor's state-change event.
 
 ## Integration test
 
 - **File**: `user-stories/002-pause-from-iphone.test.ts` (forthcoming)
 - **Setup**:
-  - Tailscale up; minsky web app reachable on tailnet
-  - Loop running with 5 in-flight tasks queued
-  - Apple Shortcut JSON imported
-- **Action**: Simulate the Shortcut HTTP request (`POST /pause`) over the tailnet, then `POST /resume` 60s later
+  - Tailscale up; Minsky web app reachable on the private network.
+  - Loop running with 5 in-flight tasks queued.
+  - Apple Shortcut JSON imported.
+- **Action**: Send the Shortcut's HTTP request (`POST /pause`) over the private network, then send `POST /resume` 60 seconds later.
 - **Assert**:
-  - Paused state reflected within 30s (latency p95)
-  - In-flight persona step completes (no abort mid-tool-call)
-  - No new task claimed during pause window
-  - Resume returns the loop to active state within 30s
-  - `state/PAUSED` flag file written/removed correctly
-  - Watch surface JSON reflects the state change within one poll interval
+  - Paused state shows within 30 seconds (latency p95).
+  - The in-flight persona step finishes (no abort mid-tool-call).
+  - No new task is claimed during the pause window.
+  - Resume returns the loop to active state within 30 seconds.
+  - The `state/PAUSED` flag file is written, then removed, correctly.
+  - The Watch surface JSON reflects the state change within one poll interval.
 
 ## Proof
 
-- **Live**: Watch surface shows "⏸ Paused" within seconds of the Shortcut tap
-- **Dashboard**: Web dashboard banner reads "Paused — tap to resume" with timestamp
-- **Notification**: A confirmation ntfy push fires on every state transition
+- **Live**: The Watch surface shows "⏸ Paused" within seconds of the Shortcut tap.
+- **Dashboard**: The web dashboard banner reads "Paused — tap to resume" with a timestamp.
+- **Notification**: A confirmation ntfy push fires on every state transition.
 
 ## Failure modes & chaos verification
 
 Per constitutional rule #7 (`vision.md` § 7).
 
-- **Steady-state hypothesis**: a `POST /pause` HTTP request from a Tailscale-connected device transitions the supervisor to paused state visible to the Watch within 30s p95.
-- **Blast radius**: the in-flight persona step (allowed to finish). No impact on the supervisor process, on other ticks already complete, or on the loop's restart policy.
-- **Operator escape hatch**: SSH to the host and `rm state/PAUSED` to force resume. An admin-token "force-resume" Shortcut is the same path over Tailscale without SSH.
+- **Steady-state hypothesis**: a `POST /pause` HTTP request from a device on the private network moves the supervisor to paused state, visible on the Watch within 30 seconds p95.
+- **Blast radius**: the in-flight persona step (allowed to finish). No impact on the supervisor process, on ticks already complete, or on the loop's restart policy.
+- **Operator escape hatch**: SSH to the machine running Minsky and run `rm state/PAUSED` to force a resume. An admin-token "force-resume" Shortcut walks the same path over the private network without SSH.
 
 | # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
 |---|---|---|---|---|
@@ -60,6 +67,8 @@ Per constitutional rule #7 (`vision.md` § 7).
 | 4 | Resume request arrives during a tick that is itself recovering from a crash | Compose: kill tick-loop, then `POST /resume` before respawn completes (clock + process death) | `graceful-degrade` | Sequence the events; assert resume queued until current tick state stabilises, no stuck flag. |
 | 5 | Two pauses within 5s (rapid double-tap) | Fire two `POST /pause` from the same device (request flood) | `graceful-degrade` | Double-fire; assert idempotency — second request acks the existing paused state, no extra ntfy notification. |
 | 6 | ntfy push fails (upstream rate-limit / outage) | `iptables -A OUTPUT -d ntfy.sh -j DROP` during a state transition (network) | `graceful-degrade` | Drop ntfy.sh; assert state still changes, notification queued for retry, dashboard reflects state truth-of-source. |
+
+OTEL is OpenTelemetry (OTEL), the open standard Minsky emits for traces, metrics, and logs.
 
 ## Status
 

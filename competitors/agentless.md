@@ -1,48 +1,65 @@
-# Reference / thesis falsifier: Agentless
+# Competitor: Agentless (OpenAutoCoder)
 
-> Agentless is a research project (not a product) demonstrating that a fixed three-phase pipeline with no agent loop reaches competitive SWE-bench Lite results at a fraction of the token cost. This file applies the Five Pivot Questions framework to the single most load-bearing reference in the directory — it directly tests Minsky's reason for existing: *"an autonomic self-improvement loop wrapped around an agent, plus hard rules enforced in CI, produces measurably better outcomes than a vanilla agent or a fixed pipeline."* If Agentless beats an agent loop on Minsky's own M1.10 corpus task-classes, the thesis needs sharper isolation of where orchestration actually pays. The verdict (answered below) is **Reference, add to the benchmark corpus as a thesis falsifier — do not adopt as a runtime.**
+> Agentless is a research project — not a product — that fixes one bug per run with a no-loop, three-step pipeline. We do not adopt it. We benchmark against it, because it directly tests Minsky's reason for existing.
 
 - **URL**: <https://github.com/OpenAutoCoder/Agentless>
-- **Paper**: Xia, Deng, Dunn, Zhang, "Agentless: Demystifying LLM-based Software Engineering Agents", *arXiv* 2407.01489, 2024 (v1 2024-07-01, v2 2024-10-29). The primary sources — the arXiv abstract, the dblp record, and the OpenAutoCoder/Agentless README — cite **only the arXiv preprint**; neither the abstract page nor the project README claims an *ICSE* or *FSE* acceptance (an earlier revision of this file asserted "*ICSE* 2026" and the source TASKS.md block says "FSE 2025" — both are unverified against the primary sources as of the 2026-06-02 review and have been removed rather than propagated). The project is the basis of OpenAI's SWE-bench Verified scaffold reported in the GPT-4o/o1 system cards.
-- **Status**: Research code, MIT-licensed, actively cited and forked; the OpenAutoCoder org publishes the SWE-bench Lite and Verified harness scripts.
+- **Status**: Research code, MIT-licensed, actively cited and forked; the OpenAutoCoder org publishes the SWE-bench Lite and Verified harness scripts. It is the basis of OpenAI's SWE-bench Verified scaffold reported in the GPT-4o/o1 system cards.
 - **Pricing**: Free (MIT). Model API costs only.
-- **Relationship**: **Reference / thesis falsifier** — not a product to adopt, a method to benchmark against. Added to `novel/competitive-benchmark/src/competitors.ts` as a `local-harness` descriptor (the corpus's reproducible-harness arm), because the falsifier must be runnable head-to-head against Minsky's other backends regardless of any adoption verdict.
+- **Relationship**: **Reference / thesis falsifier** — not a product to adopt, a method to benchmark against. Added to `novel/competitive-benchmark/src/competitors.ts` as a `local-harness` descriptor (the corpus's reproducible-harness arm), so the falsifier runs head-to-head against Minsky's other backends regardless of any adoption verdict. ("Minsky" is the background program that picks tasks and drives a coding assistant to do them; "agent" below means that coding assistant — Claude Code, Devin, Aider, or OpenHands.)
 
-## What it is
+## What this is
 
-A deliberately un-agentic approach to LLM-based software engineering. Instead of an agent loop with tool use, planning, and self-directed next-step decisions, Agentless runs a fixed three-phase pipeline:
+Agentless is a deliberately un-agentic way to fix code with a large language model (LLM). Most tools wrap the LLM in an agent loop: the LLM plans, uses tools, and decides its own next step. Agentless throws that away. It runs three fixed steps in order, every time:
 
-1. **Localization** — hierarchically narrow from repo → files → classes/functions → edit locations, using the LLM plus the repo's structure (no embedding-based retrieval in the headline configuration).
-2. **Repair** — sample multiple candidate patches in a simple diff format for the localized edit locations.
-3. **Validation** — filter candidates by regression tests and by reproduction tests the LLM synthesises for the issue, then rank and select.
+1. **Localization** — narrow down where to edit, top to bottom: repo → files → classes and functions → exact edit locations. It uses the LLM plus the repo's structure (no embedding-based retrieval in the headline configuration).
+2. **Repair** — sample several candidate patches, in a simple diff format, for those edit locations.
+3. **Validation** — keep the candidates that pass the repo's regression tests and a reproduction test the LLM writes for the issue, then rank and pick one.
 
-There is no agent decision about *what to do next*; the control flow is deterministic, only the LLM calls are stochastic. The provocative empirical claim from the paper: on SWE-bench Lite this fixed pipeline outperformed all open-source agent-based approaches at the time of publication, at a fraction of the cost — suggesting that much of the value attributed to "agent autonomy" actually comes from the underlying model, not the orchestration loop.
+The LLM never decides *what to do next*. The control flow is fixed; only the LLM calls are random. The paper's provocative claim: on the SWE-bench Lite benchmark this fixed pipeline beat every open-source agent-based tool at the time, for a fraction of the cost. The implication is that much of the value credited to "agent autonomy" actually comes from the underlying model, not the orchestration loop.
+
+**Paper**: Xia, Deng, Dunn, Zhang, "Agentless: Demystifying LLM-based Software Engineering Agents", *arXiv* 2407.01489, 2024 (v1 2024-07-01, v2 2024-10-29). The primary sources — the arXiv abstract, the dblp record, and the OpenAutoCoder/Agentless README — cite **only the arXiv preprint**. Neither the abstract page nor the README claims an *ICSE* or *FSE* acceptance, so the unverified venue assertion was removed rather than propagated.
+
+### Why it tests Minsky's reason for existing
+
+Minsky's thesis is that *an autonomic self-improvement loop wrapped around an agent, plus hard rules enforced in CI, produces measurably better outcomes than a vanilla agent or a fixed pipeline.* Agentless is the cleanest test of that claim. If a fixed pipeline beats an agent loop on Minsky's own M1.10 corpus task-classes, then Minsky has to show *precisely* where its orchestration pays rent. The verdict, worked out below, is **Reference — add to the benchmark corpus as a thesis falsifier; do not adopt as a runtime.**
 
 ### Published benchmark numbers
 
-The paper's headline (SWE-bench Lite, GPT-4o driver): **27.3% resolve rate (82/300 fixes) at ~$0.34 average cost per issue** — at the time, the best-performing AND lowest-cost open-source entry on the Lite leaderboard. Later Agentless configurations and driver models pushed substantially higher: the OpenAutoCoder README reports the same fixed pipeline driven by **Claude 3.5 Sonnet reaching 40.7% on SWE-bench Lite and 50.8% on SWE-bench Verified**. These are **Lite/Verified resolve rates of the pipeline**, not a Minsky metric — and the driver-swap delta is exactly why the head-to-head matters: a fixed pipeline that climbs from 27.3% → 40.7% on Lite purely by changing the *driver model* (with no orchestration change) is the cleanest evidence for the paper's central claim that most of the "agent" value attributed to autonomy is in fact the underlying model. The number Minsky-via-`<agent>` posts on the same corpus is the comparison, and a fixed pipeline beating an agent loop on a task-class is the falsification signal.
+The paper's headline (SWE-bench Lite, GPT-4o driver): **27.3% resolve rate (82/300 fixes) at ~$0.34 average cost per issue** — at the time, the best-performing AND lowest-cost open-source entry on the Lite leaderboard. Later configurations and driver models went much higher: the OpenAutoCoder README reports the same fixed pipeline driven by **Claude 3.5 Sonnet reaching 40.7% on SWE-bench Lite and 50.8% on SWE-bench Verified**.
 
-## Strengths (the falsifier's power)
+These are Lite/Verified resolve rates of the pipeline, not a Minsky metric. The driver-swap delta is exactly why the head-to-head matters: a fixed pipeline that climbs from 27.3% to 40.7% on Lite purely by changing the *driver model* — with no orchestration change — is the cleanest evidence for the paper's central claim that most "agent" value is in fact the underlying model. The number Minsky posts on the same corpus, driving the same kind of agent, is the comparison. A fixed pipeline beating an agent loop on a task-class is the falsification signal.
+
+## What this is not
+
+- **Not a daemon.** A daemon is a background program that keeps running on your machine, survives terminal close, and restarts on crash. Agentless is single-shot: it fixes one issue and exits.
+- **Not a fleet walker.** It has no queue and no way to walk several repos in turn. There is no notion of "keep going across N repos for 24h".
+- **Not a feature builder.** The localize → repair → validate pipeline assumes a failing test or a reproducible bug to anchor itself. Greenfield features, cross-cutting refactors, and multi-file architectural changes have no such anchor.
+- **Not self-improving.** No experiment store, no across-run learning. Each run is independent and does not get better at your repo over time.
+- **Not a competitor to the orchestrator.** It is a candidate *inner step* for one task-class and a benchmark baseline — not a peer to Minsky.
+
+## Strengths
+
+These are the qualities that make Agentless a powerful falsifier.
 
 - **Falsifiable thesis** — the paper ships a runnable harness, so the numeric claim is reproducible on Minsky's M1.10 corpus rather than taken on faith.
-- **Token-efficient and bounded** — a fixed pipeline has predictable token usage; an agent loop has unbounded retry potential. This is the cost axis Minsky's `cost-per-merged-pr` metric tracks.
-- **Reproducible** — no flaky tool-use decisions; the only stochasticity is the LLM sampling, which the multi-sample-then-filter design explicitly hedges.
-- **Forces honest measurement** — if Agentless beats Minsky-via-`<agent>` on a bug-fix task-class, the Minsky layer's value must be justified *precisely* (on which task-class, by which metric), not with a vague "agent intelligence" claim. This is rule #9 (pre-registered, falsifiable HDD) applied to Minsky's own reason for existing.
+- **Token-efficient and bounded** — a fixed pipeline has predictable token usage; an agent loop can retry without bound. This is the cost axis Minsky's `cost-per-merged-pr` metric tracks.
+- **Reproducible** — no flaky tool-use decisions. The only randomness is the LLM sampling, which the multi-sample-then-filter design explicitly hedges.
+- **Forces honest measurement** — if Agentless beats a Minsky-driven agent on a bug-fix task-class, Minsky's added value must be justified *precisely* (on which task-class, by which metric), not with a vague "agent intelligence" claim. This is rule #9 (pre-registered hypothesis-driven development — every change states its hypothesis, success threshold, pivot threshold, measurement command, and literature anchor before code is written) applied to Minsky's own reason for existing.
 
 ## Weaknesses vs Minsky's vision
 
-1. **Single-issue, single-shot.** Agentless resolves one localized issue per run; it is not a daemon, a queue, or a fleet walker. It has no notion of "keep going across N repos for 24h".
-2. **Bug-fix-shaped, not feature-shaped.** The localize→repair→validate pipeline assumes a failing test or a reproducible bug to anchor localization and validation. Greenfield feature work, cross-cutting refactors, and multi-file architectural changes have no such anchor — the design degrades exactly where agent loops with iterative test feedback earn their keep.
-3. **No self-improvement.** There is no experiment store, no MAPE-K controller, no across-run learning. Each run is independent; the pipeline does not get better at the operator's repo over time.
+1. **Single-issue, single-shot.** Agentless resolves one localized issue per run; it is not a daemon, a queue, or a fleet walker.
+2. **Bug-fix-shaped, not feature-shaped.** The pipeline needs a failing test or reproducible bug to anchor localization and validation. The design degrades exactly where agent loops with iterative test feedback earn their keep.
+3. **No self-improvement.** There is no experiment store and no MAPE-K controller (the Monitor–Analyze–Plan–Execute-over-a-Knowledge-base loop that lets Minsky study its own results and improve). Each run is independent.
 4. **No constitution / deterministic enforcement.** Agentless has no equivalent of the 17-rule `pnpm pre-pr-lint --stage=full` gate. Its discipline is *architectural* (the fixed pipeline), not *governance* (rules a worker must satisfy before merge).
-5. **No operator-machine identity, no PR delivery.** It produces a patch; it does not commit as the operator, open a PR, or walk a `TASKS.md` queue.
+5. **No operator-machine identity, no PR delivery.** It produces a patch. It does not commit as you, open a PR, or walk a `TASKS.md` queue. (`TASKS.md` is the plain-text Markdown to-do list at a project's root that Minsky reads to pick work.)
 
 ## What we learn / steal
 
-- **Deterministic pipeline as a routing target for cheap task-classes** — the strongest lesson. For SWE-bench-Lite-shaped bug fixes, a fixed pipeline may be the cheapest correct path; Minsky's value is in *routing* (orchestration decides when to use the cheap pipeline vs the expensive loop), not in always running the loop.
-- **Validation-by-synthesised-reproduction-test** — Agentless's validation phase synthesises a reproduction test and uses regression tests to filter candidates. This is a concrete technique Minsky's QA persona / gate could adopt: generate a reproduction test for the issue, use it as the accept/reject oracle.
+- **Deterministic pipeline as a routing target for cheap task-classes** — the strongest lesson. For SWE-bench-Lite-shaped bug fixes, a fixed pipeline may be the cheapest correct path. Minsky's value is in *routing* — orchestration decides when to use the cheap pipeline versus the expensive loop — not in always running the loop.
+- **Validation-by-synthesised-reproduction-test** — Agentless's validation phase synthesises a reproduction test and uses regression tests to filter candidates. Minsky's QA persona (a role the agent takes on) could adopt this: generate a reproduction test for the issue, use it as the accept/reject oracle.
 - **Cost as a first-class axis** — Agentless's headline is as much about cost as resolve rate. Minsky's `cost-per-merged-pr` metric is the right axis; the lesson is to report it as prominently as the resolve rate.
-- **The model is the artefact** — Agentless's result strengthens the README framing that an agent CLI's score is mostly its driver model's score; the orchestrator-tier delta is what Minsky must measure separately.
+- **The model is the artefact** — Agentless's result strengthens the README framing that an agent CLI's score is mostly its driver model's score. The orchestrator-tier delta is what Minsky must measure separately.
 
 ## Why choose Minsky over Agentless
 
@@ -58,15 +75,15 @@ The paper's headline (SWE-bench Lite, GPT-4o driver): **27.3% resolve rate (82/3
 - You want a deterministic, auditable pipeline with no agent autonomy to reason about.
 - You are running a benchmark and want a low-variance baseline whose cost is bounded.
 
-## Should we adopt the Agentless pipeline instead?
+## Should we wrap Agentless instead?
 
-No — but for a sharper reason than "different surface". Agentless is not a competitor to the *orchestrator*; it is a candidate *inner step* for one task-class. The disciplined answer is: **wrap it as an optional routing target, do not replace the loop.** For a test-anchored bug fix, the orchestrator could route to an Agentless-style fixed pipeline (cheap, bounded) instead of a full agent session; for feature/refactor work it routes to the agent loop. That is an addition behind the existing agent-spawn seam (rule #2), not a replacement of the tick-loop, MAPE-K, or the constitution. The benchmark corpus row is what makes that routing decision data-driven rather than asserted.
+No — but for a sharper reason than "different surface". Agentless is not a competitor to the *orchestrator*; it is a candidate *inner step* for one task-class. The disciplined answer: **wrap it as an optional routing target, do not replace the loop.** For a test-anchored bug fix, the orchestrator could route to an Agentless-style fixed pipeline (cheap, bounded) instead of a full agent session; for feature/refactor work it routes to the agent loop. That is an addition behind the existing agent-spawn seam (rule #2, don't-reinvent — talk to outside tools through a fixed adapter interface), not a replacement of the tick-loop, MAPE-K, or the constitution. The benchmark corpus row is what makes that routing decision data-driven rather than asserted.
 
 ## Five pivot questions
 
 ### 1. How is it different from Minsky?
 
-Agentless is a *method*, Minsky is an *orchestrator*. Agentless removes the agent loop and replaces it with a fixed localize→repair→validate pipeline for one issue. Minsky keeps an agent loop and wraps it in a daemon, a queue, a cross-repo fleet, an across-session self-improvement controller, and a 17-rule CI gate. They are not at the same layer: Agentless is a candidate *inner step* (and a benchmark baseline), not a peer.
+Agentless is a *method*; Minsky is an *orchestrator*. Agentless removes the agent loop and replaces it with a fixed localize → repair → validate pipeline for one issue. Minsky keeps an agent loop and wraps it in a daemon, a queue, a cross-repo fleet, an across-session self-improvement controller, and a 17-rule CI gate. They are not at the same layer: Agentless is a candidate *inner step* (and a benchmark baseline), not a peer.
 
 ### 2. What lessons can it give to us?
 
@@ -77,13 +94,15 @@ Agentless is a *method*, Minsky is an *orchestrator*. Agentless removes the agen
 
 ### 3. Are any of these lessons potentially vision-changing?
 
-**No — but the pre-registered Pivot was tested, and that is the point of asking.** This task's Pivot threshold was: *"if Agentless's benchmark reading is within the noise band of an agent loop on Minsky's M1.10 corpus AND 0 of 4 stubs produce a concrete change, the dependency landscape is settled."* Agentless does NOT fall within the noise band on the dimension that matters — it is *cheaper and lower-variance on bug-fix-shaped tasks*, which is a measurable, exploitable difference, not noise. So the falsifier earns its corpus seat: it produces a concrete change (the corpus row + a routing experiment to file), clearing the Pivot. What it does **not** do is dissolve the moat — Agentless is bug-fix-shaped and single-shot; it has no daemon, queue, fleet, self-improvement loop, or governance gate. The honest conclusion is **"Agentless sharpens *where* Minsky must claim value (orchestration + governance + feature/refactor task-classes), not *whether* it should exist."** A foundation-shaking finding would have been Agentless beating an agent loop on multi-file feature work — it does not, and is not designed to. Negative-on-the-moat / positive-on-the-corpus finding logged inline per this task's central-questions routing (the orchestrator maintains operator-facing questions centrally rather than editing `ask-human.md`).
+**No — but the pre-registered Pivot was tested, and that is the point of asking.** The Pivot threshold for this task was: *"if Agentless's benchmark reading is within the noise band of an agent loop on Minsky's M1.10 corpus AND 0 of 4 stubs produce a concrete change, the dependency landscape is settled."* Agentless does NOT fall within the noise band on the dimension that matters — it is *cheaper and lower-variance on bug-fix-shaped tasks*, which is a measurable, exploitable difference, not noise. So the falsifier earns its corpus seat: it produces a concrete change (the corpus row plus a routing experiment to file), clearing the Pivot.
+
+What it does **not** do is dissolve the moat — Agentless is bug-fix-shaped and single-shot; it has no daemon, queue, fleet, self-improvement loop, or governance gate. The honest conclusion: **Agentless sharpens *where* Minsky must claim value (orchestration + governance + feature/refactor task-classes), not *whether* it should exist.** A foundation-shaking finding would have been Agentless beating an agent loop on multi-file feature work — it does not, and is not designed to.
 
 ### 4. How can we improve our strategy based on this?
 
 - **File a routing experiment: cheap-pipeline-vs-loop on the bug-fix task-class** — pre-register the hypothesis that routing test-anchored bug fixes to an Agentless-style fixed pipeline lowers `cost-per-merged-pr` without lowering resolve rate, and measure it on the corpus. Traces to lesson §2.1.
 - **Adopt synthesised-reproduction-test validation in the gate path** — prototype the reproduction-test oracle as a QA-persona step. Traces to lesson §2.2.
-- **Lead positioning with task-class honesty** — the README should say Minsky's delta is on orchestration + governance + non-bug-fix task-classes, not on SWE-bench-Lite-shaped fixes where a fixed pipeline is competitive. Pre-empts the "isn't this just a more expensive agent loop?" critique. Traces to lesson §2.3 + §3.
+- **Lead positioning with task-class honesty** — the README should say Minsky's delta is on orchestration + governance + non-bug-fix task-classes, not on SWE-bench-Lite-shaped fixes where a fixed pipeline is competitive. This pre-empts the "isn't this just a more expensive agent loop?" critique. Traces to lessons §2.3 and §3.
 - **Keep the falsifier in the corpus permanently** — a thesis that cannot be falsified is a liability; the Agentless row is the falsifiability guarantee. Traces to lesson §2.4.
 
 ### 5. Can and should we cut corners by replacing part of Minsky with this?

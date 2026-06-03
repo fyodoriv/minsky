@@ -1,10 +1,34 @@
 # How Minsky compares to other tools — full version
 
-> Last updated 2026-05-23. The README has the 5-row summary; this is the full landscape.
+> The honest, full-landscape comparison: where Minsky sits against every tool you might pick instead.
 
-The honest version. Each column is a real product the operator might pick instead.
+## What this is
 
-Status of Minsky capabilities below: ✅ shipping today · 🟡 partial / in progress · 🔴 planned. M1 progress (2026-05-22): 39 / 81 measurable M1 tasks passing; see [MILESTONES.md § M1](../MILESTONES.md#m1--stable-measurable-one-command--v010) for the per-criterion view.
+Minsky is a background program that does coding work for you while you are away. You point it at a code project, it picks the most important unfinished to-do, asks a coding assistant to do it, and hands you a draft to review — it never merges anything on its own.
+
+This page compares Minsky to the real products you might choose instead. The README has the 5-row summary; this is the full landscape, including the rows where Minsky loses. Each column is a real product an operator (the human who runs Minsky — you) might pick.
+
+A few terms used below, defined once:
+
+- **daemon** — a background program that keeps running on your machine after you start it, surviving terminal close and restarting on crash.
+- **host** — one code project (git repository) that Minsky works on. A "cross-repo fleet" is Minsky walking several hosts in turn.
+- **agent** — the coding assistant Minsky drives to do the actual work: Claude Code, Devin, or Aider. Minsky is not an agent; it orchestrates agents.
+- **TASKS.md** — the plain-text Markdown to-do list at a project's root that Minsky reads to pick work.
+- **MAPE-K loop** — Minsky's self-improvement loop: Monitor, Analyze, Plan, Execute over a Knowledge base (Kephart & Chess, 2003). Minsky reads its own past results, finds its weak spots, and files tasks against them.
+
+## What this is not
+
+- **Not the README.** The [README](../README.md) is the short pitch and quickstart; this page is the long comparison.
+- **Not a per-vendor deep dive.** Each row links out to the full research file under `../competitors/`.
+- **Not the scorecard data.** The dated, cited benchmark numbers live in [scorecard.md](../competitors/scorecard.md).
+
+## Status legend and milestone progress
+
+Minsky capability status below uses three marks: ✅ shipping today · 🟡 partial / in progress · 🔴 planned.
+
+M1 progress (2026-05-22): 39 / 81 measurable M1 tasks passing. See [MILESTONES.md § M1](../MILESTONES.md#m1--stable-measurable-one-command--v010) for the per-criterion view.
+
+Last updated 2026-05-23.
 
 ## Full capability table (15 rows × 5 competitors)
 
@@ -46,7 +70,7 @@ Status of Minsky capabilities below: ✅ shipping today · 🟡 partial / in pro
 - **Single-operator deployment shape today** — CrewAI ships AMP at Fortune 500 scale. OpenHands ships Enterprise Agent Control Plane. Devin ships Cognition Cloud + Devbox + customer VPC. Minsky has one production deployment (the operator's own machine). Gap tracked at [`enterprise-deployment-readiness-audit`](../TASKS.md). If you need SOC 2 audit logs + RBAC + IdP integration today, Minsky doesn't ship those.
 - **Coding-specific by design** — CrewAI works for marketing, research, customer support, analytics. Minsky works for "merge code into a git repo." Tighter focus is the design choice — coding is what makes the constitution enforceable as CI, makes TASKS.md naturally version-controlled, makes the PR-shaped output measurable. But if your use case isn't shipping code, Minsky is the wrong tool.
 
-## What we steal from each
+## What we adopt from each
 
 - **OpenHands** — pluggable sandbox layer (Docker / Process / Remote); multi-task benchmark suite shape (Index = 5 tasks, not just SWE-bench); bring-your-own-agent framing.
 - **CrewAI** — hierarchical memory architecture; manager agent / delegation pattern; event-driven Flows as an alternative to procedural cross-repo-runner.
@@ -56,3 +80,8 @@ Status of Minsky capabilities below: ✅ shipping today · 🟡 partial / in pro
 ## One-paragraph summary
 
 If you want a 24/7 daemon that walks your fleet of repos, uses your credentials, enforces 18 deterministic rules, and improves itself from its own iteration ledger — pick Minsky. If you want SWE-bench leadership today + a Docker-isolated sandbox + a web UI to watch the agent think — pick OpenHands. If you want general-purpose multi-agent orchestration + Fortune 500 deployment substrate — pick CrewAI. If you want a fully managed agent in Cognition's cloud + the highest single-task autonomy bar — pick Devin. If you want a focused CLI pair programmer — pick Claude Code or Aider.
+
+## Read next
+
+- [competitors/README.md](../competitors/README.md) — the strategic landscape index and the six-property moat.
+- [scorecard.md](../competitors/scorecard.md) — the generated, dated benchmark snapshot.

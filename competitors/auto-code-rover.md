@@ -1,17 +1,27 @@
 # Competitor: AutoCodeRover (NUS spin-off, acquired by Sonar)
 
-> A research-grade autonomous program-improvement agent whose AST-aware code search + spectrum-based fault localization are worth absorbing, but whose OSS line went dormant after the team's February-2025 acquisition by Sonar — a post-mortem, not a live competitor.
+> A research-grade coding agent worth learning from, not adopting: its two best ideas (structure-aware code search and test-driven bug ranking) are portable, but its open-source line went quiet after Sonar acquired the team in February 2025 — so this is a post-mortem, not a live competitor.
 
 - **URL**: <https://github.com/AutoCodeRoverSG/auto-code-rover>
 - **Status**: **Stale / dormant** — last meaningful commit 2025-04-24 (403 days as of 2026-06-01, > 180-day post-mortem threshold); repo not formally archived; agent-tier research project, not a daemon
 - **Pricing**: Free (the OSS repo carries a custom license — `NOASSERTION` per GitHub; model/API costs only). The successor capability is commercial inside Sonar's product line.
 - **Relationship**: **Research benchmark (post-mortem)** — not a product to adopt or a fleet to wrap; a published technique (AST-aware retrieval + fault localization) to extract into Minsky's adapter/context layer
 
-## What it is
+## What this is
 
-AutoCodeRover is an LLM agent for *autonomous program improvement* — fixing GitHub-issue-shaped bugs and adding small features without a human in the loop. Its distinctive idea (ISSTA 2024, Zhang/Ruan/Fan/Roychoudhury) is that a software project is **not** a flat bag of files: the agent operates over the program's **abstract syntax tree**, and its code-search primitives are structure-aware (`search_class`, `search_method`, `search_code_in_file`) rather than raw grep. When a test suite is present, it layers **spectrum-based fault localization** (SBFL) on top to rank suspicious methods before the LLM ever proposes a patch. The pipeline is two-stage — *context retrieval* then *patch generation* — closer to Agentless's fixed-pipeline philosophy than to an open-ended agent loop, but with iterative re-search when the retrieved context is insufficient.
+AutoCodeRover is a coding assistant that fixes bugs and adds small features on its own, no human in the loop. (A *coding assistant* here is what Minsky calls an **agent** — the tool that does the actual code work; Minsky orchestrates such agents but is not one itself.) You point it at a GitHub-issue-shaped task and it produces a patch.
 
-It began as a National University of Singapore (NUS) research spin-off (co-founders Ridwan Shariffdeen — CEO, Martin Mirchev — CTO, Yuntong Zhang & Haifeng Ruan — Co-Chief Scientific Officers, advised by Prof. Abhik Roychoudhury). On 2025-02-19 it was **acquired by Sonar** (SonarSource), after which the public OSS repository effectively stopped receiving development.
+Its distinctive idea (ISSTA 2024, Zhang/Ruan/Fan/Roychoudhury) is to treat a project as structured code, not a flat bag of files. It searches over the program's **abstract syntax tree** (the parsed shape of the code — its classes and methods), so its search primitives are `search_class`, `search_method`, and `search_code_in_file` rather than raw grep. When the project has a test suite, it adds **spectrum-based fault localization** (SBFL): it runs the tests and ranks the methods most likely to be at fault before the language model ever proposes a patch.
+
+The pipeline runs in two fixed stages — first *retrieve context*, then *generate a patch* — and re-searches when the retrieved context is too thin. This is closer to a fixed pipeline (the Agentless philosophy) than to an open-ended agent loop.
+
+The project began as a National University of Singapore (NUS) research spin-off. Its founders were Ridwan Shariffdeen (CEO), Martin Mirchev (CTO), and Yuntong Zhang & Haifeng Ruan (Co-Chief Scientific Officers), advised by Prof. Abhik Roychoudhury. On 2025-02-19 **Sonar (SonarSource) acquired it**, and the public OSS repository effectively stopped receiving development after that.
+
+## What this is not
+
+- Not a daemon — there is no background program that keeps running and picks up work on its own. (A *daemon* is a background program that keeps running after you start it, survives terminal close, and restarts on crash. Minsky is a daemon; AutoCodeRover is a one-shot invocation.)
+- Not an orchestrator — it does the code work itself; it does not drive other agents.
+- Not a maintained dependency — the live capability now lives inside a closed commercial product. The OSS repo is a source of ideas, not code you should build on.
 
 ## Strengths
 
@@ -24,27 +34,17 @@ It began as a National University of Singapore (NUS) research spin-off (co-found
 ## Weaknesses vs Minsky's vision
 
 1. **Not a daemon** — AutoCodeRover is a per-issue agent invocation, not a persistent 24/7 supervisor. No overnight unattended loop, no budget management, no restart-on-crash (Minsky moats #1, #6 via `vision.md § Stay alive`).
-2. **No operator-machine identity** — it is a research harness you run; commits/identity binding to the operator's `~/.gitconfig`/`gh` is not its concern (Minsky moat #2).
-3. **No self-improvement loop** — the pipeline is fixed; there is no MAPE-K observer that tunes its own prompts from outcome history (Minsky moat #4).
-4. **Single-repo, single-issue** — no cross-repo fleet, no round-robin across N hosts (Minsky moat #5).
-5. **Dormant OSS line** — after the Sonar acquisition the public repo went quiet; the live capability now lives inside a closed commercial product, so the OSS artifact is a *technique source*, not a maintained dependency (Minsky rule #1 — adopt the pattern, not the abandoned code).
+2. **No operator-machine identity** — it is a research harness you run; commits/identity binding to the operator's `~/.gitconfig`/`gh` is not its concern (Minsky moat #2). (*Operator* = the human who runs the tool — you. Minsky runs as you, so the work lands under your own git/SSH credentials.)
+3. **No self-improvement loop** — the pipeline is fixed; there is no MAPE-K observer that tunes its own prompts from outcome history (Minsky moat #4). (The *MAPE-K loop* is Minsky's self-improvement cycle — Monitor, Analyze, Plan, Execute over a Knowledge base — that studies its own results and adjusts.)
+4. **Single-repo, single-issue** — no cross-repo fleet, no round-robin across N hosts (Minsky moat #5). (A *host* is one code repository Minsky works on; a *fleet* is several hosts it walks in turn.)
+5. **Dormant OSS line** — after the Sonar acquisition the public repo went quiet; the live capability now lives inside a closed commercial product, so the OSS artifact is a *technique source*, not a maintained dependency (Minsky rule #1, don't reinvent — adopt the pattern, not the abandoned code).
 
 ## What we learn / steal
 
-- **AST-aware code search as an adapter, not a feature** — Minsky's context-assembly seam (the brief/spec the daemon hands an agent) could expose structure-aware retrieval primitives (`search_method`/`search_class`) as an *adapter* behind `novel/adapters/`, per rule #2, rather than passing flat file blobs. This is a portable pattern, not a product.
+- **AST-aware code search as an adapter, not a feature** — Minsky's context-assembly seam (the brief/spec the daemon hands an agent) could expose structure-aware retrieval primitives (`search_method`/`search_class`) as an *adapter* behind `novel/adapters/`, per rule #2, rather than passing flat file blobs. (An *adapter* is a small wrapper file that lets Minsky talk to one outside tool through a fixed interface, so the tool can be swapped without touching the rest of the code.) This is a portable pattern, not a product.
 - **Spectrum-based fault localization as a pre-filter** — where a host repo has a test suite, an SBFL pass can rank suspect methods before the agent spawns, cutting tokens and tightening the brief. Decades-tested literature (Jones & Harrold, Abreu et al.) — exactly the "named pattern, not invented terminology" rule #5 wants.
 - **Cost-per-issue as a first-class metric** — the <$0.70/issue framing maps directly onto Minsky's `cost-per-merged-pr` scorecard metric; AutoCodeRover's economics are a useful reference point for the corpus.
 - **Two-stage context-then-patch** — a deterministic retrieval stage feeding a stochastic patch stage echoes Agentless's thesis (see `competitors/agentless.md`): orchestration should pay rent on hard tasks, not on retrieval that a fixed pipeline does cheaply.
-
-## Post-mortem: why it died
-
-- **Last meaningful commit**: 2025-04-24 ("Hotpatch (#92)" — a post-acquisition style-check touch-up; ~403 days dormant as of 2026-06-01). **Archived flag**: no (repo is read-mostly, not formally archived). **Vendor pivoted to**: **Sonar (SonarSource)** — <https://www.sonarsource.com/company/press-releases/sonar-acquires-autocoderover-to-supercharge-developers-with-ai-agents/>.
-- **Root cause** (vendor-acquisition): the NUS spin-off team was acquired by Sonar on 2025-02-19; development effort moved into Sonar's commercial code-quality product and a new Singapore R&D team. The OSS repository is the typical post-acquisition outcome — left in place for citation and reproduction, but no longer the locus of work. This is *not* an architectural dead-end or a community collapse; the technique succeeded so thoroughly it was bought.
-- **Evidence** (≥ 3 sources):
-  1. Sonar press release, *Sonar Acquires AutoCodeRover to Supercharge Developers with AI Agents*, 2025-02-19 — <https://www.sonarsource.com/company/press-releases/sonar-acquires-autocoderover-to-supercharge-developers-with-ai-agents/> (the acquisition announcement; names Roychoudhury as Senior Advisor, 15 R&D jobs 2025–2026).
-  2. NUS Computing news, *NUS-spinoff technology AutoCodeRover acquired by Sonar*, 2025-02 — <https://news.nus.edu.sg/nus-spinoff-tech-autocoderover-acquired-by-sonar/> (institutional confirmation + co-founder roster).
-  3. The repo's own commit history — `gh api repos/AutoCodeRoverSG/auto-code-rover/commits` shows the final commit "Hotpatch (#92)" dated 2025-04-24, the last activity after the February acquisition; `pushed_at` has not advanced since.
-- **Lesson for Minsky** (mandatory): Minsky's survival guardrail against *this* death mode is **rule #1 + the OSS-extractable-from-day-one discipline** combined with **operator ownership**. AutoCodeRover "died" as OSS because a single vendor owned the maintained line and an acquirer absorbed it — its users' workflow depended on a vendor's continued investment. Minsky inverts this: the daemon runs on the *operator's* machine with the *operator's* identity (moat #2), every dependency is wrapped behind an interface (rule #2), and the constitution is enforced by CI the operator owns (moat #3). An acquisition of any single agent Minsky wraps (Claude, Devin, Aider) cannot kill the operator's workflow — they swap the `cloud_agent` config key. The guardrail already exists; this post-mortem confirms it is load-bearing.
 
 ## Why choose Minsky over AutoCodeRover
 
@@ -59,6 +59,16 @@ It began as a National University of Singapore (NUS) research spin-off (co-found
 - If your only need is *one-shot SWE-bench-shape bug fixing* with strong cost economics and you want a self-contained, citable research baseline
 - If you want a reproducible academic harness to benchmark retrieval + SBFL techniques in isolation
 - (Increasingly) if you are already a Sonar customer and want the commercialized successor inside that ecosystem — at which point it is no longer the OSS project compared here
+
+## Post-mortem: why it died
+
+- **Last meaningful commit**: 2025-04-24 ("Hotpatch (#92)" — a post-acquisition style-check touch-up; ~403 days dormant as of 2026-06-01). **Archived flag**: no (repo is read-mostly, not formally archived). **Vendor pivoted to**: **Sonar (SonarSource)** — <https://www.sonarsource.com/company/press-releases/sonar-acquires-autocoderover-to-supercharge-developers-with-ai-agents/>.
+- **Root cause** (vendor-acquisition): the NUS spin-off team was acquired by Sonar on 2025-02-19; development effort moved into Sonar's commercial code-quality product and a new Singapore R&D team. The OSS repository is the typical post-acquisition outcome — left in place for citation and reproduction, but no longer the locus of work. This is *not* an architectural dead-end or a community collapse; the technique succeeded so thoroughly it was bought.
+- **Evidence** (≥ 3 sources):
+  1. Sonar press release, *Sonar Acquires AutoCodeRover to Supercharge Developers with AI Agents*, 2025-02-19 — <https://www.sonarsource.com/company/press-releases/sonar-acquires-autocoderover-to-supercharge-developers-with-ai-agents/> (the acquisition announcement; names Roychoudhury as Senior Advisor, 15 R&D jobs 2025–2026).
+  2. NUS Computing news, *NUS-spinoff technology AutoCodeRover acquired by Sonar*, 2025-02 — <https://news.nus.edu.sg/nus-spinoff-tech-autocoderover-acquired-by-sonar/> (institutional confirmation + co-founder roster).
+  3. The repo's own commit history — `gh api repos/AutoCodeRoverSG/auto-code-rover/commits` shows the final commit "Hotpatch (#92)" dated 2025-04-24, the last activity after the February acquisition; `pushed_at` has not advanced since.
+- **Lesson for Minsky** (mandatory): Minsky's survival guardrail against *this* death mode is **rule #1 (don't reinvent) + the OSS-extractable-from-day-one discipline** combined with **operator ownership**. AutoCodeRover "died" as OSS because a single vendor owned the maintained line and an acquirer absorbed it — its users' workflow depended on a vendor's continued investment. Minsky inverts this: the daemon runs on the *operator's* machine with the *operator's* identity (moat #2), every dependency is wrapped behind an interface (rule #2), and the constitution is enforced by CI the operator owns (moat #3). An acquisition of any single agent Minsky wraps (Claude, Devin, Aider) cannot kill the operator's workflow — they swap the `cloud_agent` config key. The guardrail already exists; this post-mortem confirms it is load-bearing.
 
 ## Scorecard readings (technique reference — not wired into `novel/competitive-benchmark/src/competitors.ts`)
 

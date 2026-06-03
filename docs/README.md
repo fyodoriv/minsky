@@ -1,8 +1,18 @@
 # Minsky documentation
 
-> **Where to start** — a reading order, by audience. Pick the path that matches who you are.
+> The map of every document in the Minsky repo, grouped by who you are and what you came to do.
 
-This is the canonical index of every document in the Minsky repo. Each entry lists what the doc is, who it's for, and approximate reading time.
+## What this is
+
+This page is a reading guide, not the product pitch. Minsky is a background program — a daemon, meaning a program that keeps running on your machine after you start it — that you point at your code projects. It reads each project's plain-text to-do list, picks the most important unfinished task, asks a coding assistant (the agent, such as Claude, Devin, or a model on your own computer) to do it, and hands you a draft to review. It never merges anything without you.
+
+Each section below is a path for one kind of reader: new here, installing, working on the code as an agent, studying the architecture, contributing, comparing tools, operating in production, or going deep on one topic. Every entry says what the doc is, who it's for, and roughly how long it takes to read. Pick the path that matches you.
+
+## What this is not
+
+- Not the product README — that one-pager lives at [README.md](../README.md) in the repo root.
+- Not the rulebook — the 17 non-negotiable rules live in [vision.md](../vision.md); this page only links to them.
+- Not the roadmap — that is [MILESTONES.md](../MILESTONES.md).
 
 ## I'm new here — what is Minsky?
 
@@ -11,14 +21,14 @@ Read these three, in order. Total time: ~12 minutes.
 | # | Doc | What you learn | Time |
 |---|---|---|---|
 | 1 | [README.md](../README.md) | What Minsky does, how it's installed, what works today. The honest one-pager. | ~3 min |
-| 2 | [vision.md](../vision.md) § "What Minsky is" | The strategic shape — plug-and-play repo transformer, daemon that self-improves, NOT a framework. | ~2 min |
+| 2 | [vision.md](../vision.md) § "What Minsky is" | The strategic shape — plug-and-play repo transformer, a daemon that studies and improves its own results, NOT a framework. | ~2 min |
 | 3 | [MILESTONES.md](../MILESTONES.md) | The roadmap. Which milestone Minsky is in (M1 = stable, measurable, one-command), how progress is measured. | ~5 min |
 
 Optionally: [docs/PRACTICES.md](PRACTICES.md) (~3 min) — the literature anchors. Every Minsky decision cites a named, published practice; this is the index.
 
 ## I want to install Minsky on my repo
 
-Two paths.
+A host is one code project (one git repository) that Minsky works on. Two ways to set one up.
 
 **Through your AI agent** (fastest):
 
@@ -39,18 +49,18 @@ Read in this order. Total: ~20 minutes.
 
 | # | Doc | Why |
 |---|---|---|
-| 1 | [AGENTS.md](../AGENTS.md) | The agent runbook. Setup, running, claiming tasks, the 17 constitutional rules. **Load-bearing — CI gates cite section headings here.** |
+| 1 | [AGENTS.md](../AGENTS.md) | The agent runbook. Setup, running, claiming tasks, the 17 constitutional rules (the numbered, non-negotiable project rules). **Load-bearing — CI gates cite section headings here.** |
 | 2 | [MILESTONES.md](../MILESTONES.md) | What milestone we're in, what's blocking it. Read before picking a task. |
 | 3 | [DEPRECATED.md](./DEPRECATED.md) | What NOT to invest in. Check this before implementing anything. |
-| 4 | [TASKS.md](../TASKS.md) | The work queue. Sorted P0 → P3. Pick the top unclaimed task with all rule-9 fields filled in. |
+| 4 | [TASKS.md](../TASKS.md) | The plain-text to-do list Minsky reads to pick work. Sorted P0 → P3. Pick the top unclaimed task with all rule-9 fields filled in. |
 
-Then read [vision.md](../vision.md) at your own pace — the 17 constitutional rules each get enforced by a deterministic CI lint, so you can also discover the rules by reading the lint output.
+Then read [vision.md](../vision.md) at your own pace. Each of the 17 rules is enforced by a deterministic CI lint, so you can also discover the rules by reading the lint output.
 
 ## I want to understand the architecture
 
 | Doc | What it covers |
 |---|---|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Layered model, adapter pattern, the dependency table. Where each tool plugs in. |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Layered model, the adapter pattern (a small wrapper that lets Minsky swap one outside tool for another in one file), the dependency table. Where each tool plugs in. |
 | [vision.md § "Pattern conformance index"](../vision.md#pattern-conformance-index) | Every artifact in the repo + the named published pattern it implements. |
 | [vision.md § "What Minsky is"](../vision.md#what-minsky-is) | The plug-and-play repo transformer thesis. |
 | [docs/PRACTICES.md](PRACTICES.md) | Every published software-engineering practice Minsky applies + its enforcement point. |
@@ -86,7 +96,7 @@ For the **moats as user stories** with chaos coverage + pre-registered umbrella 
 | [docs/dependency-policy.md](dependency-policy.md) | Semver triage — which bumps auto-merge, which need the operator. |
 | [docs/local-llm-fallback.md](local-llm-fallback.md) | What happens when the cloud quota runs out. |
 | [docs/daemon-pre-pr-gate.md](daemon-pre-pr-gate.md) | The 53-step pre-PR lint stack the daemon runs before pushing. |
-| [docs/cross-repo-portability.md](cross-repo-portability.md) | Running Minsky across multiple repos. |
+| [docs/cross-repo-portability.md](cross-repo-portability.md) | Running Minsky across multiple hosts. |
 | [docs/metrics-discipline.md](metrics-discipline.md) | How metrics are measured and surfaced. |
 | [docs/strategic-model-router.md](strategic-model-router.md) | Which model gets used for which task. |
 | [docs/self-diagnose-throughput-invariants.md](self-diagnose-throughput-invariants.md) | `minsky doctor` — what it checks. |
@@ -102,14 +112,14 @@ For the **moats as user stories** with chaos coverage + pre-registered umbrella 
 | [docs/experiment-runner.md](experiment-runner.md) | How `experiments/<id>.yaml` flows through the runner. |
 | [docs/experiment-tracker.md](experiment-tracker.md) | The experiment record-keeping substrate. |
 | [docs/host-transformation-checklist.md](host-transformation-checklist.md) | What "transformed" looks like for a host repo. |
-| [docs/post-task-cto-audit.md](post-task-cto-audit.md) | The CTO-style after-task audit that surfaces new tasks. |
+| [docs/post-task-cto-audit.md](post-task-cto-audit.md) | The after-task audit that surfaces new tasks. |
 | [docs/run-anywhere.md](run-anywhere.md) | Portability story across machines / OSes. |
 | [docs/rule-11-flake-detection.md](rule-11-flake-detection.md) | Rule #11 — no flaky gates. |
 | [docs/README-v1-detailed.md](README-v1-detailed.md) | The earlier, more verbose README — kept for reference. |
 
 ## I want to understand the rules
 
-[vision.md](../vision.md) is the constitution. 17 non-negotiable rules. Each rule is enforced by a deterministic CI lint that runs on every iteration. The constitution is the project specification; the linters monitor execution against it at runtime (Havelund & Goldberg, 2008).
+[vision.md](../vision.md) is the constitution: 17 non-negotiable rules. Each rule is enforced by a deterministic CI lint that runs on every iteration (one round of work: pick a task, ask an agent to do it, open a draft). The constitution is the project specification; the linters monitor execution against it at runtime (Havelund & Goldberg, 2008).
 
 A cheat-sheet of the 17 rules, with links:
 
