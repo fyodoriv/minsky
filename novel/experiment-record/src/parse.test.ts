@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +9,10 @@ import { parse } from "./parse.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureDir = join(here, "..", "test", "fixtures");
 const fx = (name: string) => readFileSync(join(fixtureDir, name), "utf8");
+
+// Repo root, relative to novel/experiment-record/src/.
+const repoRoot = join(here, "..", "..", "..");
+const liveExperimentsDir = join(repoRoot, "experiments");
 
 describe("parse — valid fixtures", () => {
   it.each(["valid-1.yaml", "valid-2.yaml", "valid-3.yaml"])("parses %s with no errors", (name) => {
@@ -39,6 +43,32 @@ describe("parse — valid fixtures", () => {
     const r2 = parse(fx("valid-3.yaml"));
     if (!r2.ok) throw new Error("expected valid");
     expect(r2.record.replay_windows_days).toEqual([7]);
+  });
+});
+
+describe("parse — real-world-derived fixtures", () => {
+  // REAL-WORLD FIXTURE: the synthetic valid-*.yaml fixtures above are convenient
+  // literals that can drift from the live record shape (Fake Fixture smell,
+  // Meszaros 2007). These cases feed the parser minsky's own `experiments/*.yaml`
+  // — the actual pre-registration records the daemon writes — so a format change
+  // in a live record (a new field, a comment shape the YAML loader chokes on)
+  // fails here instead of passing green against synthetic-only input.
+  const liveFiles = readdirSync(liveExperimentsDir).filter((n) => n.endsWith(".yaml"));
+
+  it("the live experiments/ corpus is non-empty (guards an empty glob)", () => {
+    expect(liveFiles.length).toBeGreaterThan(0);
+  });
+
+  it.each(liveFiles)("parses live experiments/%s with no errors", (name) => {
+    const result = parse(readFileSync(join(liveExperimentsDir, name), "utf8"));
+    if (!result.ok) {
+      throw new Error(
+        `live record ${name} failed to parse: ${JSON.stringify(result.errors, null, 2)}`,
+      );
+    }
+    expect(result.record.id).toMatch(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/);
+    expect(result.record.hypothesis.length).toBeGreaterThanOrEqual(20);
+    expect(result.record.replay_windows_days.length).toBeGreaterThan(0);
   });
 });
 
