@@ -214,6 +214,26 @@ The daemon's stock brief (`buildDaemonBrief` in `daemon.ts`) is ~7-10KB of conte
 
 The substrate works; the brief shape doesn't. **Pivot threshold (rule #9):** if rolling-7d p95 of `local-spawn-timeout` count > 5/day across all workers, ship `daemon-aider-brief-shrinker` (filed as P0 in TASKS.md) that produces a slim brief (~≤2 KB, no gates, no templates) specifically for the aider path. The threshold has already been tripped by the 2026-05-07 live run; the task is queued.
 
+## Concurrency-aware worker spawn — per-backend caps
+
+When the daemon routes **local-only** (`MINSKY_LLM_PROVIDER=local-preferred` / `local-only`), the number of workers the machine-budget autoscaler ramps to must not exceed what the local inference server can run **concurrently**. `mlx_lm.server` and stock LM Studio serialise inference — one request in flight at a time — so N local-routed workers all queue behind a single inference loop, and effective throughput collapses to ~1/N (Little's Law: past the server's concurrency, extra workers add only contention, not throughput).
+
+The autoscaler closes this gap with an optional `localServerConcurrencyCap` field on `AutoscalerState` (`novel/tick-loop/src/machine-budget-autoscaler.ts`). When set, `computeWorkerTarget` bounds the worker ceiling to `min(maxWorkersForBudget(cores, budgetPct), cap)` in **every** regime (ramp-up holds at the cap, knee-hold/at-budget clamp a stale higher target back down, gridlock-backoff still halves but within the capped ceiling). With no cap (cloud routing, or a concurrent backend) the controller free-runs to the budget ceiling exactly as before.
+
+Per-backend cap matrix:
+
+| Backend | Concurrent inference? | Recommended `localServerConcurrencyCap` |
+| --- | --- | --- |
+| `mlx_lm.server` (this machine's default) | No — single request in flight | `1` |
+| LM Studio (stock) | No — single request in flight | `1` |
+| LM Studio Pro / server mode | Sometimes — depends on the loaded model + GPU layers | `1` unless the build advertises concurrent decoding |
+| [vLLM](https://github.com/vllm-project/vllm) | Yes — continuous batching | operator-set, sized to GPU memory (e.g. `4`–`8`) |
+| [SGLang](https://github.com/sgl-project/sglang) | Yes — RadixAttention batching | operator-set, sized to GPU memory |
+
+The edge (the launchd/config read in `bin/tick-loop.mjs`) owns the default: `1` for mlx/LM-Studio, raised only when the operator has migrated to a concurrent backend. Leaving the cap `undefined` means "cap inactive" — correct for cloud routing. The companion self-diagnose invariant `local-server-concurrency-mismatch` (`scripts/self-diagnose.mjs`) fires the other direction: it warns when `MINSKY_LOCAL_SERVER_MAX_CONCURRENT` is set ≥2 but the probed backend advertises no concurrency hint, i.e. the operator over-promised a single-inference server's capacity.
+
+**Pivot (rule #9):** if vLLM-class concurrent-inference backends become the operator default, the fixed default-1 cap would throttle them wrongly. Decision boundary: ≥2 operator reports of an over-throttled concurrent backend in 30 days → abandon the static default and switch to probe-based cap discovery (read the server's advertised `max_concurrent_requests` and use it as the cap).
+
 ## Worktree lifecycle — the local path owns it
 
 The **claude** spawn path gets a per-worker git worktree for free: `claude --worktree <name>` makes Claude Code create it. The **local** path (`MINSKY_LLM_PROVIDER=local-preferred`, aider / opencode) takes the `--worktree` arg out of the equation, so **the local path owns its own worktree lifecycle** — nothing else creates it.

@@ -20,6 +20,10 @@ import build_brief  # noqa: E402  pylint: disable=wrong-import-position
 import pick_task  # noqa: E402  pylint: disable=wrong-import-position
 
 
+REPO_ROOT = Path(__file__).parent.parent
+LIVE_TASKS_MD = REPO_ROOT / "TASKS.md"
+
+
 SAMPLE_TASKS_MD = """# Tasks
 
 ## P0
@@ -705,3 +709,28 @@ def test_build_brief_persona_cli_smoke(tmp_path: Path) -> None:
     )
     assert bad.returncode != 0
     assert "unknown persona role" in bad.stderr
+
+
+# --- Real-world-derived fixture -------------------------------------------
+
+
+def test_render_brief_from_live_tasks_md_real_world_fixture() -> None:
+    """REAL-WORLD FIXTURE: build a brief from a task block in minsky's own live
+    TASKS.md, not the SAMPLE_TASKS_MD literal.
+
+    SAMPLE_TASKS_MD is a convenient hand-written shape that drifts from the real
+    file (Fake Fixture smell, Meszaros 2007). Picking a live task and rendering
+    its brief proves the picker -> brief pipeline survives the actual task-block
+    format the daemon feeds an agent spawn, catching drift the synthetic misses.
+    """
+    assert LIVE_TASKS_MD.is_file()
+    content = LIVE_TASKS_MD.read_text(encoding="utf-8")
+    task = pick_task.pick_host_task(content)
+    assert task is not None, "live TASKS.md yielded no pickable task"
+    assert pick_task.is_rule_9_compliant(task)
+
+    brief = build_brief.render_brief(task, "fyodoriv/minsky", f"feat/{task.id}")
+    assert f"# Task: {task.id}" in brief
+    assert "## Hypothesis (rule #9)" in brief
+    assert "## Measurement" in brief
+    assert task.hypothesis is not None and task.hypothesis in brief

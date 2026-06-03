@@ -161,6 +161,8 @@ EOF
 
 Pick the `agent` value matching the AI agent that's running you right now: `claude` if you're Claude Code, `devin` if you're Devin, `cursor` if you're inside Cursor, `aider` if you're Aider with a local Ollama model, etc. The operator can change it later; default to `claude` if unsure.
 
+To express the operator's full preference — including the local-LLM fallback (`local_llm_enabled`, `local_llm.model`, `local_llm.base_url`) and `cloud_agent` — in one editable file, copy the annotated [`docs/example-config.json`](docs/example-config.json) to `~/.minsky/config.json` and edit it. See [docs/configuration.md § Local-LLM fallback keys](docs/configuration.md) for every key, its default, and the `MINSKY_LOCAL_LLM` env override. Verify the file is honored with no agent spawn: `MINSKY_CONFIG=~/.minsky/config.json DRY_RUN=1 "$INSTALL_DIR/bin/minsky-run.sh" --once --dry-run`.
+
 ## Step 5 — telemetry consent (the one human prompt)
 
 This is the ONE place you must pause and ask the operator. Read this prompt to them VERBATIM (do not paraphrase):

@@ -6,6 +6,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   type AutoscalerState,
+  boundWorkerCeiling,
   computeWorkerTarget,
   GRIDLOCK_LOAD_MULTIPLE,
   MACHINE_BUDGET_POLICY,
@@ -171,6 +172,129 @@ describe("computeWorkerTarget — gridlock backoff", () => {
         recentPrRate: 0,
       }),
     );
+    expect(d.target).toBe(1);
+  });
+});
+
+describe("boundWorkerCeiling — local-server concurrency cap", () => {
+  test("no cap returns the budget ceiling unchanged", () => {
+    expect(boundWorkerCeiling(state({ cores: 10, budgetPct: 70 }))).toBe(7);
+  });
+
+  test("cap lowers the ceiling below the budget ceiling", () => {
+    expect(
+      boundWorkerCeiling(state({ cores: 10, budgetPct: 70, localServerConcurrencyCap: 1 })),
+    ).toBe(1);
+  });
+
+  test("budget ceiling wins when it is below the cap", () => {
+    // 2 cores @ 70% → budget ceiling 1; a cap of 4 cannot raise it.
+    expect(
+      boundWorkerCeiling(state({ cores: 2, budgetPct: 70, localServerConcurrencyCap: 4 })),
+    ).toBe(1);
+  });
+
+  test("cap of 0 or negative is floored to 1 (never 'never run')", () => {
+    expect(
+      boundWorkerCeiling(state({ cores: 10, budgetPct: 70, localServerConcurrencyCap: 0 })),
+    ).toBe(1);
+    expect(
+      boundWorkerCeiling(state({ cores: 10, budgetPct: 70, localServerConcurrencyCap: -3 })),
+    ).toBe(1);
+  });
+
+  test("non-finite cap is ignored (budget ceiling used)", () => {
+    expect(
+      boundWorkerCeiling(
+        state({ cores: 10, budgetPct: 70, localServerConcurrencyCap: Number.NaN }),
+      ),
+    ).toBe(7);
+  });
+});
+
+describe("computeWorkerTarget — localServerConcurrencyCap (all three regimes)", () => {
+  test("ramp-up: never ramps past the cap of 1 even with rising throughput", () => {
+    const d = computeWorkerTarget(
+      state({
+        loadAvg: 1,
+        lastTargets: [1],
+        recentActiveSubprocs: 1,
+        recentPrRate: 1,
+        localServerConcurrencyCap: 1,
+      }),
+    );
+    // current=1 already at the capped ceiling → hold at 1, no ramp to 2.
+    expect(d.target).toBe(1);
+    expect(d.target).toBeLessThanOrEqual(1);
+  });
+
+  test("ramp-up: cap of 2 lets the ramp reach 2 then holds", () => {
+    const d = computeWorkerTarget(
+      state({
+        loadAvg: 1,
+        lastTargets: [1],
+        recentActiveSubprocs: 2,
+        recentPrRate: 1,
+        localServerConcurrencyCap: 2,
+      }),
+    );
+    expect(d.reason).toBe("ramp-up");
+    expect(d.target).toBe(2);
+    // A subsequent step at the cap holds rather than ramping to 3.
+    const next = computeWorkerTarget(
+      state({
+        loadAvg: 1,
+        lastTargets: [2],
+        recentActiveSubprocs: 2,
+        recentPrRate: 1,
+        localServerConcurrencyCap: 2,
+      }),
+    );
+    expect(next.target).toBeLessThanOrEqual(2);
+  });
+
+  test("knee-hold: a prior over-cap target is clamped down to the cap", () => {
+    // lastTargets[6] is above the cap (an uncapped history); the cap must
+    // pull the next target back to 1, not let the stale higher target ride.
+    const d = computeWorkerTarget(
+      state({
+        loadAvg: 4,
+        lastTargets: [6],
+        recentActiveSubprocs: 2,
+        recentPrRate: 0,
+        localServerConcurrencyCap: 1,
+      }),
+    );
+    expect(d.target).toBe(1);
+  });
+
+  test("at-budget: utilisation at/above budget still respects the cap", () => {
+    const d = computeWorkerTarget(
+      state({
+        loadAvg: 8,
+        lastTargets: [5],
+        recentActiveSubprocs: 5,
+        recentPrRate: 2,
+        localServerConcurrencyCap: 1,
+      }),
+    );
+    expect(d.reason).toBe("at-budget");
+    expect(d.target).toBe(1);
+  });
+
+  test("gridlock-backoff: backoff floor never exceeds the cap", () => {
+    const d = computeWorkerTarget(
+      state({
+        budgetPct: 100,
+        loadAvg: 10 * GRIDLOCK_LOAD_MULTIPLE + 21,
+        lastTargets: [8],
+        recentActiveSubprocs: 0,
+        recentPrRate: 0,
+        localServerConcurrencyCap: 1,
+      }),
+    );
+    expect(d.reason).toBe("gridlock-backoff");
+    // floor(8/2)=4, but the cap clamps it to 1.
     expect(d.target).toBe(1);
   });
 });
