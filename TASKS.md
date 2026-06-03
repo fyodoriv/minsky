@@ -87,94 +87,94 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- ===================================================================== -->
 
 - [ ] `obs-run-session-ledger` — give every supervised run ONE consolidated log + a `run-summary.json` (uptime, restarts, throughput), so an 8h run is one readable record instead of scattered JSONL
-  **ID**: obs-run-session-ledger
-  **Tags**: p0, observability, stability, run-metrics, milestone-m1
-  **Milestone**: M1
-  **Touches**: `scripts/run-summary.mjs`, `scripts/run-summary.test.mjs`, `scripts/orchestrate.mjs`, `docs/observability-8h-run.md`
-  **Competitive-goal**: feeds `daemon-stability-pct` + `deploy-frequency` — without a per-run uptime/throughput record, Minsky's own scorecard column stays empty.
-  **Hypothesis**: a run's evidence is scattered across `.minsky/orchestrate.jsonl`, `experiment-store/*.jsonl`, `.minsky/failures/`, and raw `.out/.err` logs, so "how long did it run uninterrupted and how many tasks shipped?" needs manual jq across ≥4 sources. A single `.minsky/runs/<run-id>/` (consolidated `run.log` + `run-summary.json`) makes both answerable with one command.
-  **Success**: after a run, `.minsky/runs/<run-id>/run-summary.json` contains `{ runId, startedAt, endedAt, totalUptimeSec, longestUninterruptedSec, restartCount, tasksAttempted, tasksMerged }`, all derived from existing ledgers; `run.log` interleaves orchestrate + tick-loop + failure events in timestamp order.
-  **Pivot**: if a faithful consolidated log can't be derived from append-only ledgers (interleave races, missing ts), emit `run-summary.json` only and have the dashboard link the source ledgers — do NOT maintain a second write path that can drift from the ledgers.
-  **Measurement**: `node scripts/run-summary.mjs --run latest --json | jq -e '.longestUninterruptedSec >= 0 and .tasksMerged >= 0 and (.runId|length>0)'` exits 0 after a run.
-  **Anchor**: Avizienis, Laprie, Randell, Landwehr, "Basic Concepts and Taxonomy of Dependable and Secure Computing", IEEE TDSC 2004 (continuity/uptime as a dependability attribute); rule #4 (metrics must be visible).
-  **Details**: Reuse existing data — no parallel hot-loop instrumentation. `scripts/run-summary.mjs` reads `.minsky/orchestrate.jsonl` (tick ts, workerAlive, healed, merged[]), `.minsky/runany-restart-state.json` (restartIndex, originMs), and `experiment-store/cross-repo/*.jsonl` (verdicts) for the active run, then writes `run-summary.json` + a ts-ordered `run.log`. Longest-uninterrupted = max span between consecutive restart/`healed:true` events. Throughput = count of merged PRs.
-  **Files**: `scripts/run-summary.mjs` (new), `scripts/run-summary.test.mjs` (new), `scripts/orchestrate.mjs` (stamp run-id at run start), `docs/observability-8h-run.md`.
-  **Acceptance**: (a) schema as in Success, derived purely from existing ledgers; (b) deterministic unit test over fixture ledgers (known input → known uptime/throughput); (c) surfaced on the dashboard (`obs-browser-verified-run-dashboard`) and agent-browser-verified; (d) documented in `docs/observability-8h-run.md`; (e) graceful-degrade: missing ledger → field `null`, never a crash.
+  - **ID**: obs-run-session-ledger
+  - **Tags**: p0, observability, stability, run-metrics, milestone-m1
+  - **Milestone**: M1
+  - **Touches**: `scripts/run-summary.mjs`, `scripts/run-summary.test.mjs`, `scripts/orchestrate.mjs`, `docs/observability-8h-run.md`
+  - **Competitive-goal**: feeds `daemon-stability-pct` + `deploy-frequency` — without a per-run uptime/throughput record, Minsky's own scorecard column stays empty.
+  - **Hypothesis**: a run's evidence is scattered across `.minsky/orchestrate.jsonl`, `experiment-store/*.jsonl`, `.minsky/failures/`, and raw `.out/.err` logs, so "how long did it run uninterrupted and how many tasks shipped?" needs manual jq across ≥4 sources. A single `.minsky/runs/<run-id>/` (consolidated `run.log` + `run-summary.json`) makes both answerable with one command.
+  - **Success**: after a run, `.minsky/runs/<run-id>/run-summary.json` contains `{ runId, startedAt, endedAt, totalUptimeSec, longestUninterruptedSec, restartCount, tasksAttempted, tasksMerged }`, all derived from existing ledgers; `run.log` interleaves orchestrate + tick-loop + failure events in timestamp order.
+  - **Pivot**: if a faithful consolidated log can't be derived from append-only ledgers (interleave races, missing ts), emit `run-summary.json` only and have the dashboard link the source ledgers — do NOT maintain a second write path that can drift from the ledgers.
+  - **Measurement**: `node scripts/run-summary.mjs --run latest --json | jq -e '.longestUninterruptedSec >= 0 and .tasksMerged >= 0 and (.runId|length>0)'` exits 0 after a run.
+  - **Anchor**: Avizienis, Laprie, Randell, Landwehr, "Basic Concepts and Taxonomy of Dependable and Secure Computing", IEEE TDSC 2004 (continuity/uptime as a dependability attribute); rule #4 (metrics must be visible).
+  - **Details**: Reuse existing data — no parallel hot-loop instrumentation. `scripts/run-summary.mjs` reads `.minsky/orchestrate.jsonl` (tick ts, workerAlive, healed, merged[]), `.minsky/runany-restart-state.json` (restartIndex, originMs), and `experiment-store/cross-repo/*.jsonl` (verdicts) for the active run, then writes `run-summary.json` + a ts-ordered `run.log`. Longest-uninterrupted = max span between consecutive restart/`healed:true` events. Throughput = count of merged PRs.
+  - **Files**: `scripts/run-summary.mjs` (new), `scripts/run-summary.test.mjs` (new), `scripts/orchestrate.mjs` (stamp run-id at run start), `docs/observability-8h-run.md`.
+  - **Acceptance**: (a) schema as in Success, derived purely from existing ledgers; (b) deterministic unit test over fixture ledgers (known input → known uptime/throughput); (c) surfaced on the dashboard (`obs-browser-verified-run-dashboard`) and agent-browser-verified; (d) documented in `docs/observability-8h-run.md`; (e) graceful-degrade: missing ledger → field `null`, never a crash.
 
 - [ ] `obs-error-capture-and-reporter` — capture the FULL list of errors a run hits (untruncated, classified) and report them off-box via a swappable `ErrorReporter` adapter (Sentry + local-file strategies)
-  **ID**: obs-error-capture-and-reporter
-  **Tags**: p0, observability, errors, sentry, adapter, stability, milestone-m1
-  **Milestone**: M1
-  **Touches**: `novel/adapters/error-reporter/**`, `scripts/export-run-errors.mjs`, `scripts/orchestrate.mjs`, `scripts/capture-failure.sh`, `docs/observability-8h-run.md`
-  **Competitive-goal**: feeds `change-fail-rate` / `regression-escape-rate` — an error budget is uncomputable without a complete, classified error ledger.
-  **Hypothesis**: caught errors are truncated today (orchestrate.jsonl `sweepError` ≤200 chars, experiment-store notes ≤100 chars) and `.minsky/failures/` is ring-limited to 20, so a long run silently loses error detail and nothing leaves the box. A full `errors.jsonl` (untruncated text + class + exit code + duration) plus an `ErrorReporter` adapter shipping each error to Sentry means zero detail lost and errors visible off-box.
-  **Success**: every caught error appends one full row to `.minsky/runs/<run-id>/errors.jsonl` `{ ts, runId, taskId, class, message, stack?, exitCode?, durationMs? }`; an `ErrorReporter` adapter (`novel/adapters/error-reporter/`) with `SentryErrorReporter` + `FileErrorReporter` strategies is wired into the orchestrate tick catch and `capture-failure.sh`; `count(errors.jsonl) == count(reporter sink events)`.
-  **Pivot**: if hosted Sentry is unavailable or conflicts with the local-first preference, default the adapter to a self-hostable strategy (GlitchTip / OpenObserve OTLP / `FileErrorReporter`) — the interface is the deliverable, the SaaS is swappable; never hard-couple the hot loop to one vendor.
-  **Measurement**: `node novel/adapters/error-reporter/dist/selftest.js` exits 0, and `node scripts/export-run-errors.mjs --run latest --json | jq 'length'` equals `jq 'length' .minsky/runs/<id>/errors-reported.jsonl` (FileErrorReporter sink).
-  **Anchor**: Majors, Fong-Jones, Miranda, "Observability Engineering", O'Reilly 2022 (high-cardinality error events); rule #2 (every external dependency behind an adapter interface).
-  **Details**: New `novel/adapters/error-reporter/` with `interface ErrorReporter { report(err, ctx): Promise<void>; selfTest() }`, a `SentryErrorReporter` (wraps `@sentry/node captureException`), and a `FileErrorReporter` (appends `errors-reported.jsonl`) as the offline default. Wire into `scripts/orchestrate.mjs` tick catch and `capture-failure.sh`. Classify errors (spawn-failed / lint-failed / timeout / gate-failed / crash). No secrets in payloads (reuse `check-otel-no-pii` discipline).
-  **Files**: `novel/adapters/error-reporter/src/{index,sentry,file,selftest}.ts` (new), `scripts/export-run-errors.mjs` (new), `scripts/orchestrate.mjs`, `scripts/capture-failure.sh`, `docs/observability-8h-run.md`.
-  **Acceptance**: (a) interface + 2 strategies + selfTest; (b) full untruncated classified `errors.jsonl`; (c) wired into tick + capture-failure; (d) no-PII lint passes on payloads; (e) errors visible in the external sink AND on the dashboard, agent-browser-verified; (f) documented; (g) graceful-degrade: a reporter failure never crashes the run (rule #6 — log locally, continue).
+  - **ID**: obs-error-capture-and-reporter
+  - **Tags**: p0, observability, errors, sentry, adapter, stability, milestone-m1
+  - **Milestone**: M1
+  - **Touches**: `novel/adapters/error-reporter/**`, `scripts/export-run-errors.mjs`, `scripts/orchestrate.mjs`, `scripts/capture-failure.sh`, `docs/observability-8h-run.md`
+  - **Competitive-goal**: feeds `change-fail-rate` / `regression-escape-rate` — an error budget is uncomputable without a complete, classified error ledger.
+  - **Hypothesis**: caught errors are truncated today (orchestrate.jsonl `sweepError` ≤200 chars, experiment-store notes ≤100 chars) and `.minsky/failures/` is ring-limited to 20, so a long run silently loses error detail and nothing leaves the box. A full `errors.jsonl` (untruncated text + class + exit code + duration) plus an `ErrorReporter` adapter shipping each error to Sentry means zero detail lost and errors visible off-box.
+  - **Success**: every caught error appends one full row to `.minsky/runs/<run-id>/errors.jsonl` `{ ts, runId, taskId, class, message, stack?, exitCode?, durationMs? }`; an `ErrorReporter` adapter (`novel/adapters/error-reporter/`) with `SentryErrorReporter` + `FileErrorReporter` strategies is wired into the orchestrate tick catch and `capture-failure.sh`; `count(errors.jsonl) == count(reporter sink events)`.
+  - **Pivot**: if hosted Sentry is unavailable or conflicts with the local-first preference, default the adapter to a self-hostable strategy (GlitchTip / OpenObserve OTLP / `FileErrorReporter`) — the interface is the deliverable, the SaaS is swappable; never hard-couple the hot loop to one vendor.
+  - **Measurement**: `node novel/adapters/error-reporter/dist/selftest.js` exits 0, and `node scripts/export-run-errors.mjs --run latest --json | jq 'length'` equals `jq 'length' .minsky/runs/<id>/errors-reported.jsonl` (FileErrorReporter sink).
+  - **Anchor**: Majors, Fong-Jones, Miranda, "Observability Engineering", O'Reilly 2022 (high-cardinality error events); rule #2 (every external dependency behind an adapter interface).
+  - **Details**: New `novel/adapters/error-reporter/` with `interface ErrorReporter { report(err, ctx): Promise<void>; selfTest() }`, a `SentryErrorReporter` (wraps `@sentry/node captureException`), and a `FileErrorReporter` (appends `errors-reported.jsonl`) as the offline default. Wire into `scripts/orchestrate.mjs` tick catch and `capture-failure.sh`. Classify errors (spawn-failed / lint-failed / timeout / gate-failed / crash). No secrets in payloads (reuse `check-otel-no-pii` discipline).
+  - **Files**: `novel/adapters/error-reporter/src/{index,sentry,file,selftest}.ts` (new), `scripts/export-run-errors.mjs` (new), `scripts/orchestrate.mjs`, `scripts/capture-failure.sh`, `docs/observability-8h-run.md`.
+  - **Acceptance**: (a) interface + 2 strategies + selfTest; (b) full untruncated classified `errors.jsonl`; (c) wired into tick + capture-failure; (d) no-PII lint passes on payloads; (e) errors visible in the external sink AND on the dashboard, agent-browser-verified; (f) documented; (g) graceful-degrade: a reporter failure never crashes the run (rule #6 — log locally, continue).
 
 - [ ] `obs-cost-and-latency-per-task` — measure cost-per-task (USD/tokens) and per-task speed (latency) live, by joining the existing token-monitor adapter with ledger timestamps
-  **ID**: obs-cost-and-latency-per-task
-  **Tags**: p0, observability, cost, latency, run-metrics, milestone-m1
-  **Milestone**: M1
-  **Touches**: `scripts/run-summary.mjs`, `novel/adapters/token-monitor/src/index.ts`, `docs/observability-8h-run.md`
-  **Competitive-goal**: fills `cost-per-merged-pr` + `mean-autonomous-merge-latency` — the two metrics most quoted against Devin/OpenHands.
-  **Hypothesis**: `tokens-per-story` and `mttr` are STUBs ("no OTEL backend"), yet the data exists — MaciekTokenMonitor reads per-session token usage and the ledgers carry per-iteration timestamps. Joining them per task makes cost-per-task and latency real numbers.
-  **Success**: `run-summary.json` gains `perTask: [{ taskId, costUsd, tokensIn, tokensOut, latencySec }]` plus roll-ups `meanCostPerMergedPr` + `meanMergeLatencySec`, derived from token-monitor snapshots + ledger ts (no new hot-loop calls).
-  **Pivot**: if per-task token attribution is ambiguous (a session spans multiple tasks), amortize session cost across that session's merged tasks and LABEL it `costAttribution: "amortized"` — never report false-precision per-task cost.
-  **Measurement**: `node scripts/run-summary.mjs --run latest --json | jq -e '.meanCostPerMergedPr >= 0 and .meanMergeLatencySec >= 0'` exits 0.
-  **Anchor**: Kohavi, Tang, Xu, "Trustworthy Online Controlled Experiments", Cambridge 2020 (cost/latency as first-class metrics); rule #4.
-  **Details**: Extend `scripts/run-summary.mjs` (from `obs-run-session-ledger`) to read `novel/adapters/token-monitor` snapshots and join on the task window. Cost in USD via the model's published per-token price (config, not hardcoded). Latency = `merged_ts − task_pick_ts` from the ledger.
-  **Files**: `scripts/run-summary.mjs`, `novel/adapters/token-monitor/src/index.ts` (expose per-window usage if needed), `docs/observability-8h-run.md`.
-  **Acceptance**: (a) perTask cost+latency + roll-ups; (b) attribution method labeled; (c) dashboard tiles + agent-browser verification; (d) documented; (e) deterministic test over a fixture session+ledger pair.
+  - **ID**: obs-cost-and-latency-per-task
+  - **Tags**: p0, observability, cost, latency, run-metrics, milestone-m1
+  - **Milestone**: M1
+  - **Touches**: `scripts/run-summary.mjs`, `novel/adapters/token-monitor/src/index.ts`, `docs/observability-8h-run.md`
+  - **Competitive-goal**: fills `cost-per-merged-pr` + `mean-autonomous-merge-latency` — the two metrics most quoted against Devin/OpenHands.
+  - **Hypothesis**: `tokens-per-story` and `mttr` are STUBs ("no OTEL backend"), yet the data exists — MaciekTokenMonitor reads per-session token usage and the ledgers carry per-iteration timestamps. Joining them per task makes cost-per-task and latency real numbers.
+  - **Success**: `run-summary.json` gains `perTask: [{ taskId, costUsd, tokensIn, tokensOut, latencySec }]` plus roll-ups `meanCostPerMergedPr` + `meanMergeLatencySec`, derived from token-monitor snapshots + ledger ts (no new hot-loop calls).
+  - **Pivot**: if per-task token attribution is ambiguous (a session spans multiple tasks), amortize session cost across that session's merged tasks and LABEL it `costAttribution: "amortized"` — never report false-precision per-task cost.
+  - **Measurement**: `node scripts/run-summary.mjs --run latest --json | jq -e '.meanCostPerMergedPr >= 0 and .meanMergeLatencySec >= 0'` exits 0.
+  - **Anchor**: Kohavi, Tang, Xu, "Trustworthy Online Controlled Experiments", Cambridge 2020 (cost/latency as first-class metrics); rule #4.
+  - **Details**: Extend `scripts/run-summary.mjs` (from `obs-run-session-ledger`) to read `novel/adapters/token-monitor` snapshots and join on the task window. Cost in USD via the model's published per-token price (config, not hardcoded). Latency = `merged_ts − task_pick_ts` from the ledger.
+  - **Files**: `scripts/run-summary.mjs`, `novel/adapters/token-monitor/src/index.ts` (expose per-window usage if needed), `docs/observability-8h-run.md`.
+  - **Acceptance**: (a) perTask cost+latency + roll-ups; (b) attribution method labeled; (c) dashboard tiles + agent-browser verification; (d) documented; (e) deterministic test over a fixture session+ledger pair.
 
 - [ ] `obs-result-quality-score` — attach a result-quality score to each merged task so the run reports quality, not just quantity
-  **ID**: obs-result-quality-score
-  **Tags**: p0, observability, quality, run-metrics, milestone-m1
-  **Milestone**: M1
-  **Touches**: `scripts/run-summary.mjs`, `docs/observability-8h-run.md`
-  **Competitive-goal**: feeds `gate-pass-rate` + `change-fail-rate` — quality is the axis competitors compete on, currently a `—` in Minsky's column.
-  **Hypothesis**: current run signals are structural (files changed, CI green) and don't answer "was the work good?". A composite quality score per merged task (first-push CI green × PR self-grade × tests-added × no same-day revert) yields one comparable quality number.
-  **Success**: `run-summary.json` `perTask[].quality` ∈ [0,1] from those components, plus roll-up `meanQuality`; component breakdown stored alongside.
-  **Pivot**: if a component needs human input, ship the objective sub-score (CI-green × tests-added × no-revert) and mark the review component `null` — partial-but-honest beats unmeasured.
-  **Measurement**: `node scripts/run-summary.mjs --run latest --json | jq -e '.meanQuality >= 0 and .meanQuality <= 1'` exits 0.
-  **Anchor**: Forsgren, Humble, Kim, "Accelerate", 2018 (change-fail-rate / quality as a delivery metric, not a vanity count); rule #4.
-  **Details**: Extend `run-summary.mjs`. Reuse the existing `pr-self-grade` lint output and `spec-alignment` CI data; detect tests-added from the diff; detect reverts from git log. Composite weights documented + configurable.
-  **Files**: `scripts/run-summary.mjs`, `docs/observability-8h-run.md`.
-  **Acceptance**: (a) perTask.quality + meanQuality + component breakdown; (b) dashboard tile + agent-browser verification; (c) documented; (d) deterministic test over fixtures.
+  - **ID**: obs-result-quality-score
+  - **Tags**: p0, observability, quality, run-metrics, milestone-m1
+  - **Milestone**: M1
+  - **Touches**: `scripts/run-summary.mjs`, `docs/observability-8h-run.md`
+  - **Competitive-goal**: feeds `gate-pass-rate` + `change-fail-rate` — quality is the axis competitors compete on, currently a `—` in Minsky's column.
+  - **Hypothesis**: current run signals are structural (files changed, CI green) and don't answer "was the work good?". A composite quality score per merged task (first-push CI green × PR self-grade × tests-added × no same-day revert) yields one comparable quality number.
+  - **Success**: `run-summary.json` `perTask[].quality` ∈ [0,1] from those components, plus roll-up `meanQuality`; component breakdown stored alongside.
+  - **Pivot**: if a component needs human input, ship the objective sub-score (CI-green × tests-added × no-revert) and mark the review component `null` — partial-but-honest beats unmeasured.
+  - **Measurement**: `node scripts/run-summary.mjs --run latest --json | jq -e '.meanQuality >= 0 and .meanQuality <= 1'` exits 0.
+  - **Anchor**: Forsgren, Humble, Kim, "Accelerate", 2018 (change-fail-rate / quality as a delivery metric, not a vanity count); rule #4.
+  - **Details**: Extend `run-summary.mjs`. Reuse the existing `pr-self-grade` lint output and `spec-alignment` CI data; detect tests-added from the diff; detect reverts from git log. Composite weights documented + configurable.
+  - **Files**: `scripts/run-summary.mjs`, `docs/observability-8h-run.md`.
+  - **Acceptance**: (a) perTask.quality + meanQuality + component breakdown; (b) dashboard tile + agent-browser verification; (c) documented; (d) deterministic test over fixtures.
 
 - [ ] `obs-live-competitive-self-column` — restore the deleted live-ingest pipeline so Minsky's OWN run metrics appear as a scorecard column, head-to-head with competitors
-  **ID**: obs-live-competitive-self-column
-  **Tags**: p0, observability, competitive, scorecard, milestone-m1, m1-10
-  **Milestone**: M1
-  **Touches**: `novel/competitive-benchmark/src/**`, `scripts/benchmark-run.mjs`, `scripts/render-scorecard-md.mjs`, `competitors/scorecard.md`, `docs/observability-8h-run.md`
-  **Competitive-goal**: this IS the competitive surface — it places Minsky's `autonomous-merge-rate`, `cost-per-merged-pr`, `mean-autonomous-merge-latency`, `human-intervention-rate`, `daemon-stability-pct` against every competitor in `competitors.ts`.
-  **Hypothesis**: the scorecard's Minsky column is all `—` because the live-ingest pipeline (`benchmark-run.mjs` / `computeMinskyReadings` / `bin/minsky competitive`) was deleted in the 2026-05-28 Path-A cut. Re-deriving Minsky's readings from `run-summary.json` and rendering a Minsky column makes "Minsky vs competitor X" a real comparison on ≥5 shared metrics.
-  **Success**: `node scripts/benchmark-run.mjs --run latest` writes `.minsky/competitive-scorecard.json` with a `minsky` entry sourced from `run-summary.json`; regenerated `competitors/scorecard.md` shows ≥5 Minsky cells filled with a delta vs each competitor sharing that metric.
-  **Pivot**: if a run is too short for a stable reading (n<5 merged PRs for a metric), render that cell as `(n too small)` rather than a misleading point estimate — honesty over a vanity number (rule #4).
-  **Measurement**: `node scripts/benchmark-run.mjs --run latest --json | jq -e '[.minsky.values | to_entries[] | select(.value != null)] | length >= 5'` exits 0.
-  **Anchor**: Basili, Caldiera, Rombach, "The Goal-Question-Metric Approach", 1994 (compare against a baseline on the same operationalized metric); prior plan `docs/plans/self-metrics-competitive-benchmark.md` (slice c).
-  **Details**: Re-implement the deleted reducer behind the existing `metrics.ts` catalogue: read `run-summary.json`, map to the 5 ledger-derivable metric ids, call `computeDelta()` vs each competitor's published values, emit the scorecard JSON, regenerate `competitors/scorecard.md`. Competitors stay pure data (rule #2).
-  **Files**: `novel/competitive-benchmark/src/{ledger,scorecard}.ts` (re-add), `scripts/benchmark-run.mjs` (re-add), `scripts/render-scorecard-md.mjs`, `docs/observability-8h-run.md`.
-  **Acceptance**: (a) Minsky self-column with ≥5 filled metrics + deltas; (b) small-n honesty guard; (c) scorecard rendered + agent-browser-verified on the dashboard; (d) documented; (e) competitors stay pure data; (f) deterministic test over a fixture `run-summary.json`.
+  - **ID**: obs-live-competitive-self-column
+  - **Tags**: p0, observability, competitive, scorecard, milestone-m1, m1-10
+  - **Milestone**: M1
+  - **Touches**: `novel/competitive-benchmark/src/**`, `scripts/benchmark-run.mjs`, `scripts/render-scorecard-md.mjs`, `competitors/scorecard.md`, `docs/observability-8h-run.md`
+  - **Competitive-goal**: this IS the competitive surface — it places Minsky's `autonomous-merge-rate`, `cost-per-merged-pr`, `mean-autonomous-merge-latency`, `human-intervention-rate`, `daemon-stability-pct` against every competitor in `competitors.ts`.
+  - **Hypothesis**: the scorecard's Minsky column is all `—` because the live-ingest pipeline (`benchmark-run.mjs` / `computeMinskyReadings` / `bin/minsky competitive`) was deleted in the 2026-05-28 Path-A cut. Re-deriving Minsky's readings from `run-summary.json` and rendering a Minsky column makes "Minsky vs competitor X" a real comparison on ≥5 shared metrics.
+  - **Success**: `node scripts/benchmark-run.mjs --run latest` writes `.minsky/competitive-scorecard.json` with a `minsky` entry sourced from `run-summary.json`; regenerated `competitors/scorecard.md` shows ≥5 Minsky cells filled with a delta vs each competitor sharing that metric.
+  - **Pivot**: if a run is too short for a stable reading (n<5 merged PRs for a metric), render that cell as `(n too small)` rather than a misleading point estimate — honesty over a vanity number (rule #4).
+  - **Measurement**: `node scripts/benchmark-run.mjs --run latest --json | jq -e '[.minsky.values | to_entries[] | select(.value != null)] | length >= 5'` exits 0.
+  - **Anchor**: Basili, Caldiera, Rombach, "The Goal-Question-Metric Approach", 1994 (compare against a baseline on the same operationalized metric); prior plan `docs/plans/self-metrics-competitive-benchmark.md` (slice c).
+  - **Details**: Re-implement the deleted reducer behind the existing `metrics.ts` catalogue: read `run-summary.json`, map to the 5 ledger-derivable metric ids, call `computeDelta()` vs each competitor's published values, emit the scorecard JSON, regenerate `competitors/scorecard.md`. Competitors stay pure data (rule #2).
+  - **Files**: `novel/competitive-benchmark/src/{ledger,scorecard}.ts` (re-add), `scripts/benchmark-run.mjs` (re-add), `scripts/render-scorecard-md.mjs`, `docs/observability-8h-run.md`.
+  - **Acceptance**: (a) Minsky self-column with ≥5 filled metrics + deltas; (b) small-n honesty guard; (c) scorecard rendered + agent-browser-verified on the dashboard; (d) documented; (e) competitors stay pure data; (f) deterministic test over a fixture `run-summary.json`.
 
 - [ ] `obs-browser-verified-run-dashboard` — ONE live dashboard page showing the run's metrics + competitive comparison, gated by an agent-browser smoke test, plus the umbrella runbook
-  **ID**: obs-browser-verified-run-dashboard
-  **Tags**: p0, observability, dashboard, ui, browser-verified, docs, milestone-m1
-  **Milestone**: M1
-  **Touches**: `novel/dashboard-web/src/**`, `scripts/verify-dashboard-browser.mjs`, `docs/observability-8h-run.md`
-  **Competitive-goal**: surfaces every other obs metric (uptime, throughput, cost/task, latency, errors, quality, competitive deltas) in one glanceable place — rule #4 visibility made real.
-  **Hypothesis**: the metrics above are useless if no one can see them at a glance. A single dashboard route rendering `run-summary.json` + the competitive scorecard, proven to render by an agent-browser smoke test, lets an operator (and a reviewer) verify the 8h run's health in one screen.
-  **Success**: a route (e.g. `/run` on the existing dashboard-web server) renders tiles for uptime, tasks-merged, cost/task, mean latency, error count, mean quality, and the Minsky-vs-competitor table; an agent-browser script opens it and asserts each tile shows a value.
-  **Pivot**: if reviving the deprecated `dashboard-web` SSR is too unstable, render a static `.minsky/runs/<id>/report.html` from `run-summary.json` and agent-browser-verify THAT — a stable static artifact beats a flaky live server (rule #6/#7).
-  **Measurement**: `node scripts/verify-dashboard-browser.mjs` (drives agent-browser, asserts the 7 tiles are present + non-empty) exits 0.
-  **Anchor**: Card, Mackinlay, Shneiderman, "Readings in Information Visualization", 1999 (glanceable, overview-first display); rule #4 (visible metrics) + rule #7 (graceful degrade).
-  **Details**: Extend `novel/dashboard-web` (or the static-report fallback) to read `run-summary.json` + `.minsky/competitive-scorecard.json`. Add `scripts/verify-dashboard-browser.mjs` using the `agent-browser` skill to open the page and assert tiles. Write `docs/observability-8h-run.md` as the single runbook: what each metric means, where it is stored, the exact command to view it, and the copy-paste agent-browser verification command.
-  **Files**: `novel/dashboard-web/src/{server,render}.ts`, `scripts/verify-dashboard-browser.mjs` (new), `docs/observability-8h-run.md` (new — umbrella runbook for the whole suite).
-  **Acceptance**: (a) one page with all 7 tiles + competitive table; (b) agent-browser smoke test asserts tiles non-empty and IS the merge gate; (c) `docs/observability-8h-run.md` documents every metric, its storage, view command, and the browser-verification command; (d) graceful-degrade: a missing metric shows `—`, page still renders; (e) the runbook's agent-browser command is copy-pasteable and verified.
+  - **ID**: obs-browser-verified-run-dashboard
+  - **Tags**: p0, observability, dashboard, ui, browser-verified, docs, milestone-m1
+  - **Milestone**: M1
+  - **Touches**: `novel/dashboard-web/src/**`, `scripts/verify-dashboard-browser.mjs`, `docs/observability-8h-run.md`
+  - **Competitive-goal**: surfaces every other obs metric (uptime, throughput, cost/task, latency, errors, quality, competitive deltas) in one glanceable place — rule #4 visibility made real.
+  - **Hypothesis**: the metrics above are useless if no one can see them at a glance. A single dashboard route rendering `run-summary.json` + the competitive scorecard, proven to render by an agent-browser smoke test, lets an operator (and a reviewer) verify the 8h run's health in one screen.
+  - **Success**: a route (e.g. `/run` on the existing dashboard-web server) renders tiles for uptime, tasks-merged, cost/task, mean latency, error count, mean quality, and the Minsky-vs-competitor table; an agent-browser script opens it and asserts each tile shows a value.
+  - **Pivot**: if reviving the deprecated `dashboard-web` SSR is too unstable, render a static `.minsky/runs/<id>/report.html` from `run-summary.json` and agent-browser-verify THAT — a stable static artifact beats a flaky live server (rule #6/#7).
+  - **Measurement**: `node scripts/verify-dashboard-browser.mjs` (drives agent-browser, asserts the 7 tiles are present + non-empty) exits 0.
+  - **Anchor**: Card, Mackinlay, Shneiderman, "Readings in Information Visualization", 1999 (glanceable, overview-first display); rule #4 (visible metrics) + rule #7 (graceful degrade).
+  - **Details**: Extend `novel/dashboard-web` (or the static-report fallback) to read `run-summary.json` + `.minsky/competitive-scorecard.json`. Add `scripts/verify-dashboard-browser.mjs` using the `agent-browser` skill to open the page and assert tiles. Write `docs/observability-8h-run.md` as the single runbook: what each metric means, where it is stored, the exact command to view it, and the copy-paste agent-browser verification command.
+  - **Files**: `novel/dashboard-web/src/{server,render}.ts`, `scripts/verify-dashboard-browser.mjs` (new), `docs/observability-8h-run.md` (new — umbrella runbook for the whole suite).
+  - **Acceptance**: (a) one page with all 7 tiles + competitive table; (b) agent-browser smoke test asserts tiles non-empty and IS the merge gate; (c) `docs/observability-8h-run.md` documents every metric, its storage, view command, and the browser-verification command; (d) graceful-degrade: a missing metric shows `—`, page still renders; (e) the runbook's agent-browser command is copy-pasteable and verified.
 
 - [ ] `local-gate-merge-test-anti-flake` — make `scripts/local-gate-merge.test.mjs` deterministic under host-oversubscription. During parallel delivery waves (many worktree agents at once) its subprocess-heavy cases time out and red the worker's `pnpm pre-pr-lint --stage=full`, causing agents to spuriously self-mark tasks blocked even though CI (a single un-oversubscribed job) passes the same test. Multiple 2026-06 grind agents hit this.
   - **ID**: local-gate-merge-test-anti-flake
