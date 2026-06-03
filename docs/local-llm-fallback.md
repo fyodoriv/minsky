@@ -149,6 +149,36 @@ Slice 4 closes this gap:
 
 Implementation: `novel/tick-loop/src/claude-exhaustion-state.ts` (pure read/write helpers; paired-tested over 8 chaos rows). Persistence failures are graceful-degrade per rule #6 — the in-process `lastClaudeFailure` carry-over still works even if the disk write fails.
 
+## Bidirectional runtime auto-pivot (local ⇄ remote, mid-run, zero operator action)
+
+The slice-1 `decideProvider` matrix above governs which provider an iteration
+starts on. The **runtime auto-pivot** (`runtime-token-limit-auto-pivot-local-
+and-back`) makes the live `bin/minsky-run.sh` loop switch in BOTH directions
+during a run, without operator intervention:
+
+- **Forward (remote → local).** When `decideRunAnyProvider` sees all remote
+  backends exhausted/down, the iteration drops to local in ≤1 iteration (the
+  pre-existing forward fallback). It now also persists
+  `.minsky/runany-local-since.json` and appends a `provider-mode-transition`
+  (`remote→local`) record to `.minsky/orchestrate.jsonl`.
+- **Back (local → remote).** Each later iteration runs a cheap remote
+  recover-probe FIRST (`runany-resolve-model.mjs --recover-probe`). The pure
+  `decideRecoverFlipBack` flips the run back to remote only when a minimum dwell
+  has elapsed AND N consecutive good probes have accrued — anti-flap. A bad probe
+  resets the counter (transient-fail-no-flip). On flip-back the run honors
+  `MINSKY_STRATEGIC_PIN_MODEL` verbatim (pin-precedence) and appends a
+  `provider-mode-transition` (`local→remote`, `trigger: recover-flip-back`)
+  record.
+
+This is the runtime sibling of the `switchback` claude-probe described in the
+slice-4 note below — but bidirectional, mid-run, and driven by remote-backend
+liveness rather than a budget-state transition. Operator knobs
+(`MINSKY_RECOVER_DWELL_MS`, `MINSKY_RECOVER_GOOD_PROBES`, the
+`MINSKY_FORCE_EXHAUSTED` test seam) and the Pivot are documented in
+[`docs/run-anywhere.md` § "Runtime recover-probe"](./run-anywhere.md). The pure
+flip decision is unit-tested in
+`scripts/lib/runany-provider-decision.test.mjs`.
+
 ## Throughput baseline (post-slice-3 measurement)
 
 Once slice 3 ships, `node scripts/llm-provider-throughput.mjs --since=$(date -v-7d -u +%Y-%m-%d) --json` returns:

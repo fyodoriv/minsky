@@ -12,7 +12,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { decideRunAnyProvider } from "./runany-provider-decision.mjs";
+import {
+  DEFAULT_RECOVER_DWELL_MS,
+  DEFAULT_RECOVER_GOOD_PROBES,
+  decideRecoverFlipBack,
+  decideRunAnyProvider,
+} from "./runany-provider-decision.mjs";
 import { pickStrategicModel } from "./strategic-model-router.mjs";
 
 /**
@@ -129,5 +134,145 @@ describe("pickStrategicModel — catalog walk", () => {
     });
     expect(result.kind).toBe("fallback");
     expect(result.agent).toBe("local");
+  });
+});
+
+describe("decideRecoverFlipBack — anti-flap dwell + N-consecutive-good", () => {
+  const T0 = 1_000_000;
+
+  it("no-ops when the run is already on remote", () => {
+    const r = decideRecoverFlipBack({
+      currentMode: "remote",
+      probeOk: true,
+      nowMs: T0 + DEFAULT_RECOVER_DWELL_MS + 1,
+      localSinceMs: T0 - 999_999,
+    });
+    expect(r.flipBack).toBe(false);
+    expect(r.reason).toBe("not-on-local");
+  });
+
+  it("holds local until the minimum dwell elapses, even with a good probe", () => {
+    const r = decideRecoverFlipBack({
+      currentMode: "local",
+      probeOk: true,
+      nowMs: T0 + 1_000, // only 1s on local
+      localSinceMs: T0,
+      goodProbesNeeded: 1,
+    });
+    expect(r.flipBack).toBe(false);
+    expect(r.reason).toBe("dwell-not-elapsed");
+    // The good probe still accrues so the counter survives the dwell window.
+    expect(r.goodProbes).toBe(1);
+  });
+
+  it("holds local until N consecutive good probes accrue (single good probe insufficient)", () => {
+    const past = T0 - DEFAULT_RECOVER_DWELL_MS - 1; // dwell satisfied
+    const r = decideRecoverFlipBack({
+      currentMode: "local",
+      probeOk: true,
+      nowMs: T0,
+      localSinceMs: past,
+      goodProbesNeeded: 2,
+      priorGoodProbes: 0,
+    });
+    expect(r.flipBack).toBe(false);
+    expect(r.reason).toBe("awaiting-consecutive-good-probes");
+    expect(r.goodProbes).toBe(1);
+  });
+
+  it("flips back once dwell AND N consecutive good probes both hold", () => {
+    const past = T0 - DEFAULT_RECOVER_DWELL_MS - 1;
+    const r = decideRecoverFlipBack({
+      currentMode: "local",
+      probeOk: true,
+      nowMs: T0,
+      localSinceMs: past,
+      goodProbesNeeded: 2,
+      priorGoodProbes: 1, // this probe is the 2nd consecutive good
+    });
+    expect(r.flipBack).toBe(true);
+    expect(r.reason).toContain("recover-flip-back");
+    // Counter is consumed on flip so the next local cycle starts fresh.
+    expect(r.goodProbes).toBe(0);
+  });
+
+  it("uses the documented defaults when dwell/goodProbesNeeded are omitted", () => {
+    const past = T0 - DEFAULT_RECOVER_DWELL_MS - 1;
+    const r = decideRecoverFlipBack({
+      currentMode: "local",
+      probeOk: true,
+      nowMs: T0,
+      localSinceMs: past,
+      priorGoodProbes: DEFAULT_RECOVER_GOOD_PROBES - 1,
+    });
+    expect(r.flipBack).toBe(true);
+  });
+});
+
+describe("decideRecoverFlipBack — transient-fail-no-flip", () => {
+  const T0 = 1_000_000;
+
+  it("a bad probe resets the consecutive-good counter to 0 and never flips", () => {
+    const past = T0 - DEFAULT_RECOVER_DWELL_MS - 1;
+    const r = decideRecoverFlipBack({
+      currentMode: "local",
+      probeOk: false,
+      nowMs: T0,
+      localSinceMs: past,
+      goodProbesNeeded: 2,
+      priorGoodProbes: 1, // had 1 good probe; this bad one wipes it
+    });
+    expect(r.flipBack).toBe(false);
+    expect(r.reason).toBe("probe-bad-reset");
+    expect(r.goodProbes).toBe(0);
+  });
+
+  it("a good→bad→good sequence does NOT reach 2-consecutive (no flip on the bad)", () => {
+    const past = T0 - DEFAULT_RECOVER_DWELL_MS - 1;
+    // good (1)
+    const g1 = decideRecoverFlipBack({
+      currentMode: "local",
+      probeOk: true,
+      nowMs: T0,
+      localSinceMs: past,
+      goodProbesNeeded: 2,
+      priorGoodProbes: 0,
+    });
+    expect(g1.goodProbes).toBe(1);
+    expect(g1.flipBack).toBe(false);
+    // bad → reset to 0
+    const b = decideRecoverFlipBack({
+      currentMode: "local",
+      probeOk: false,
+      nowMs: T0 + 1,
+      localSinceMs: past,
+      goodProbesNeeded: 2,
+      priorGoodProbes: g1.goodProbes,
+    });
+    expect(b.goodProbes).toBe(0);
+    expect(b.flipBack).toBe(false);
+    // good again → only 1 consecutive, still no flip
+    const g2 = decideRecoverFlipBack({
+      currentMode: "local",
+      probeOk: true,
+      nowMs: T0 + 2,
+      localSinceMs: past,
+      goodProbesNeeded: 2,
+      priorGoodProbes: b.goodProbes,
+    });
+    expect(g2.goodProbes).toBe(1);
+    expect(g2.flipBack).toBe(false);
+  });
+
+  it("treats localSinceMs<=0 (never dropped) as dwell-not-elapsed, never flips", () => {
+    const r = decideRecoverFlipBack({
+      currentMode: "local",
+      probeOk: true,
+      nowMs: T0,
+      localSinceMs: 0,
+      goodProbesNeeded: 1,
+    });
+    expect(r.flipBack).toBe(false);
+    expect(r.reason).toBe("dwell-not-elapsed");
   });
 });

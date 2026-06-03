@@ -219,6 +219,55 @@ else
   exit 1
 fi
 
+# --- (d.2) cost-tier picker (first-run only) --------------------------
+# On a config WITHOUT `cost_tier`, present the brain+workers cost-tier
+# menu (with $/hr expectations), persist the choice, and never ask again
+# (Krug 2014 progressive disclosure; Nielsen 1993 visibility of system
+# status). The decision logic + config merge is a pure Python helper
+# (scripts/cost_tier_picker.py) so it is unit-testable; this shell wires
+# the TTY prompt around it. Honors MINSKY_COST_TIER for non-interactive
+# runs (launchd/SSH/CI/tests) and falls back to the default tier when
+# there's no TTY — never blocks the bootstrap on a prompt (rule #11).
+COST_TIER_PICKER="$MINSKY_ROOT/scripts/cost_tier_picker.py"
+if [ -f "$COST_TIER_PICKER" ] && command -v python3 >/dev/null 2>&1; then
+  bold "cost tier…"
+  COST_DECISION="$(python3 "$COST_TIER_PICKER" --decide 2>/dev/null || echo skip)"
+  case "$COST_DECISION" in
+    skip)
+      # Already chosen on a prior run — print the one-line summary, no re-prompt.
+      python3 "$COST_TIER_PICKER" --summary || true
+      ;;
+    use-default)
+      # Non-interactive (or MINSKY_COST_TIER set): apply env choice or default.
+      COST_TIER_CHOICE="${MINSKY_COST_TIER:-2}"
+      if python3 "$COST_TIER_PICKER" --apply "$COST_TIER_CHOICE"; then
+        :
+      else
+        warn "cost tier '$COST_TIER_CHOICE' invalid — falling back to default (2)"
+        python3 "$COST_TIER_PICKER" --apply 2 || true
+      fi
+      ;;
+    prompt)
+      # Interactive: show the menu, read the choice (Enter = default 2).
+      python3 "$COST_TIER_PICKER" --menu
+      printf ''
+      read -r COST_TIER_CHOICE || COST_TIER_CHOICE=""
+      COST_TIER_CHOICE="${COST_TIER_CHOICE:-2}"
+      if python3 "$COST_TIER_PICKER" --apply "$COST_TIER_CHOICE"; then
+        :
+      else
+        warn "invalid tier '$COST_TIER_CHOICE' — using default (2)"
+        python3 "$COST_TIER_PICKER" --apply 2 || true
+      fi
+      ;;
+    *)
+      warn "cost-tier picker returned '$COST_DECISION' — skipping"
+      ;;
+  esac
+else
+  warn "cost-tier picker unavailable (need python3 + scripts/cost_tier_picker.py) — skipping"
+fi
+
 # --- (e) run minsky doctor + report + next step -----------------------
 bold "running minsky doctor…"
 DOCTOR_RC=0

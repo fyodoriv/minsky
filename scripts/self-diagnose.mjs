@@ -831,6 +831,60 @@ export function daemonPrStuckDirtyInvariant(opts) {
 }
 
 /**
+ * @typedef {object} DaemonPrStuckConflictingInvariantOpts
+ * @property {() => Promise<readonly OpenDaemonPrSnapshotForDirty[]>} openDaemonPrs
+ * @property {number} [maxAgeHours] - fire when any PR has been conflicting for longer than this (default 2)
+ */
+
+/**
+ * Throughput invariant: a daemon-authored PR has been in `conflicting`
+ * (GitHub-computed merge conflict against the advanced base) state for
+ * ≥ `maxAgeHours`. The watchdog-extension sibling of
+ * `daemon-pr-stuck-dirty` — DIRTY is the locally-computed conflict;
+ * CONFLICTING is GitHub's `mergeStateStatus` when `main` advanced under
+ * the PR. A long monitoring window found CONFLICTING-stuck PRs were the
+ * #1 manual-unblock class, yet only `dirty` was surfaced — so the MAPE-K
+ * analyse step never saw the conflicting population the
+ * `scripts/auto-rebase-dirty-prs.mjs` Execute step now acts on.
+ *
+ * Auto-resolution path: the same `scripts/auto-rebase-dirty-prs.mjs`
+ * watchdog rebases-or-closes CONFLICTING PRs identically to DIRTY ones.
+ *
+ * @param {DaemonPrStuckConflictingInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonPrStuckConflictingInvariant(opts) {
+  const { openDaemonPrs, maxAgeHours = 2 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const prs = await openDaemonPrs();
+    const stuck = prs.filter(
+      (p) => p.mergeableState === "conflicting" && p.ageHours >= maxAgeHours,
+    );
+    if (stuck.length === 0) return { id: "daemon-pr-stuck-conflicting", ok: true };
+    const evidence = stuck
+      .map((p) => `#${p.number} conflicting for ${p.ageHours.toFixed(1)}h (>${maxAgeHours}h)`)
+      .join("; ");
+    const updateCmds = stuck.map((p) => `gh pr update-branch ${p.number}`).join(" && ");
+    return {
+      id: "daemon-pr-stuck-conflicting",
+      ok: false,
+      // Same actor signal as `daemon-pr-stuck-dirty`: minsky tries the
+      // rebase-or-close first; the operator only steps in if both the
+      // `gh pr update-branch` AND the close-superseded escalation hit a
+      // transient `gh` error — a rare failure mode.
+      actor: "minsky-then-operator",
+      evidence,
+      suggestedTaskTitle: `${stuck.length} daemon PR(s) stuck conflicting for >${maxAgeHours}h`,
+      suggestedFix: `One or more daemon-authored PRs have been in CONFLICTING (base advanced under them) state for >${maxAgeHours}h. **Minsky auto-fix**: \`scripts/auto-rebase-dirty-prs.mjs\` treats CONFLICTING like DIRTY — it (a) tries \`gh pr update-branch\`, (b) escalates to close-as-superseded on conflict. To disable, set \`MINSKY_AUTO_REBASE_DIRTY_PRS=off\`. Manual fallback: \`${updateCmds}\`. Pivot if >50% of CONFLICTING PRs can't be rebased: degrade to soft-escalation (file \`Blocked: needs-operator-rebase\`).`,
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "daemon-pr-stuck-conflicting";
+  return fn;
+}
+
+/**
  * @typedef {object} OpenDaemonPrSnapshotForThrash
  * @property {number} number
  * @property {number} commitCount - number of commits stacked on the PR head
@@ -1974,6 +2028,7 @@ export function defaultInvariants() {
       probeGitWorktreeCount,
     }),
     daemonPrStuckDirtyInvariant({ openDaemonPrs: openDaemonPrsForDirty }),
+    daemonPrStuckConflictingInvariant({ openDaemonPrs: openDaemonPrsForDirty }),
     daemonPrThrashInvariant({ openDaemonPrs: openDaemonPrsForThrash }),
     daemonSpawnFailureRateInvariant({
       recentVerdicts: () => readExperimentStoreVerdicts(repoRoot),
