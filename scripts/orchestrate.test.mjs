@@ -4,12 +4,16 @@
 // No @ts-check (matches sibling scripts/*.test.mjs convention).
 import { describe, expect, it } from "vitest";
 import {
+  buildOnceJsonSummary,
   buildProviderModeTransition,
   buildRunanyPolicyRecords,
   buildTickLedgerLine,
+  decideAgentForRole,
+  decideDetachedWorkerAction,
   decideHeal,
   decideWorkerPausePids,
   parseLaunchctlRunning,
+  resolveSpawnRole,
 } from "./orchestrate.mjs";
 
 describe("buildProviderModeTransition (runtime token-limit auto-pivot ledger)", () => {
@@ -241,5 +245,152 @@ describe("decideWorkerPausePids (load-shed pid selection)", () => {
     expect(decideWorkerPausePids("4101\n4102\n", 1)).toEqual(
       decideWorkerPausePids("4101\n4102\n", 1),
     );
+  });
+});
+
+// claude-orchestrator-local-worker-fanout: the brain-vs-hands role pin.
+// The orchestrator (conductor) spends the cloud budget; a worker uses the
+// cheap local agent. `resolveSpawnRole` classifies from MINSKY_ROLE,
+// defaulting to the conservative orchestrator (a missing label can only make
+// a process MORE conservative on cloud spend). `decideAgentForRole` maps a
+// role to (agent, model).
+describe("resolveSpawnRole (process role classification)", () => {
+  it("MINSKY_ROLE=worker ⇒ worker", () => {
+    expect(resolveSpawnRole("worker")).toBe("worker");
+  });
+  it("missing / unset ⇒ orchestrator (conservative default)", () => {
+    expect(resolveSpawnRole(undefined)).toBe("orchestrator");
+    expect(resolveSpawnRole("")).toBe("orchestrator");
+  });
+  it("any non-worker value ⇒ orchestrator (typo cannot leak cloud to a worker)", () => {
+    expect(resolveSpawnRole("orchestrator")).toBe("orchestrator");
+    expect(resolveSpawnRole("WORKER")).toBe("orchestrator");
+    expect(resolveSpawnRole("brain")).toBe("orchestrator");
+  });
+});
+
+describe("decideAgentForRole (role-pinned agent + model)", () => {
+  const cfg = {
+    cloudAgent: "claude",
+    cloudModel: "claude-opus-4-7-max",
+    localAgent: "aider",
+    localModel: "ollama_chat/qwen3-coder:30b",
+  };
+
+  it("orchestrator ⇒ cloud agent + cloud model", () => {
+    expect(decideAgentForRole("orchestrator", cfg)).toEqual({
+      agent: "claude",
+      model: "claude-opus-4-7-max",
+      role: "orchestrator",
+    });
+  });
+
+  it("worker ⇒ local agent + local model", () => {
+    expect(decideAgentForRole("worker", cfg)).toEqual({
+      agent: "aider",
+      model: "ollama_chat/qwen3-coder:30b",
+      role: "worker",
+    });
+  });
+
+  it("MINSKY_STRATEGIC_PIN_MODEL hard-override wins the model slot for either role", () => {
+    const pinned = { ...cfg, pinModel: "claude-opus-4-8" };
+    expect(decideAgentForRole("orchestrator", pinned).model).toBe("claude-opus-4-8");
+    // An operator debugging a worker against the cloud model can pin it.
+    expect(decideAgentForRole("worker", pinned).model).toBe("claude-opus-4-8");
+    // The agent slot is NOT overridden by the model pin.
+    expect(decideAgentForRole("worker", pinned).agent).toBe("aider");
+  });
+
+  it("falls back to safe defaults when config is empty (rule #6)", () => {
+    expect(decideAgentForRole("orchestrator", {})).toEqual({
+      agent: "claude",
+      model: "claude-opus-4-7-max",
+      role: "orchestrator",
+    });
+    expect(decideAgentForRole("worker", {})).toEqual({
+      agent: "aider",
+      model: "ollama_chat/qwen3-coder:30b",
+      role: "worker",
+    });
+  });
+
+  it("is pure / deterministic — same input, same output", () => {
+    expect(decideAgentForRole("worker", cfg)).toEqual(decideAgentForRole("worker", cfg));
+  });
+});
+
+// orchestrator-detached-worker-finish: a worker must never become a zombie
+// holding the cloud budget when its parent brain exits. `decideDetachedWorkerAction`
+// is the pure actor-model decision the chaos test + self-diagnose invariant share.
+describe("decideDetachedWorkerAction (no-zombie-on-orchestrator-kill)", () => {
+  it("orchestrator alive ⇒ continue", () => {
+    expect(decideDetachedWorkerAction({ orchestratorAlive: true, workerBusy: true })).toBe(
+      "continue",
+    );
+    expect(decideDetachedWorkerAction({ orchestratorAlive: true, workerBusy: false })).toBe(
+      "continue",
+    );
+  });
+
+  it("orchestrator dead + worker busy ⇒ finish-then-exit (don't waste committed effort)", () => {
+    expect(decideDetachedWorkerAction({ orchestratorAlive: false, workerBusy: true })).toBe(
+      "finish-then-exit",
+    );
+  });
+
+  it("orchestrator dead + worker idle ⇒ exit-now (no zombie)", () => {
+    expect(decideDetachedWorkerAction({ orchestratorAlive: false, workerBusy: false })).toBe(
+      "exit-now",
+    );
+  });
+
+  it("never returns continue once the orchestrator is dead (no zombie path)", () => {
+    expect(decideDetachedWorkerAction({ orchestratorAlive: false, workerBusy: true })).not.toBe(
+      "continue",
+    );
+    expect(decideDetachedWorkerAction({ orchestratorAlive: false, workerBusy: false })).not.toBe(
+      "continue",
+    );
+  });
+});
+
+// The `--once --json` summary the task's `**Measurement**` consumes: stdout
+// must carry a single object with BOTH `merged` and `skipped` defined.
+describe("buildOnceJsonSummary (--once --json machine summary)", () => {
+  it("emits merged[] + skipped count (the measurement's two required keys)", () => {
+    const s = buildOnceJsonSummary(
+      { merged: [{ number: 7 }, { number: 8 }], skipped: [{ number: 9 }] },
+      { ts: "2026-06-02T00:00:00.000Z", role: "orchestrator" },
+    );
+    expect(s.merged).toEqual([7, 8]);
+    expect(s.skipped).toBe(1);
+    expect(typeof s.merged).toBe("object");
+    expect(typeof s.skipped).toBe("number");
+  });
+
+  it("skipped is always a NUMBER (a downstream j.skipped never sees an array)", () => {
+    const s = buildOnceJsonSummary({ merged: [], skipped: [] });
+    expect(s.skipped).toBe(0);
+    expect(Array.isArray(s.skipped)).toBe(false);
+  });
+
+  it("records the role (defaults to orchestrator)", () => {
+    expect(buildOnceJsonSummary({ merged: [], skipped: [] }).role).toBe("orchestrator");
+    expect(buildOnceJsonSummary({ merged: [], skipped: [] }, { role: "worker" }).role).toBe(
+      "worker",
+    );
+  });
+
+  it("carries an optional sweepError + runId without polluting the clean case", () => {
+    const clean = buildOnceJsonSummary({ merged: [], skipped: [] });
+    expect("sweepError" in clean).toBe(false);
+    expect("runId" in clean).toBe(false);
+    const withErr = buildOnceJsonSummary(
+      { merged: [], skipped: [] },
+      { sweepError: "boom", runId: "abc-1-deadbeef" },
+    );
+    expect(withErr.sweepError).toBe("boom");
+    expect(withErr.runId).toBe("abc-1-deadbeef");
   });
 });
