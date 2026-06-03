@@ -18,7 +18,7 @@
 ;; Apple's sandbox-exec(1) exposes via SBPL. `(deny default)` is fail-safe-
 ;; defaults: anything not explicitly allowed is denied.
 ;;
-;; Applied by: distribution/launchd/com.minsky.tick-loop.plist —
+;; Applied by: the tick-loop launchd plist (com.minsky.tick-loop.plist) —
 ;;   ProgramArguments → /usr/bin/sandbox-exec -f <this profile> <run-tick-loop.sh>
 ;; Pinned by: scripts/check-supervisor-sandbox-hardening.mjs (asserts this
 ;;   file exists, opens with `(deny default)`, and is referenced by the plist).
@@ -69,8 +69,9 @@
 
 ;; --- Filesystem: the repo (read + write) -------------------------------------
 ;; The supervisor performs git operations, writes logs under .minsky/, and the
-;; agent edits tracked files. MINSKY_HOME is substituted by setup.sh's envsubst
-;; into the absolute repo path before this profile is installed.
+;; agent edits tracked files. MINSKY_HOME is substituted by the installer's
+;; envsubst (minsky init / minsky update) into the absolute repo path before
+;; this profile is installed.
 (allow file-read* file-write*
   (subpath (param "MINSKY_HOME")))
 
@@ -100,7 +101,7 @@
 ;; on $HOME this keeps scratch out of the operator's Documents/Desktop. The
 ;; per-user TMPDIR launchd assigns lives under /private/var/folders, so the two
 ;; subpaths below cover it without needing TMPDIR as a profile param (which the
-;; setup.sh envsubst whitelist — `${MINSKY_HOME} ${HOME}` — would not expand).
+;; installer's envsubst whitelist — `${MINSKY_HOME} ${HOME}` — would not expand).
 (allow file-read* file-write*
   (subpath "/private/tmp")
   (subpath "/private/var/folders"))

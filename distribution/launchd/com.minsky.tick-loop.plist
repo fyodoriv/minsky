@@ -119,9 +119,9 @@ Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
          with EPERM — see scripts/chaos-sandbox-disallowed-read.mjs.
 
          The `-D` flags supply the profile's `(param ...)` placeholders:
-           MINSKY_HOME → the repo's writable subtree (envsubst'd by setup.sh)
+           MINSKY_HOME → the repo's writable subtree (envsubst'd by the installer)
            HOME        → resolves `~/.claude`, `~/.minsky`, `~/.gitconfig`
-         Both are in setup.sh's envsubst whitelist (`${MINSKY_HOME} ${HOME}`).
+         Both are in the installer's envsubst whitelist (`${MINSKY_HOME} ${HOME}`).
          The per-user temp dir is covered by the profile's `/private/var/folders`
          subpath, so no TMPDIR param is needed.
 
