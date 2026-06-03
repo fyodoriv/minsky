@@ -12,6 +12,12 @@
 //   setup.sh                  — bootstrap entrypoint
 //   distribution/**           — supervisor / packaging artefacts
 //   .github/workflows/**      — CI workflows
+//   bin/**                    — operator CLI entrypoints (bin/minsky, …)
+//   skill-plugins/**          — per-agent SKILL.md plugin artefacts
+//   <root>/*.yaml             — top-level manifests (Agentfile.yaml, …)
+//
+// (`commands/` is intentionally NOT in the set — it does not exist in this
+// repo; the eligibility list tracks shipped surfaces, not hypothetical ones.)
 //
 // Test files (`*.test.ts`, `*.test.mjs`), fixture files (`*.fixture.ts`),
 // and node_modules paths are skipped. Modifications (status M / D / R) are
@@ -105,6 +111,19 @@ function isEligibleAddition(f) {
 }
 
 /**
+ * Directory prefixes whose newly-added files are rule-8-eligible.
+ *
+ * @type {readonly string[]}
+ */
+const ELIGIBLE_PREFIXES = Object.freeze([
+  "novel/",
+  "distribution/",
+  ".github/workflows/",
+  "bin/",
+  "skill-plugins/",
+]);
+
+/**
  * Pure path-shape check; exposed for the CLI's opt-out scan (we only read
  * the first lines of files we'd otherwise check).
  *
@@ -115,12 +134,12 @@ export function isEligiblePath(p) {
   if (p.length === 0) return false;
   if (p.includes("node_modules/")) return false;
   if (isTestOrFixture(p)) return false;
-  if (p.startsWith("novel/")) return true;
-  if (p.startsWith("distribution/")) return true;
-  if (p.startsWith(".github/workflows/")) return true;
-  if (p === "setup.sh") return true;
-  if (isRootMarkdown(p)) return true;
-  return false;
+  return (
+    ELIGIBLE_PREFIXES.some((prefix) => p.startsWith(prefix)) ||
+    p === "setup.sh" ||
+    isRootMarkdown(p) ||
+    isRootYaml(p)
+  );
 }
 
 /**
@@ -144,6 +163,19 @@ function isTestOrFixture(p) {
  */
 function isRootMarkdown(p) {
   if (!p.endsWith(".md")) return false;
+  return !p.includes("/");
+}
+
+/**
+ * Top-level `*.yaml` manifests (Agentfile.yaml, pnpm-workspace.yaml, …). Only
+ * the repo root — nested yaml lives inside an eligible directory (novel/,
+ * distribution/, .github/workflows/) or is package-internal config.
+ *
+ * @param {string} p
+ * @returns {boolean}
+ */
+function isRootYaml(p) {
+  if (!p.endsWith(".yaml")) return false;
   return !p.includes("/");
 }
 
