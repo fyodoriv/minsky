@@ -19,6 +19,12 @@
 #   openhands-sdk        → exit 0 if `import openhands` succeeds, prints version
 #   openhands-cli        → exit 0 if `openhands` is on PATH, prints version
 #   syntax <path>        → exit 0 if python3 -m py_compile <path> succeeds
+#   state-dir-writable [dir] → exit 0 if the minsky state dir is writable
+#                          (creating it if needed); prints the resolved path.
+#                          Defaults to ${MINSKY_HOME:-${MINSKY_STATE_DIR:-$HOME/.minsky}}.
+#                          Surfaces the minsky-runtime-resilience failure
+#                          mode (unwritable state dir) as a doctor row
+#                          BEFORE an iteration aborts on it at runtime.
 #
 # Source: 2026-05-25 retro — observability arc slice 1; rule #2
 # (Strategy seam — python3 probing is the dependency, this helper
@@ -74,9 +80,30 @@ case "$PROBE" in
     fi
     python3 -m py_compile "$ARG" 2>/dev/null
     ;;
+  state-dir-writable)
+    # minsky-runtime-resilience: surface an unwritable state dir as a
+    # doctor row, BEFORE an iteration aborts on the experiment-store
+    # mkdir at runtime. Resolves the same dir the runner uses, tries to
+    # create it (mkdir -p is idempotent for an existing dir), and checks
+    # the -w bit. Pure read-after-create probe; the dir is the operator's
+    # own state dir, so creating it is benign (matches what the first
+    # `minsky` run does anyway). Anchor: SRE 2016 Ch. 6 — detect a
+    # degraded-resource condition before it surfaces as a runtime failure.
+    state_dir="${ARG:-${MINSKY_HOME:-${MINSKY_STATE_DIR:-$HOME/.minsky}}}"
+    if ! mkdir -p "$state_dir" 2>/dev/null; then
+      echo "$state_dir (cannot create — chmod u+w the parent, or set MINSKY_HOME=<writable>)"
+      exit 1
+    fi
+    if [ ! -w "$state_dir" ]; then
+      echo "$state_dir (not writable — chmod u+w it, or set MINSKY_HOME=<writable>)"
+      exit 1
+    fi
+    echo "$state_dir"
+    exit 0
+    ;;
   *)
     echo "bash-doctor-probes: unknown probe '$PROBE'" >&2
-    echo "valid: python-version, openhands-sdk, openhands-cli, syntax" >&2
+    echo "valid: python-version, openhands-sdk, openhands-cli, syntax, state-dir-writable" >&2
     exit 2
     ;;
 esac

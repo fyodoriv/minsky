@@ -61,6 +61,36 @@ Per constitutional rule #7 (vision.md § 7).
 | 19 | OS throttle contradicts the budget (launchd `Background` QoS / `Nice` / low `ulimit` / stale `MINSKY_*` cap) makes the budget physically unreachable | misconfiguration | `circuit-break-and-notify` — `detectThrottles` flags it, `renderMirrorTasks` emits the durable mirror-repo fix; the gate `scripts/check-machine-budget.mjs` hard-fails CI on a `Background` plist | `novel/tick-loop/src/os-throttle-detect.test.ts` (throttle-detection assertions) + `scripts/check-machine-budget.test.mjs` (Background-fixture fail assertion) |
 | 20 | Non-launchd / partial host probe (Linux, missing plist) | dependency-degrade | `graceful-degrade` — absent evidence fields degrade to a clean (no-throttle) result rather than crashing the probe | `novel/tick-loop/src/os-throttle-detect.test.ts` (partial-evidence assertions) |
 
+## Related: bash-CLI runtime resilience (minsky-runtime-resilience)
+
+The pure cores here keep the per-iteration loop alive across GitHub-auth
+blips, queue exhaustion, and same-machine concurrency (failure modes 6–16
+above). The bash entrypoint that *invokes* this loop —
+[`bin/minsky-run.sh`](../../bin/minsky-run.sh) — carries the same
+loud-fail-AT-the-right-boundary discipline for the host I/O it owns, so a
+live runtime failure surfaces an operator-actionable message instead of a
+raw shell/errno:
+
+- **Unwritable experiment-store dir** (wrong-owner `MINSKY_HOME`, read-only
+  mount) → `invariant_host_experiment_store_writable` prints the offending
+  path + the recovery command (`chmod u+w …` or `MINSKY_HOME=<writable>`)
+  and exits non-zero cleanly — never a bare `mkdir` errno.
+- **Unwritable log/brief target dir** → `resilient_logfile` falls back to
+  `${TMPDIR:-/tmp}/minsky-<user>-<id>.log` with a one-line warn and the
+  iteration continues (graceful degradation, SRE 2016 Ch. 6).
+- **Missing/non-executable run target (spawn shim)** → `preflight_run_target`
+  names the path + the fix (`pnpm install` / `chmod +x`) and records a
+  `spawn-failed` verdict instead of letting python surface a raw `ENOENT`.
+
+`minsky doctor` reports state-dir writability up front via the
+`state-dir-writable` probe in
+[`scripts/bash-doctor-probes.sh`](../../scripts/bash-doctor-probes.sh), so
+the condition is caught before an iteration aborts on it. Branch coverage:
+[`tests/runtime-resilience.bats`](../../tests/runtime-resilience.bats).
+Anchor: Armstrong 2003 (let-it-crash AT the boundary); Beyer et al., *SRE*,
+2016, Ch. 6 (graceful degradation). Sibling slice:
+`minsky-cli-fresh-clone-bootstrap` (same discipline at install time).
+
 ## Threat model
 
 Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
