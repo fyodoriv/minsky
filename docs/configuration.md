@@ -2,6 +2,8 @@
 
 Per-machine config at `~/.minsky/config.json`. Edit once, read on every minsky start.
 
+A complete annotated example ships at [`docs/example-config.json`](example-config.json) — copy it to `~/.minsky/config.json` and edit. It is strict JSON (`jq`-parseable); the `_*` keys are documentation-only and ignored by the runner.
+
 ## Minimal config
 
 ```json
@@ -68,6 +70,43 @@ minsky
 ```
 
 The daemon auto-detects the local model from the prefix and threads `--base-url` + `--reasoning-effort=none` + `--no-extended-thinking` to the shim. Verified end-to-end on 2026-05-24 against `qwen3-coder:30b` (the same model Minsky's legacy `aider` local agent uses). Tool-call reliability degrades below ~8B params — use `qwen3-coder:30b` or larger for production work.
+
+## Local-LLM fallback keys (`local_llm_enabled`, `local_llm.*`)
+
+Distinct from the `local_agent` / `cloud_agent_model: "ollama_chat/…"` paths above, the `local_llm_*` keys express a **declarative local-LLM-fallback preference** that `bin/minsky-run.sh` reads directly. Setting `local_llm_enabled: true` routes every iteration through the operator's local OpenAI-compatible endpoint (Ollama / LM Studio / MLX) with **zero env-var ceremony** — the operator's complete preference fits in one editable file.
+
+```json
+{
+  "cloud_agent": "devin",
+  "local_llm_enabled": true,
+  "local_llm": {
+    "model": "ollama_chat/qwen3-coder:30b",
+    "base_url": "http://localhost:11434"
+  },
+  "openhands": { "model": "claude-opus-4-7" }
+}
+```
+
+| Key | Default (as read in `bin/minsky-run.sh`) | What it controls |
+| --- | --- | --- |
+| `local_llm_enabled` | `false` | When `true`, every iteration uses the local backend instead of `cloud_agent`. Read at `jq -r '.local_llm_enabled // false'`. |
+| `local_llm.model` | `ollama_chat/qwen3-coder:30b` | LiteLLM model id for the local backend (`ollama_chat/<name>` for Ollama, `lm_studio/<name>` for LM Studio). Read at `jq -r '.local_llm.model // "…"'`. |
+| `local_llm.base_url` | `http://localhost:11434` | Base URL of the local OpenAI-compatible server (Ollama `:11434`, LM Studio `:1234`). Read at `jq -r '.local_llm.base_url // "…"'`. |
+| `cloud_agent` | `openhands` | Which agent runs when `local_llm_enabled` is `false`. Read at `jq -r '.cloud_agent // "openhands"'`. |
+| `openhands.model` | `claude-opus-4-7` | OpenHands LiteLLM model id when `cloud_agent: "openhands"` and not in local mode. Read at `jq -r '.openhands.model // "claude-opus-4-7"'`. |
+
+**Env override (wins per-run).** `MINSKY_LOCAL_LLM=1` forces `local_llm_enabled` on for one invocation without editing the file (escape hatch); the config value is the persistent default. This mirrors the resolution order at the top of this file: env var > `~/.minsky/config.json` > built-in default.
+
+**Verify the file is honored — no agent spawn.** A dry-run resolves and prints which provider the next iteration would use, before any host walk:
+
+```bash
+MINSKY_CONFIG=~/.minsky/config.json DRY_RUN=1 bin/minsky-run.sh --once --dry-run
+# config: local_llm=on model=ollama_chat/qwen3-coder:30b base-url=http://localhost:11434 (from …/config.json) [dry-run]
+```
+
+With no `--host` / `--hosts-dir`, the dry-run is a pure config-resolution preview (exit 0, no spawn). With a host, it falls through to the normal per-host `planned`-verdict dry-run.
+
+For the full local-model setup walkthrough (warming, keep-alive, tool-call reliability), see [docs/local-llm-fallback.md](local-llm-fallback.md).
 
 ## Agent comparison
 
