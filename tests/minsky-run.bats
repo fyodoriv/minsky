@@ -2173,3 +2173,52 @@ EOF
   # Even with opt-in env var, --dry-run gates out the audit.
   [ ! -f "$sentinel" ]
 }
+
+# --- config-as-code: --once alias + local_llm dry-run preview --------------
+# Pins minsky-config-json-support-local-llm-pref: the declarative
+# local-LLM-fallback preference in ~/.minsky/config.json is honored by a
+# zero-ceremony dry-run (no host, no spawn), and `--once` is a single-iteration
+# alias for --max-iterations 1.
+
+@test "--once is accepted (alias for --max-iterations 1)" {
+  host="$(make_host one "$(complete_task_block)")"
+  run "$MINSKY_RUN" --host "$host" --once --dry-run
+  [ "$status" -eq 0 ]
+  jsonl="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$jsonl" ]
+  # --once caps to exactly one iteration record.
+  [ "$(wc -l < "$jsonl" | tr -d ' ')" -eq 1 ]
+}
+
+@test "dry-run with local_llm_enabled prints local_llm=on to stdout (no host, exit 0)" {
+  printf '%s' '{"local_llm_enabled":true,"local_llm":{"model":"ollama_chat/qwen3-coder:30b","base_url":"http://localhost:11434"},"cloud_agent":"devin"}' > "$CONFIG_FILE"
+  run "$MINSKY_RUN" --once --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"local_llm=on"* ]]
+  [[ "$output" == *"model=ollama_chat/qwen3-coder:30b"* ]]
+  [[ "$output" == *"base-url=http://localhost:11434"* ]]
+}
+
+@test "dry-run local_llm preview honors MINSKY_LOCAL_LLM=1 env override" {
+  # Config has local_llm_enabled:false; the env override forces it on.
+  printf '%s' '{"local_llm_enabled":false,"local_llm":{"model":"lm_studio/qwen3-coder","base_url":"http://localhost:1234"}}' > "$CONFIG_FILE"
+  MINSKY_LOCAL_LLM=1 run "$MINSKY_RUN" --once --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"local_llm=on"* ]]
+  [[ "$output" == *"base-url=http://localhost:1234"* ]]
+}
+
+@test "dry-run without local_llm and no host still fails the hosts-dir invariant" {
+  # Regression guard: the config-preview early-exit must NOT swallow the
+  # historical invariant failure for the non-local-config path.
+  printf '%s' '{"openhands":{"model":"claude-opus-4-7"}}' > "$CONFIG_FILE"
+  run "$MINSKY_RUN" --once --dry-run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"INVARIANT FAIL"* ]] || [[ "$output" == *"required"* ]]
+}
+
+@test "--help documents the --once alias" {
+  run "$MINSKY_RUN" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--once"* ]]
+}

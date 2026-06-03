@@ -169,6 +169,49 @@ if [[ "${MINSKY_TICK_DRY_RUN:-}" != "1" && "${MINSKY_TICK_DRY_RUN:-}" != "true" 
   node "${MINSKY_HOME}/scripts/auto-close-orphan-prs.mjs" 2>&1 || true
   printf 'autonomic-fix: pass 2 — rebase dirty PRs (MINSKY_AUTO_REBASE_DIRTY_PRS=%s)\n' "${MINSKY_AUTO_REBASE_DIRTY_PRS:-on}"
   node "${MINSKY_HOME}/scripts/auto-rebase-dirty-prs.mjs" 2>&1 || true
+
+  # Daily metrics render (advisory, once-per-UTC-date). Without this the
+  # daemon never re-renders `docs/METRICS.md` — the TS daily-fire was
+  # deleted in phase-11b and the live bash daemon only runs self-diagnose
+  # / orphan-PR / rebase / auto-merge maintenance. `docs/METRICS.md` then
+  # goes dark: `_Updated:` stamps drift past their `_Budget:` windows and
+  # `scripts/check-metric-freshness.mjs` starts reporting stale sections —
+  # the canonical monitoring-data-going-dark silent failure (Beyer et al.,
+  # SRE 2016, Ch. 6). The daemon's existing commit path carries the bump.
+  #
+  # Idempotent: gated on the absence of a per-UTC-date sentinel under
+  # `${MINSKY_HOME}/.minsky/metric-render-sentinels/<date>` so it fires at
+  # MOST once per day. Re-running the maintenance block the same day is a
+  # no-op (the sentinel already exists). The sentinel dir lives under the
+  # gitignored `.minsky/` tree, so it never pollutes the working tree the
+  # auto-commit path scans.
+  #
+  # Errors are advisory (rule #7 graceful-degrade): a failed render (dirty
+  # tree, dist not built, sentinel-write race with a parallel agent) leaves
+  # the prior `docs/METRICS.md` in place and the next day's maintenance
+  # block retries — never blocks startup. The sentinel is written ONLY on a
+  # successful render so a failed render retries the same day.
+  #
+  # Opt-out: MINSKY_DAILY_METRICS_RENDER=off disables the fire entirely
+  # (rule #2 escape hatch). Default ON per rule #16 (Default by default) —
+  # a self-supervised dogfood loop that lets its own observability surface
+  # go stale is a constitutional violation of rule #4 (everything visible).
+  if [[ "${MINSKY_DAILY_METRICS_RENDER:-on}" != "off" ]]; then
+    metric_render_date="$(date -u +%F)"
+    metric_render_sentinel_dir="${MINSKY_HOME}/.minsky/metric-render-sentinels"
+    metric_render_sentinel="${metric_render_sentinel_dir}/${metric_render_date}"
+    if [[ -f "${metric_render_sentinel}" ]]; then
+      printf 'metrics-render: already rendered for %s (sentinel present); skipping\n' "${metric_render_date}"
+    else
+      printf 'metrics-render: rendering docs/METRICS.md for %s (MINSKY_DAILY_METRICS_RENDER=%s)\n' "${metric_render_date}" "${MINSKY_DAILY_METRICS_RENDER:-on}"
+      if bash "${MINSKY_HOME}/bin/minsky" metrics render 2>&1; then
+        mkdir -p "${metric_render_sentinel_dir}" 2>/dev/null || true
+        printf '%s\n' "$(date -u +%FT%TZ)" > "${metric_render_sentinel}" 2>/dev/null || true
+      else
+        printf 'metrics-render: render exited non-zero (advisory; will retry %s on next cycle)\n' "${metric_render_date}"
+      fi
+    fi
+  fi
 fi
 
 # Auto-merge sweep (advisory). Runs `scripts/auto-merge-clean-prs.mjs`

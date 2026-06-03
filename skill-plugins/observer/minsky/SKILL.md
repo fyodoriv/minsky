@@ -2,6 +2,7 @@
 name: minsky
 description: Start the Minsky autonomous run loop and PROACTIVELY monitor it. The caller launches minsky, then enters a monitoring loop — checking health every 30s, reading experiment records for verdicts + PR URLs, healing stale PIDs and spawn failures, restarting on crash, and reporting progress to the operator. Use when the user says "run minsky", "start minsky", "observe minsky", "watch minsky", "monitor minsky", "keep minsky running", or similar. CRITICAL — never block on a long-running command. Always use non-blocking spawns + periodic status checks.
 allowed-tools: Bash, Read, Grep, Glob
+protocol_version: v1
 ---
 
 # Minsky observer
@@ -319,8 +320,19 @@ MINSKY_NON_INTERACTIVE=1 minsky --max-iterations=1 --tick-interval-ms=0
 - **Match**: partial (need the fix to know if it drops to 0).
 - **Lesson**: `<one line>`.
 
+Protocol version: v1
+
 *🤖 Filed by the minsky observer. See Minsky's `skill-plugins/observer/minsky/SKILL.md` § 5.*
 ````
+
+**Always carry the `Protocol version: v<N>` line** — it pins each
+observer-filed PR to the exact protocol revision the observer followed,
+so a post-incident audit can read the PR against the protocol-as-of-that-PR
+rather than against today's (possibly evolved) protocol. The version is
+the `protocol_version` value in this SKILL.md's frontmatter; bump both
+the frontmatter and the `## Changelog` below whenever the protocol changes
+substantively (a new section, a changed escalation boundary, a new heal
+class). Pure metadata — it adds an audit trail, not a behaviour change.
 
 ### The PR creation commands
 
@@ -638,3 +650,35 @@ If you're ending your agent session but minsky should keep running:
 4. Tell the next session: "minsky daemon PID XXXX is running on
    <hosts-dir>. Config: <agent> + <model>. Check `minsky status` and
    `tail ~/.minsky/daemon.log`."
+
+## Changelog
+
+The observer protocol is versioned so every observer-filed PR (§5)
+cites the `Protocol version: v<N>` it followed — making each escalation
+auditable against the protocol-as-of-that-PR rather than against the
+current (possibly evolved) protocol. The version lives in this
+SKILL.md's `protocol_version` frontmatter field; bump it here AND in the
+frontmatter whenever the protocol changes substantively.
+
+### v1 — initial versioned protocol
+
+The five-section observer protocol the skill carries today:
+
+1. **Watch** (§2 Monitor loop) — non-blocking health probes every
+   30-60s, experiment-record reads for verdicts + PR URLs, and the
+   signal-classification table.
+2. **Restart** (§3 Restart, bounded) — stale-PID cleanup, the
+   ≤5-restarts/60-min budget, and the 10s/30s/60s/120s/120s backoff.
+3. **Safe-heal** (§4 Safe-heal, very bounded) — the catalogued
+   automated/operator-recipe/blocked-by-policy heals, scoped to
+   `.minsky/`, `node_modules/`, and `.tsbuildinfo` artefacts only.
+4. **Swift-PR** (§5 Swift-PR) — the draft-PR escalation path, the
+   upstream-repo picker, the PR-body template (now carrying the
+   `Protocol version: v<N>` line), and the ≤2-PRs/hour rate limit.
+5. **Log** (§6 Log) — one-JSON-object-per-line audit trail in
+   `.minsky/observer.log`.
+
+A version bump (v1 → v2) is warranted when any of these change
+substantively: a new top-level section, a changed escalation boundary,
+a new heal class promoted to `automated`, or a change to the Swift-PR
+upstream-routing table.
