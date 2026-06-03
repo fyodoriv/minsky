@@ -1,6 +1,6 @@
 // @ts-check
 // Deterministic unit tests for `summarizeRun` — the pure core of the per-run
-// observability summary (task `obs-run-session-ledger`). Fixtures in, known
+// observability summary. Fixtures in, known
 // summary out (Avizienis 2004 — uptime/continuity as a measured dependability
 // attribute). No I/O: the CLI wrapper does the file reads, this tests the math.
 import { describe, expect, it } from "vitest";

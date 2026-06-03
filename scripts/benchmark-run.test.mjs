@@ -1,7 +1,6 @@
 // @ts-check
-// Tests for the competitive self-column reducer (task
-// obs-live-competitive-self-column). Pure functions over a fixture run summary
-// + the real competitor corpus.
+// Tests for the competitive self-column reducer. Pure functions over a fixture
+// run summary + the real competitor corpus.
 import { describe, expect, it } from "vitest";
 import { buildScorecard, minskyReadings } from "./benchmark-run.mjs";
 
