@@ -51,6 +51,57 @@ _now_ms() {
   fi
 }
 
+# --- Runtime-resilience helpers (minsky-runtime-resilience) -----------------
+# Three live runtime failure modes used to abort the iteration with a raw
+# shell/errno (mkdir failure, unwritable log/brief target, missing run
+# target). These helpers move each failure to the operator-actionable
+# boundary: a one-line message that NAMES the path + the recovery command,
+# and — for the non-fatal log/brief case — a `${TMPDIR:-/tmp}` fallback so
+# the iteration continues. Loud-fail AT the right boundary (Armstrong 2003,
+# let-it-crash); graceful degradation for the non-fatal write (Beyer et al.,
+# SRE 2016, Ch. 6).
+
+# resilient_logfile <preferred-dir> <id> [suffix]
+# Returns (on stdout) a writable file path for a per-iteration log/brief.
+# If <preferred-dir> is writable, returns "<preferred-dir>/minsky-<id><suffix>".
+# Otherwise falls back to "${TMPDIR:-/tmp}/minsky-${USER:-anon}-<id><suffix>"
+# (USER-scoped to avoid multi-tenant /tmp collisions, per the task's Pivot
+# clause) and emits a one-line warn to stderr. Always prints a usable path
+# (rule #6: the function never aborts the iteration over a log target).
+resilient_logfile() {
+  local preferred_dir="$1"
+  local id="$2"
+  local suffix="${3:-.log}"
+  local safe_id="${id//\//_}"
+  if [[ -n "$preferred_dir" ]] && mkdir -p "$preferred_dir" 2>/dev/null && [[ -w "$preferred_dir" ]]; then
+    printf '%s/minsky-%s%s' "$preferred_dir" "$safe_id" "$suffix"
+    return 0
+  fi
+  local fallback_dir="${TMPDIR:-/tmp}"
+  echo "minsky-run: WARN log/brief target dir unwritable ($preferred_dir); falling back to $fallback_dir" >&2
+  printf '%s/minsky-%s-%s%s' "$fallback_dir" "${USER:-anon}" "$safe_id" "$suffix"
+}
+
+# preflight_run_target <path> [fix-hint]
+# Guards a required executable run target (the runner itself, the openhands
+# spawn shim). When the path is missing OR not executable, emits a one-line
+# message naming the path + the fix and returns non-zero — instead of
+# letting the caller surface `command not found` / `ENOENT` with no pointer.
+preflight_run_target() {
+  local target="$1"
+  local fix_hint="${2:-pnpm install (rebuilds workspaces) or chmod +x the path}"
+  if [[ ! -e "$target" ]]; then
+    echo "INVARIANT FAIL: run target missing: $target" >&2
+    echo "  fix: $fix_hint" >&2
+    return 1
+  fi
+  if [[ ! -x "$target" ]]; then
+    echo "INVARIANT FAIL: run target not executable: $target" >&2
+    echo "  fix: \`chmod +x $target\` (or $fix_hint)" >&2
+    return 1
+  fi
+}
+
 HOSTS_DIR=""
 SINGLE_HOST=""  # --host <repo> filter mode (PR #875: closes the smoke
                 # finding that `minsky --once <repo>` was iterating every
@@ -254,10 +305,29 @@ invariant_hosts_dir_readable() {
 
 invariant_host_experiment_store_writable() {
   # Invariant 4: each host's .minsky/experiment-store/cross-repo/ is creatable.
+  #
+  # Runtime-resilience (minsky-runtime-resilience): a bare
+  # `INVARIANT FAIL: cannot create $dir` (the pre-fix message) gave the
+  # operator no recovery path — on a wrong-owner MINSKY_HOME or a
+  # read-only mount, the iteration aborted with the raw mkdir errno and
+  # the operator had to reverse-engineer the fix. Now the failure names
+  # the path AND the concrete recovery command (chmod / MINSKY_HOME),
+  # then returns non-zero cleanly. Loud-fail AT the operator-actionable
+  # boundary (Armstrong 2003; SRE Ch. 6 graceful degradation).
   local host="$1"
   local dir="$host/.minsky/experiment-store/cross-repo"
-  mkdir -p "$dir" || { echo "INVARIANT FAIL: cannot create $dir" >&2; return 1; }
-  [[ -w "$dir" ]] || { echo "INVARIANT FAIL: $dir not writable" >&2; return 1; }
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    echo "INVARIANT FAIL: cannot create experiment-store dir: $dir" >&2
+    echo "  the parent path is unwritable (wrong owner, read-only mount, or restrictive perms)." >&2
+    echo "  fix: \`chmod u+w $host/.minsky\` (or the offending parent), or" >&2
+    echo "       set MINSKY_HOME=<a writable directory> and re-run." >&2
+    return 1
+  fi
+  if [[ ! -w "$dir" ]]; then
+    echo "INVARIANT FAIL: experiment-store dir not writable: $dir" >&2
+    echo "  fix: \`chmod u+w $dir\`, or set MINSKY_HOME=<a writable directory>." >&2
+    return 1
+  fi
 }
 
 invariant_pick_task_present() {
@@ -532,7 +602,14 @@ iterate_host() {
   # produce confusing iteration records against a host that's never
   # been intentionally bootstrapped.
   invariant_host_bootstrapped "$host" || return 1
-  invariant_host_experiment_store_writable "$host"
+  # `|| return 1` is load-bearing: iterate_host runs inside `if iterate_host
+  # …; then` in walk_hosts, which SUPPRESSES `set -e` for the whole function
+  # body. Without the explicit guard, the failed invariant's `return 1` is
+  # ignored and execution falls through to record_iteration's unguarded
+  # `mkdir`, re-surfacing the raw errno this branch exists to replace
+  # (minsky-runtime-resilience). Returning 1 here breaks walk_hosts's inner
+  # loop and moves to the next host — clean degradation, no raw errno.
+  invariant_host_experiment_store_writable "$host" || return 1
 
   # Resolve the GH_HOST for every gh call this iteration makes. Parity
   # port of `novel/cross-repo-runner/src/gh-host-resolve.ts`. The probe
@@ -947,6 +1024,22 @@ EOF
   # loop produced no PRs.
   local spawn_agent="$script_dir/../scripts/spawn_agent.py"
 
+  # Runtime-resilience preflight (minsky-runtime-resilience, branch c):
+  # guard the spawn shim BEFORE the watchdog wrappers invoke it. When the
+  # dispatcher is missing (partial clone, interrupted `pnpm install`) the
+  # `python3 "$spawn_agent" …` calls below would surface as a raw python
+  # `can't open file …: [Errno 2] No such file or directory` with no
+  # pointer at the fix. Move the failure to the operator-actionable
+  # boundary: name the path + the fix, record a spawn-failed verdict, and
+  # return cleanly so the daemon loop survives (rule #6, let-it-crash AT
+  # the right boundary — not a raw ENOENT mid-iteration).
+  if ! preflight_run_target "$spawn_agent" "pnpm install (restores scripts/spawn_agent.py)"; then
+    rm -f "$brief_file"
+    record_iteration "$host" "$iter_n" "$task_id" "$branch" "spawn-failed" "" \
+      "run target missing: scripts/spawn_agent.py (run pnpm install)" "$gh_host"
+    return 1
+  fi
+
   # Export the three MINSKY_* env vars the spawned agent (and the host's
   # rule lints) expect. Parity port of TS `spawn-plan.ts` § `env: { … }`.
   # Without these, the 12 host-side rule lints that key off
@@ -1348,9 +1441,15 @@ print(load_host_config(Path('$host')).host_repo)
   # context) and a watchdog kill mid-audit would leave the agent's
   # work-in-progress on disk. The operator can ^C to stop. The audit
   # is opt-in anyway (MINSKY_CTO_AUDIT_ON_DRAIN=1).
+  # Runtime-resilience (minsky-runtime-resilience, branch b): the CTO-audit
+  # log target is `$host/.minsky/`, an operator-supplied dir that can be
+  # unwritable (wrong-owner MINSKY_HOME, read-only mount). Pre-fix, an
+  # unwritable `$host/.minsky/` aborted the audit at the `mkdir -p` errno.
+  # Now `resilient_logfile` falls back to `${TMPDIR:-/tmp}/minsky-<user>-<id>.log`
+  # with a one-line warn and the audit continues (graceful degradation —
+  # the audit's value is the spawned agent's PR, not the log path).
   local audit_log
-  audit_log="$host/.minsky/cto-audit-${utc_date}.log"
-  mkdir -p "$(dirname "$audit_log")"
+  audit_log="$(resilient_logfile "$host/.minsky" "cto-audit-${utc_date}" ".log")"
 
   # Same worktree-isolation pattern as iterate_host — the CTO audit
   # ALSO runs a cloud agent with full git write access; if we leave it

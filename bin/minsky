@@ -179,6 +179,54 @@ _minsky_count_bootstrapped_siblings() {
   printf '%s' "$_count"
 }
 
+# ── Built-runtime guard (fresh-clone bootstrap, rule #6 loud-fail) ───
+#
+# On a fresh clone the foreground/daemon paths below `exec` a run
+# target — the Node runner `novel/cross-repo-runner/bin/minsky-run.mjs`
+# (when present) or the canonical bash runner `bin/minsky-run.sh`. The
+# `prepare` lifecycle hook (`tsc -b --force` in package.json) builds the
+# TS workspaces' `dist/` on `pnpm install`, so a normal `git clone &&
+# pnpm install` leaves both runnable with no separate build step.
+#
+# But a partial/interrupted install can leave the tree with NO runnable
+# entrypoint: an empty/gutted `minsky-run.mjs` AND a missing
+# `bin/minsky-run.sh`. Without this guard the operator would see a raw
+# node `ERR_MODULE_NOT_FOUND` (or a bare `bash: ...: No such file`)
+# instead of an actionable next step. Per Armstrong 2003 (let-it-crash
+# AT the actionable boundary), we crash loudly HERE with a one-line
+# `pnpm install` hint, not a stack trace deep in node's module loader.
+#
+# Pure-ish: the only I/O is `[ -s ]` / `[ -f ]` existence probes. The
+# repo dir is passed in ($1) so the function is callable against a
+# fixture tree from the bats suite (`tests/fresh-clone-bootstrap.bats`)
+# without touching the operator's real checkout.
+#
+# Returns 0 when a runnable entrypoint exists; prints the hint to
+# stderr and returns 1 when neither does.
+#
+# Source: TASKS.md `minsky-cli-fresh-clone-bootstrap`; rule #6
+# (stay-alive — loud-crash at the right boundary); pnpm docs (`prepare`
+# is the canonical build-on-install hook).
+_minsky_assert_built() {
+  local _ab_repo="$1"
+  local _ab_node_runner="$_ab_repo/novel/cross-repo-runner/bin/minsky-run.mjs"
+  local _ab_bash_runner="$_ab_repo/bin/minsky-run.sh"
+
+  # A runnable Node runner is a NON-EMPTY .mjs (`-s`): the gutted
+  # Path-A placeholder is a zero-byte file, which `-f` would wrongly
+  # accept. The bash runner just needs to exist + be executable.
+  if [ -s "$_ab_node_runner" ]; then
+    return 0
+  fi
+  if [ -x "$_ab_bash_runner" ]; then
+    return 0
+  fi
+
+  echo "minsky: no runnable entrypoint found (looked for $_ab_node_runner and $_ab_bash_runner)." >&2
+  echo "minsky: run \`pnpm install\` from the repo root to build it ($_ab_repo)." >&2
+  return 1
+}
+
 # ── Bash-skeleton probe set (shared by `doctor` and the deprecated
 #    `bash-doctor` alias) ──────────────────────────────────────────────
 #
@@ -832,6 +880,17 @@ try {
       echo "unknown"
     fi
     exit 0
+    ;;
+  __assert-built)
+    # Hidden test seam (double-underscore = not in help / not operator
+    # surface). Runs ONLY the built-runtime guard against a repo dir so
+    # `tests/fresh-clone-bootstrap.bats` can pin both branches against a
+    # fixture tree — never the real dist (no `rm -rf` race with
+    # concurrent test runs). Default repo = this script's repo root.
+    # Source: TASKS.md `minsky-cli-fresh-clone-bootstrap`.
+    _ab_target="${2:-$(dirname "$(dirname "$(_minsky_realpath "$0")")")}"
+    _minsky_assert_built "$_ab_target"
+    exit $?
     ;;
   status)
     if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
@@ -1702,6 +1761,27 @@ EOF
       _doctor_print PASS "gh" "$(gh --version 2>/dev/null | head -1)"
     else
       _doctor_print WARN "gh" "not on PATH (PR creation will be skipped)"
+    fi
+
+    # OPTIONAL — state dir writable (minsky-runtime-resilience)
+    # A wrong-owner MINSKY_HOME or a read-only mount makes the runtime
+    # experiment-store mkdir abort mid-iteration with a raw errno. Surface
+    # it here as a doctor row BEFORE the daemon starts, with the recovery
+    # command inline (the probe prints "<dir> (… chmod u+w …)" on failure).
+    # WARN-only — `minsky doctor`'s exit-0 invariant gates on the TS-path
+    # critical checks (node/git); a state-dir failure is operator-actionable
+    # but doesn't crit-fail the machine readiness contract pinned by
+    # test/integration/m1-red-green.test.ts. Delegates to
+    # scripts/bash-doctor-probes.sh so bin/minsky's "no python3 bootstrap
+    # cost" rule stays satisfied (the probe is pure shell).
+    _bd_probes_sd="$(dirname "$(readlink "$0" 2>/dev/null || echo "$0")")/../scripts/bash-doctor-probes.sh"
+    [ -f "$_bd_probes_sd" ] || _bd_probes_sd="$(dirname "$0")/../scripts/bash-doctor-probes.sh"
+    if [ -f "$_bd_probes_sd" ]; then
+      if _sd_out=$(MINSKY_HOME="$MINSKY_STATE_DIR" bash "$_bd_probes_sd" state-dir-writable 2>/dev/null); then
+        _doctor_print PASS "state-dir" "$_sd_out (writable)"
+      else
+        _doctor_print WARN "state-dir" "${_sd_out:-$MINSKY_STATE_DIR (unwritable)}"
+      fi
     fi
 
     # OPTIONAL — config
@@ -3375,6 +3455,12 @@ if [ "${1:-}" = "--daemon" ]; then
 
   mkdir -p "$MINSKY_STATE_DIR"
 
+  # Fresh-clone bootstrap guard (rule #6): refuse to background a daemon
+  # against an unbuilt tree. Without this the runner would write a
+  # node ERR_MODULE_NOT_FOUND storm into daemon.log before KeepAlive
+  # gives up. See TASKS.md `minsky-cli-fresh-clone-bootstrap`.
+  _minsky_assert_built "$MINSKY_REPO_PATH" || exit 1
+
   # Crash-recovery for the host repo. Delegates to the
   # `reset-host-if-crashed` subcommand which:
   #   - keeps the working tree intact if `<sidecar>/graceful-stop`
@@ -3470,8 +3556,13 @@ if [ -f "$RUNNER_BIN" ]; then
   exec node "$RUNNER_BIN" "$@"
 fi
 BASH_RUNNER_FALLBACK="$MINSKY_REPO_PATH/bin/minsky-run.sh"
+# Fresh-clone bootstrap guard (rule #6): when neither runnable
+# entrypoint exists (partial/interrupted install left the tree
+# unbuilt), emit the actionable `pnpm install` hint instead of a raw
+# `bash: ...: No such file` / node module-resolution error. See
+# TASKS.md `minsky-cli-fresh-clone-bootstrap`.
 if [ ! -x "$BASH_RUNNER_FALLBACK" ]; then
-  echo "minsky: Node runner missing at $RUNNER_BIN AND bash runner missing at $BASH_RUNNER_FALLBACK — repo is broken." >&2
+  _minsky_assert_built "$MINSKY_REPO_PATH"
   exit 1
 fi
 exec bash "$BASH_RUNNER_FALLBACK" "$@"

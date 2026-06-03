@@ -144,6 +144,36 @@ describe("checkPatternIndex", () => {
     expect(result.violations.length).toBe(1);
   });
 
+  test("new file under bin/ requires an index row", () => {
+    const result = checkPatternIndex({
+      changedFiles: [{ status: "A", path: "bin/minsky-new-verb" }],
+      visionMdContent: VISION_FIXTURE_NO_NEWPKG,
+      optOuts: new Map(),
+    });
+    expect(result.violations.length).toBe(1);
+    expect(result.violations[0]?.path).toBe("bin/minsky-new-verb");
+  });
+
+  test("new file under skill-plugins/ requires an index row", () => {
+    const result = checkPatternIndex({
+      changedFiles: [{ status: "A", path: "skill-plugins/observer/minsky/SKILL.md" }],
+      visionMdContent: VISION_FIXTURE_NO_NEWPKG,
+      optOuts: new Map(),
+    });
+    expect(result.violations.length).toBe(1);
+    expect(result.violations[0]?.path).toBe("skill-plugins/observer/minsky/SKILL.md");
+  });
+
+  test("new top-level *.yaml manifest requires an index row", () => {
+    const result = checkPatternIndex({
+      changedFiles: [{ status: "A", path: "Agentfile.yaml" }],
+      visionMdContent: VISION_FIXTURE_NO_NEWPKG,
+      optOuts: new Map(),
+    });
+    expect(result.violations.length).toBe(1);
+    expect(result.violations[0]?.path).toBe("Agentfile.yaml");
+  });
+
   test("a deleted file (status D) is never an addition → skipped", () => {
     const result = checkPatternIndex({
       changedFiles: [{ status: "D", path: "novel/orphan/src/foo.ts" }],
@@ -200,9 +230,14 @@ describe("isEligiblePath", () => {
     expect(isEligiblePath("VISION.md")).toBe(true);
     expect(isEligiblePath("distribution/systemd/foo.service")).toBe(true);
     expect(isEligiblePath(".github/workflows/ci.yml")).toBe(true);
+    expect(isEligiblePath("bin/minsky")).toBe(true);
+    expect(isEligiblePath("skill-plugins/observer/minsky/SKILL.md")).toBe(true);
+    expect(isEligiblePath("Agentfile.yaml")).toBe(true);
     expect(isEligiblePath("novel/widget/src/foo.test.ts")).toBe(false);
     expect(isEligiblePath("novel/widget/__fixtures__/x.json")).toBe(false);
     expect(isEligiblePath("docs/foo.md")).toBe(false); // not root
+    expect(isEligiblePath("docs/config.yaml")).toBe(false); // yaml not at root
+    expect(isEligiblePath("Agentfile.yml")).toBe(false); // .yml is not .yaml
     expect(isEligiblePath("novel/widget/node_modules/dep/index.js")).toBe(false);
   });
 });
