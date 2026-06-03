@@ -4,12 +4,48 @@
 // No @ts-check (matches sibling scripts/*.test.mjs convention).
 import { describe, expect, it } from "vitest";
 import {
+  buildProviderModeTransition,
   buildRunanyPolicyRecords,
   buildTickLedgerLine,
   decideHeal,
   decideWorkerPausePids,
   parseLaunchctlRunning,
 } from "./orchestrate.mjs";
+
+describe("buildProviderModeTransition (runtime token-limit auto-pivot ledger)", () => {
+  it("records a remote→local forward fallback with its trigger", () => {
+    const r = buildProviderModeTransition({
+      from: "remote",
+      to: "local",
+      trigger: "local-fallback",
+      ts: "2026-05-17T06:11:28Z",
+    });
+    expect(r["event"]).toBe("provider-mode-transition");
+    expect(r["from"]).toBe("remote");
+    expect(r["to"]).toBe("local");
+    expect(r["trigger"]).toBe("local-fallback");
+    expect(r["ts"]).toBe("2026-05-17T06:11:28Z");
+  });
+
+  it("records a local→remote recover flip-back, carrying the re-pinned model", () => {
+    const r = buildProviderModeTransition({
+      from: "local",
+      to: "remote",
+      trigger: "recover-flip-back",
+      model: "claude-opus-4-7",
+    });
+    expect(r["from"]).toBe("local");
+    expect(r["to"]).toBe("remote");
+    expect(r["model"]).toBe("claude-opus-4-7");
+  });
+
+  it("omits optional fields when absent (no empty model/runId keys)", () => {
+    const r = buildProviderModeTransition({ from: "remote", to: "local", trigger: "t" });
+    expect("model" in r).toBe(false);
+    expect("runId" in r).toBe(false);
+    expect(typeof r["ts"]).toBe("string");
+  });
+});
 
 describe("decideHeal (conductor self-heal decision)", () => {
   it("worker alive ⇒ ok (no heal)", () => {

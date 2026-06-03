@@ -3,8 +3,18 @@
 // <!-- scope: human-approved 2026-05-26 operator "In minsky I don't want to run anything, it should resolve things automatically as rational" -->
 //
 // Auto-rebase (or close-as-superseded) daemon-authored PRs stuck in
-// DIRTY state for >2h. Converts the `daemon-pr-stuck-dirty` self-
-// diagnose finding from `[👤 needs-operator]` → `[🤖 minsky-will-fix]`.
+// DIRTY *or* CONFLICTING state for >2h. Converts the
+// `daemon-pr-stuck-dirty` / `daemon-pr-stuck-conflicting` self-diagnose
+// findings from `[👤 needs-operator]` → `[🤖 minsky-will-fix]`.
+//
+// CONFLICTING extension (rule #9 — pre-registered, task
+// `daemon-stuck-pr-rebase-watchdog`): a long monitoring window found
+// daemon PRs wedged CONFLICTING as `main` advanced under them — the #1
+// manual-intervention class. `decideRebaseAction` now classifies
+// `mergeStateStatus=="CONFLICTING"` for the same rebase-or-close
+// treatment it already gives `DIRTY`, and the rollup carries a
+// `conflicting` count so the supervisor's ledger can track the
+// population the watchdog cleared.
 //
 // Pattern (matching `auto-merge-clean-prs.mjs` + `local-gate-merge.mjs`):
 // pure decision function (`decideRebaseAction`) over a `gh pr list`
@@ -49,11 +59,17 @@ const DEFAULT_LIMIT = 3;
 const MIN_AGE_HOURS = 2;
 const DAEMON_BRANCH_PREFIXES = ["feat/", "fix/", "chore/", "docs/", "refactor/", "test/"];
 
+// Merge-state statuses that signal an un-mergeable PR the watchdog should
+// rebase-or-close. DIRTY = local merge conflict; CONFLICTING = GitHub's
+// computed conflict against the current base (the failure mode where main
+// advanced under the PR). Both get identical rebase-or-close treatment.
+const STUCK_MERGE_STATES = ["DIRTY", "CONFLICTING"];
+
 /**
  * @typedef {object} OpenPrSnapshot
  * @property {number} number
  * @property {string} headRefName
- * @property {string} mergeStateStatus   - "DIRTY" | "CLEAN" | "BLOCKED" | "BEHIND" | "UNSTABLE" | "UNKNOWN"
+ * @property {string} mergeStateStatus   - "DIRTY" | "CONFLICTING" | "CLEAN" | "BLOCKED" | "BEHIND" | "UNSTABLE" | "UNKNOWN"
  * @property {string} title
  * @property {string} createdAt          - ISO 8601 timestamp
  * @property {string} author             - login of the PR author
@@ -62,6 +78,7 @@ const DAEMON_BRANCH_PREFIXES = ["feat/", "fix/", "chore/", "docs/", "refactor/",
  * @property {number} pr
  * @property {"rebase" | "close-superseded" | "skip"} action
  * @property {string} reason
+ * @property {"DIRTY" | "CONFLICTING" | undefined} [stuckState] - which stuck state triggered the rebase (set on action="rebase")
  */
 
 /**
@@ -78,9 +95,11 @@ export function decideRebaseAction(prs, { nowMs, limit = DEFAULT_LIMIT }) {
   let acted = 0;
   for (const pr of prs) {
     if (acted >= limit) break;
-    // Only act on DIRTY PRs (merge conflict). CLEAN/MERGEABLE PRs go
-    // through the gh-native auto-merge stage 1 path.
-    if (pr.mergeStateStatus !== "DIRTY") continue;
+    // Only act on DIRTY/CONFLICTING PRs (merge conflict, computed either
+    // locally or by GitHub against the advanced base). CLEAN/MERGEABLE
+    // PRs go through the gh-native auto-merge stage 1 path.
+    if (!STUCK_MERGE_STATES.includes(pr.mergeStateStatus)) continue;
+    const stuckState = /** @type {"DIRTY" | "CONFLICTING"} */ (pr.mergeStateStatus);
     // Bound by age — flake on a fresh push isn't auto-rebase material.
     const ageHours = (nowMs - Date.parse(pr.createdAt)) / 3_600_000;
     if (ageHours < MIN_AGE_HOURS) {
@@ -110,7 +129,8 @@ export function decideRebaseAction(prs, { nowMs, limit = DEFAULT_LIMIT }) {
     decisions.push({
       pr: pr.number,
       action: "rebase",
-      reason: `DIRTY for ${ageHours.toFixed(1)}h on ${pr.headRefName}`,
+      reason: `${stuckState} for ${ageHours.toFixed(1)}h on ${pr.headRefName}`,
+      stuckState,
     });
     acted += 1;
   }
@@ -189,7 +209,7 @@ function closePrAsSupersededViaGh(prNumber) {
       "close",
       String(prNumber),
       "--comment",
-      `Auto-closed by \`daemon-auto-rebase-dirty-prs\` — \`gh pr update-branch\` failed with conflicts after >${MIN_AGE_HOURS}h DIRTY. The daemon's next iteration will re-open a fresh PR if the underlying task is still picked. See \`scripts/auto-rebase-dirty-prs.mjs\` for the autonomic-loop rationale.`,
+      `Auto-closed by \`daemon-auto-rebase-dirty-prs\` — \`gh pr update-branch\` failed with conflicts after >${MIN_AGE_HOURS}h DIRTY/CONFLICTING. The daemon's next iteration will re-open a fresh PR if the underlying task is still picked. See \`scripts/auto-rebase-dirty-prs.mjs\` for the autonomic-loop rationale.`,
     ],
     { encoding: "utf8" },
   );
@@ -201,12 +221,12 @@ function closePrAsSupersededViaGh(prNumber) {
  *
  * @param {RebaseDecision} d
  * @param {{ rebaseFn: (n: number) => "rebased" | "conflict" | "transient", closeFn: (n: number) => void }} io
- * @returns {{ pr: number, outcome: "rebased" | "closed-superseded" | "transient-error", reason: string }}
+ * @returns {{ pr: number, outcome: "rebased" | "closed-superseded" | "transient-error", reason: string, stuckState?: "DIRTY" | "CONFLICTING" | undefined }}
  */
 function executeOneRebase(d, { rebaseFn, closeFn }) {
   const result = rebaseFn(d.pr);
   if (result === "rebased") {
-    return { pr: d.pr, outcome: "rebased", reason: d.reason };
+    return { pr: d.pr, outcome: "rebased", reason: d.reason, stuckState: d.stuckState };
   }
   if (result === "conflict") {
     closeFn(d.pr);
@@ -214,12 +234,14 @@ function executeOneRebase(d, { rebaseFn, closeFn }) {
       pr: d.pr,
       outcome: "closed-superseded",
       reason: `${d.reason} (conflict escalated)`,
+      stuckState: d.stuckState,
     };
   }
   return {
     pr: d.pr,
     outcome: "transient-error",
     reason: `${d.reason} (will retry next cycle)`,
+    stuckState: d.stuckState,
   };
 }
 
@@ -232,10 +254,10 @@ function executeOneRebase(d, { rebaseFn, closeFn }) {
  *   closeFn: (n: number) => void,
  *   dryRun: boolean,
  * }} io
- * @returns {readonly { pr: number, outcome: "rebased" | "closed-superseded" | "skipped" | "transient-error" | "dry-run", reason: string }[]}
+ * @returns {readonly { pr: number, outcome: "rebased" | "closed-superseded" | "skipped" | "transient-error" | "dry-run", reason: string, stuckState?: "DIRTY" | "CONFLICTING" | undefined }[]}
  */
 export function executeDecisions(decisions, { rebaseFn, closeFn, dryRun }) {
-  /** @type {{ pr: number, outcome: "rebased" | "closed-superseded" | "skipped" | "transient-error" | "dry-run", reason: string }[]} */
+  /** @type {{ pr: number, outcome: "rebased" | "closed-superseded" | "skipped" | "transient-error" | "dry-run", reason: string, stuckState?: "DIRTY" | "CONFLICTING" | undefined }[]} */
   const outcomes = [];
   for (const d of decisions) {
     if (d.action === "skip") {
@@ -243,7 +265,12 @@ export function executeDecisions(decisions, { rebaseFn, closeFn, dryRun }) {
       continue;
     }
     if (dryRun) {
-      outcomes.push({ pr: d.pr, outcome: "dry-run", reason: `would ${d.action}: ${d.reason}` });
+      outcomes.push({
+        pr: d.pr,
+        outcome: "dry-run",
+        reason: `would ${d.action}: ${d.reason}`,
+        stuckState: d.stuckState,
+      });
       continue;
     }
     if (d.action === "rebase") {
@@ -251,6 +278,31 @@ export function executeDecisions(decisions, { rebaseFn, closeFn, dryRun }) {
     }
   }
   return outcomes;
+}
+
+/**
+ * Roll up per-PR outcomes into supervisor-ledger counts. Extracted as a
+ * pure function (rule #2) so the `conflicting` counter the task requires
+ * is unit-testable without the I/O `isMain` block. The `conflicting`
+ * count is the number of acted-on PRs whose stuck state was CONFLICTING
+ * (the watchdog's new population) — orthogonal to the rebased/closed
+ * action axis, so a CONFLICTING PR that gets rebased counts toward both
+ * `rebased` and `conflicting`.
+ *
+ * @param {readonly { outcome: string, stuckState?: "DIRTY" | "CONFLICTING" | undefined, pr?: number, reason?: string }[]} outcomes
+ * @returns {{ rebased: number, closed: number, skipped: number, transient: number, dryRun: number, conflicting: number }}
+ */
+export function rollupOutcomes(outcomes) {
+  const acted = new Set(["rebased", "closed-superseded", "transient-error", "dry-run"]);
+  return {
+    rebased: outcomes.filter((o) => o.outcome === "rebased").length,
+    closed: outcomes.filter((o) => o.outcome === "closed-superseded").length,
+    skipped: outcomes.filter((o) => o.outcome === "skipped").length,
+    transient: outcomes.filter((o) => o.outcome === "transient-error").length,
+    dryRun: outcomes.filter((o) => o.outcome === "dry-run").length,
+    conflicting: outcomes.filter((o) => o.stuckState === "CONFLICTING" && acted.has(o.outcome))
+      .length,
+  };
 }
 
 /* v8 ignore start */
@@ -278,18 +330,15 @@ if (isMain) {
     closeFn: closePrAsSupersededViaGh,
     dryRun,
   });
-  const rollup = {
-    rebased: outcomes.filter((o) => o.outcome === "rebased").length,
-    closed: outcomes.filter((o) => o.outcome === "closed-superseded").length,
-    skipped: outcomes.filter((o) => o.outcome === "skipped").length,
-    transient: outcomes.filter((o) => o.outcome === "transient-error").length,
-    dryRun: outcomes.filter((o) => o.outcome === "dry-run").length,
-  };
+  const rollup = rollupOutcomes(outcomes);
   if (asJson) {
-    process.stdout.write(`${JSON.stringify({ outcomes, rollup }, null, 2)}\n`);
+    // Top-level `rebased`/`closed`/`skipped`/`conflicting` keys mirror the
+    // task's Measurement command, which asserts all four exist on the
+    // parsed JSON. `outcomes` + `rollup` carry the detailed breakdown.
+    process.stdout.write(`${JSON.stringify({ ...rollup, outcomes, rollup }, null, 2)}\n`);
   } else {
     process.stdout.write(
-      `daemon-auto-rebase-dirty-prs: ${rollup.rebased} rebased · ${rollup.closed} closed-superseded · ${rollup.skipped} skipped · ${rollup.transient} transient${dryRun ? ` · ${rollup.dryRun} dry-run` : ""}\n`,
+      `daemon-auto-rebase-dirty-prs: ${rollup.rebased} rebased · ${rollup.closed} closed-superseded · ${rollup.skipped} skipped · ${rollup.transient} transient · ${rollup.conflicting} conflicting${dryRun ? ` · ${rollup.dryRun} dry-run` : ""}\n`,
     );
     for (const o of outcomes) {
       process.stdout.write(`  #${o.pr}: ${o.outcome} — ${o.reason}\n`);

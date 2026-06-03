@@ -12,6 +12,7 @@ import {
   daemonNoopIterationRateInvariant,
   daemonNoProgressRateInvariant,
   daemonPrLintPassRateInvariant,
+  daemonPrStuckConflictingInvariant,
   daemonPrStuckDirtyInvariant,
   daemonPrStuckOnCiInvariant,
   daemonPrThrashInvariant,
@@ -957,6 +958,50 @@ describe("daemonPrStuckDirtyInvariant", () => {
   it("uses default threshold of 2 hours when none provided", async () => {
     const openDaemonPrs = async () => [{ number: 1, mergeableState: "dirty", ageHours: 2.5 }];
     const result = await daemonPrStuckDirtyInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(false);
+  });
+
+  it("does NOT fire on a conflicting PR — that's the conflicting invariant's job", async () => {
+    const openDaemonPrs = async () => [{ number: 1, mergeableState: "conflicting", ageHours: 9 }];
+    const result = await daemonPrStuckDirtyInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("daemonPrStuckConflictingInvariant", () => {
+  it("passes when no PR is conflicting", async () => {
+    const openDaemonPrs = async () => [
+      { number: 1, mergeableState: "clean", ageHours: 5 },
+      { number: 2, mergeableState: "dirty", ageHours: 10 },
+    ];
+    const result = await daemonPrStuckConflictingInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when a conflicting PR is younger than the threshold", async () => {
+    const openDaemonPrs = async () => [{ number: 1, mergeableState: "conflicting", ageHours: 1 }];
+    const result = await daemonPrStuckConflictingInvariant({ openDaemonPrs, maxAgeHours: 2 })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires for conflicting PRs older than threshold (the watchdog finding)", async () => {
+    const openDaemonPrs = async () => [
+      { number: 322, mergeableState: "conflicting", ageHours: 3 },
+      { number: 999, mergeableState: "conflicting", ageHours: 6.5 },
+    ];
+    const result = await daemonPrStuckConflictingInvariant({ openDaemonPrs, maxAgeHours: 2 })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("daemon-pr-stuck-conflicting");
+    expect(result.evidence).toContain("#322");
+    expect(result.evidence).toContain("3.0h");
+    expect(result.suggestedFix).toContain("gh pr update-branch 322");
+    expect(result.suggestedFix).toContain("auto-rebase-dirty-prs.mjs");
+  });
+
+  it("uses default threshold of 2 hours when none provided", async () => {
+    const openDaemonPrs = async () => [{ number: 1, mergeableState: "conflicting", ageHours: 2.5 }];
+    const result = await daemonPrStuckConflictingInvariant({ openDaemonPrs })();
     expect(result.ok).toBe(false);
   });
 });

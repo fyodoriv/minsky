@@ -634,3 +634,179 @@ class TestResolveAgentArgvMaxIterations:
         assert result is not None
         assert "openhands" in result[0]
         assert "--max-iterations" not in result
+
+
+# --- argv regression matrix (cloud-agent-spawn-argv-regression-matrix) -----
+#
+# One example-table per backend pins the LIVE spawn-argv contract so drift is
+# caught in CI (<5 min) instead of in a multi-hour daemon run. Each row is a
+# (flag, value) pair the backend's full argv MUST carry, in `--flag value`
+# order. The flag-presence test asserts every required flag for every backend;
+# the position test asserts each flag's value sits immediately after it; the
+# mutation tripwire proves that dropping a required flag from the expected
+# table turns the assertion red with the flag named.
+#
+# Pattern: example-table-driven scenarios (Wynne & Helleso/y, The Cucumber
+# Book, 2012, Ch. 1). The spawn contract lives behind one module seam
+# (resolve_agent_argv) per Parnas 1972.
+
+# (brief, repo, model) used by every matrix row — fixed so position math is
+# deterministic regardless of the optional shim-only flags.
+_MATRIX_BRIEF = "/brief.md"
+_MATRIX_REPO = "/host/repo"
+_MATRIX_MODEL = "claude-opus-4-7"
+
+# Per-backend required (flag, value) contract. These are the flags whose
+# absence makes the spawn a no-op / wrong-target: the brief, the repo, and the
+# model must all reach the agent. Canonical uses --task-file/--workspace; the
+# shim uses --brief-file/--repo. The model flag name is shared.
+_CANONICAL_REQUIRED: list[tuple[str, str]] = [
+    ("--task-file", _MATRIX_BRIEF),
+    ("--workspace", _MATRIX_REPO),
+    ("--model", _MATRIX_MODEL),
+]
+_SHIM_REQUIRED: list[tuple[str, str]] = [
+    ("--brief-file", _MATRIX_BRIEF),
+    ("--repo", _MATRIX_REPO),
+    ("--model", _MATRIX_MODEL),
+]
+
+
+def _matrix_argv(openhands_on_path: bool, shim_path: Path) -> list[str]:
+    """Resolve the argv for one matrix backend with the fixed request."""
+    result = resolve_agent_argv(
+        brief_file=_MATRIX_BRIEF,
+        repo=_MATRIX_REPO,
+        model=_MATRIX_MODEL,
+        openhands_on_path=openhands_on_path,
+        shim_path=shim_path,
+    )
+    assert result is not None, "matrix backend resolved to None"
+    return result
+
+
+def _assert_flag_value(argv: list[str], flag: str, value: str) -> None:
+    """Assert `flag` is present and immediately followed by `value`.
+
+    Failure messages name the missing flag so a red mutation row is
+    self-diagnosing (Success criterion 2)."""
+    assert flag in argv, f"required flag {flag} missing from argv {argv!r}"
+    idx = argv.index(flag)
+    assert idx + 1 < len(argv), f"required flag {flag} has no value in {argv!r}"
+    assert argv[idx + 1] == value, (
+        f"required flag {flag} should carry {value!r}, got {argv[idx + 1]!r}"
+    )
+
+
+# Backend × required-flag product: 2 backends × 3 required flags = 6 cases.
+_ARGV_MATRIX_ROWS = [
+    pytest.param(True, flag, value, id=f"canonical-{flag.lstrip('-')}")
+    for flag, value in _CANONICAL_REQUIRED
+] + [
+    pytest.param(False, flag, value, id=f"shim-{flag.lstrip('-')}")
+    for flag, value in _SHIM_REQUIRED
+]
+
+
+@pytest.fixture
+def matrix_shim(tmp_path: Path) -> Path:
+    """A real existing file so resolve_agent_argv's is_file() check passes
+    on the shim branch. Contents are irrelevant — argv resolution never
+    reads them."""
+    shim = tmp_path / "matrix-shim.py"
+    shim.write_text("#!/usr/bin/env python3\n# matrix stub\n")
+    return shim
+
+
+class TestResolveAgentArgvMatrix:
+    """The argv regression matrix proper — `pytest -k argv_matrix` selects it."""
+
+    @pytest.mark.parametrize(
+        ("openhands_on_path", "flag", "value"), _ARGV_MATRIX_ROWS
+    )
+    def test_argv_matrix_required_flag_present_and_positioned(
+        self,
+        openhands_on_path: bool,
+        flag: str,
+        value: str,
+        matrix_shim: Path,
+    ) -> None:
+        """Each backend's full argv carries every required flag in
+        `--flag value` order. 6 parameterized cases (2 backends × 3 flags)."""
+        argv = _matrix_argv(openhands_on_path, matrix_shim)
+        _assert_flag_value(argv, flag, value)
+
+    @pytest.mark.parametrize(
+        ("openhands_on_path", "required"),
+        [
+            pytest.param(True, _CANONICAL_REQUIRED, id="canonical-full-contract"),
+            pytest.param(False, _SHIM_REQUIRED, id="shim-full-contract"),
+        ],
+    )
+    def test_argv_matrix_full_contract(
+        self,
+        openhands_on_path: bool,
+        required: list[tuple[str, str]],
+        matrix_shim: Path,
+    ) -> None:
+        """The full per-backend contract holds at once: every required
+        (flag, value) is present and positioned. Cross-checks the per-flag
+        rows above — a backend that satisfies each flag in isolation must
+        also satisfy them together."""
+        argv = _matrix_argv(openhands_on_path, matrix_shim)
+        for flag, value in required:
+            _assert_flag_value(argv, flag, value)
+
+    @pytest.mark.parametrize(
+        ("openhands_on_path", "required", "dropped"),
+        [
+            # Mutation tripwire: a hand-edited expected table that DROPS a
+            # required flag must turn ≥1 case red, and the message must name
+            # the dropped flag (Success criterion 2). We invert the contract:
+            # the dropped flag MUST be absent from `required` (proving the
+            # mutation took) yet MUST still be present in the live argv
+            # (proving the live contract still ships it). If a future refactor
+            # quietly stops emitting the flag, the second assert flips red —
+            # the matrix detects the regression.
+            pytest.param(
+                True, _CANONICAL_REQUIRED, "--model", id="canonical-drop-model"
+            ),
+            pytest.param(
+                True, _CANONICAL_REQUIRED, "--task-file", id="canonical-drop-task-file"
+            ),
+            pytest.param(
+                False, _SHIM_REQUIRED, "--model", id="shim-drop-model"
+            ),
+            pytest.param(
+                False, _SHIM_REQUIRED, "--brief-file", id="shim-drop-brief-file"
+            ),
+        ],
+    )
+    def test_argv_matrix_dropping_required_flag_is_detected(
+        self,
+        openhands_on_path: bool,
+        required: list[tuple[str, str]],
+        dropped: str,
+        matrix_shim: Path,
+    ) -> None:
+        """Drop `dropped` from the expected table; the remaining contract is
+        still asserted against the live argv, and the dropped flag is proven
+        to STILL ship live. This pins both directions: the mutation is real
+        (flag absent from `required`) and the live argv has not regressed
+        (flag present in argv)."""
+        mutated = [(f, v) for (f, v) in required if f != dropped]
+        assert any(f == dropped for f, _ in required), (
+            f"{dropped} should have been in the pristine contract"
+        )
+        assert all(f != dropped for f, _ in mutated), (
+            f"mutation failed to drop {dropped}"
+        )
+        argv = _matrix_argv(openhands_on_path, matrix_shim)
+        # The surviving flags still hold.
+        for flag, value in mutated:
+            _assert_flag_value(argv, flag, value)
+        # The dropped flag is STILL emitted live — if this regresses, the
+        # failure message names the flag.
+        assert dropped in argv, (
+            f"live spawn argv dropped required flag {dropped}: {argv!r}"
+        )

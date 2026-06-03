@@ -298,6 +298,63 @@ def test_pick_host_task_returns_none_when_no_eligible_tasks() -> None:
     assert chosen is None
 
 
+# --- Tag/section priority-discipline tests -------------------------------
+# Regression for `daemon-priority-discipline-picktask-bug`: a `p1`-tagged
+# block physically placed in `## P0` was returned ahead of every genuine
+# `p0`-tagged block below it, because the picker walked `PRIORITY_ORDER` by
+# section header only and never consulted `tags`.
+
+TAG_SECTION_MISMATCH_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "picker-tag-section-mismatch.md"
+)
+
+
+def test_pick_host_task_skips_p1_tagged_block_misfiled_in_p0() -> None:
+    content = TAG_SECTION_MISMATCH_FIXTURE.read_text(encoding="utf-8")
+    chosen = pick_task.pick_host_task(content)
+    assert chosen is not None
+    # The misfiled p1-in-P0 block must NOT shadow the genuine p0 block.
+    assert chosen.id != "misplaced-p1-in-p0"
+
+
+def test_pick_host_task_returns_genuine_p0_over_misfiled_p1() -> None:
+    content = TAG_SECTION_MISMATCH_FIXTURE.read_text(encoding="utf-8")
+    chosen = pick_task.pick_host_task(content)
+    assert chosen is not None
+    assert chosen.id == "genuine-p0"
+
+
+def test_tags_match_section_rejects_contradicting_priority_tag() -> None:
+    misfiled = pick_task.ParsedTask(
+        title="x", priority="P0", id="x", tags=["p1", "picker"]
+    )
+    assert not pick_task.tags_match_section(misfiled)
+
+
+def test_tags_match_section_accepts_aligned_priority_tag() -> None:
+    aligned = pick_task.ParsedTask(
+        title="x", priority="P0", id="x", tags=["p0", "picker"]
+    )
+    assert pick_task.tags_match_section(aligned)
+
+
+def test_tags_match_section_accepts_absent_priority_tag() -> None:
+    # Back-compat: a block that omits the redundant priority tag is NOT a
+    # contradiction and stays eligible.
+    untagged = pick_task.ParsedTask(
+        title="x", priority="P0", id="x", tags=["picker"]
+    )
+    assert pick_task.tags_match_section(untagged)
+
+
+def test_tags_match_section_is_case_insensitive() -> None:
+    # `P0` section vs an uppercase `P0` tag both normalise — no false skip.
+    upper = pick_task.ParsedTask(
+        title="x", priority="P0", id="x", tags=["P0", "picker"]
+    )
+    assert pick_task.tags_match_section(upper)
+
+
 # --- findTask parity tests -----------------------------------------------
 
 
@@ -689,6 +746,84 @@ class TestPickHostTaskWithAllPrs:
         chosen = pick_task.pick_host_task(tasks_md)
         assert chosen is not None
         assert chosen.id == "my-task"
+
+
+# --- TaskSource port (rule #2 — Ports & Adapters) ------------------------
+
+
+class TestTaskSourcePort:
+    """The `TaskSource` Protocol + `TasksMdTaskSource` adapter round-trip.
+
+    Pins the rule-#2 seam: `TasksMdTaskSource` satisfies the `TaskSource`
+    Protocol and routes the three port verbs (`list_open_tasks`,
+    `get_task`, `find`) through the existing parser with zero behavior
+    change vs the module-level functions.
+    """
+
+    def test_tasks_md_source_satisfies_task_source_protocol(self) -> None:
+        source = pick_task.TasksMdTaskSource(content=SAMPLE_TASKS_MD)
+        # runtime_checkable Protocol — structural conformance check.
+        assert isinstance(source, pick_task.TaskSource)
+
+    def test_list_open_tasks_matches_parse_tasks_md(self) -> None:
+        source = pick_task.TasksMdTaskSource(content=SAMPLE_TASKS_MD)
+        via_port = source.list_open_tasks()
+        direct = pick_task.parse_tasks_md(SAMPLE_TASKS_MD)
+        assert [t.id for t in via_port] == [t.id for t in direct]
+
+    def test_get_task_returns_matching_record(self) -> None:
+        source = pick_task.TasksMdTaskSource(content=SAMPLE_TASKS_MD)
+        task = source.get_task("proj-840-slash-command-labels")
+        assert task is not None
+        assert task.id == "proj-840-slash-command-labels"
+
+    def test_get_task_returns_none_for_unknown_id(self) -> None:
+        source = pick_task.TasksMdTaskSource(content=SAMPLE_TASKS_MD)
+        assert source.get_task("no-such-task") is None
+
+    def test_find_matches_module_level_find_task(self) -> None:
+        source = pick_task.TasksMdTaskSource(content=SAMPLE_TASKS_MD)
+        via_port = source.find("slash command")
+        direct = pick_task.find_task(SAMPLE_TASKS_MD, "slash command")
+        assert via_port.ok == direct.ok
+        assert via_port.task is not None and direct.task is not None
+        assert via_port.task.id == direct.task.id
+
+    def test_constructs_from_path(self) -> None:
+        # The daemon's case: TasksMdTaskSource('TASKS.md').
+        tasks_md = Path(__file__).parent.parent / "TASKS.md"
+        if not tasks_md.is_file():
+            return  # Tolerated when run from a sub-directory checkout.
+        source = pick_task.TasksMdTaskSource(str(tasks_md))
+        assert callable(getattr(source, "list_open_tasks"))
+        tasks = source.list_open_tasks()
+        assert len(tasks) > 0
+
+    def test_requires_exactly_one_of_path_or_content(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError):
+            pick_task.TasksMdTaskSource()  # neither
+        with pytest.raises(ValueError):
+            pick_task.TasksMdTaskSource("TASKS.md", content="x")  # both
+
+    def test_pick_from_source_equals_pick_host_task(self) -> None:
+        # The interface-routed picker must agree with the string-routed one.
+        source = pick_task.TasksMdTaskSource(content=P0_BEFORE_P1_TASKS_MD)
+        via_port = pick_task.pick_from_source(source)
+        direct = pick_task.pick_host_task(P0_BEFORE_P1_TASKS_MD)
+        assert via_port is not None and direct is not None
+        assert via_port.id == direct.id == "high-priority-task"
+
+    def test_pick_from_source_honors_filters(self) -> None:
+        # open-PR filter routed through the port skips the P0, falls to P1.
+        source = pick_task.TasksMdTaskSource(content=P0_BEFORE_P1_TASKS_MD)
+        chosen = pick_task.pick_from_source(
+            source,
+            open_pr_branches=["feat/high-priority-task"],
+        )
+        assert chosen is not None
+        assert chosen.id == "low-priority-task"
 
 
 def _build_tasks_md_with_one_task(task_id: str) -> str:

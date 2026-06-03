@@ -5,7 +5,15 @@
 
 import { describe, expect, it } from "vitest";
 
-import { makeTcpProbe, parseArgs, parseBackends, resolvePin } from "./runany-resolve-model.mjs";
+import {
+  makeTcpProbe,
+  parseArgs,
+  parseBackends,
+  parseDwellMs,
+  parseGoodProbesNeeded,
+  parseLocalSinceMarker,
+  resolvePin,
+} from "./runany-resolve-model.mjs";
 
 describe("parseBackends", () => {
   it("defaults to the single Anthropic backend when unset", () => {
@@ -61,12 +69,70 @@ describe("resolvePin", () => {
 });
 
 describe("parseArgs", () => {
-  it("defaults both flags off", () => {
-    expect(parseArgs([])).toEqual({ json: false, force: false });
+  it("defaults all flags off", () => {
+    expect(parseArgs([])).toEqual({ json: false, force: false, recover: false });
   });
 
   it("reads --json and --force-probe", () => {
-    expect(parseArgs(["--json", "--force-probe"])).toEqual({ json: true, force: true });
+    expect(parseArgs(["--json", "--force-probe"])).toEqual({
+      json: true,
+      force: true,
+      recover: false,
+    });
+  });
+
+  it("reads --recover-probe", () => {
+    expect(parseArgs(["--recover-probe"]).recover).toBe(true);
+  });
+});
+
+describe("parseLocalSinceMarker", () => {
+  it("returns the never-dropped state for undefined / empty input", () => {
+    expect(parseLocalSinceMarker(undefined)).toEqual({ localSinceMs: 0, goodProbes: 0 });
+    expect(parseLocalSinceMarker("   ")).toEqual({ localSinceMs: 0, goodProbes: 0 });
+  });
+
+  it("returns the never-dropped state for corrupt JSON (rule #6 degrade)", () => {
+    expect(parseLocalSinceMarker("{not json")).toEqual({ localSinceMs: 0, goodProbes: 0 });
+  });
+
+  it("parses a well-formed marker", () => {
+    expect(parseLocalSinceMarker(JSON.stringify({ localSinceMs: 123, goodProbes: 2 }))).toEqual({
+      localSinceMs: 123,
+      goodProbes: 2,
+    });
+  });
+
+  it("clamps negative / missing fields to 0", () => {
+    expect(parseLocalSinceMarker(JSON.stringify({ localSinceMs: -5 }))).toEqual({
+      localSinceMs: 0,
+      goodProbes: 0,
+    });
+  });
+});
+
+describe("parseDwellMs / parseGoodProbesNeeded env overrides", () => {
+  it("return undefined when the env var is unset", () => {
+    expect(parseDwellMs({})).toBeUndefined();
+    expect(parseGoodProbesNeeded({})).toBeUndefined();
+  });
+
+  it("read a valid dwell override", () => {
+    expect(parseDwellMs({ MINSKY_RECOVER_DWELL_MS: "30000" })).toBe(30000);
+  });
+
+  it("reject a non-numeric / negative dwell override", () => {
+    expect(parseDwellMs({ MINSKY_RECOVER_DWELL_MS: "nope" })).toBeUndefined();
+    expect(parseDwellMs({ MINSKY_RECOVER_DWELL_MS: "-1" })).toBeUndefined();
+  });
+
+  it("read and floor a valid good-probes override", () => {
+    expect(parseGoodProbesNeeded({ MINSKY_RECOVER_GOOD_PROBES: "3" })).toBe(3);
+    expect(parseGoodProbesNeeded({ MINSKY_RECOVER_GOOD_PROBES: "3.9" })).toBe(3);
+  });
+
+  it("reject a good-probes override below 1", () => {
+    expect(parseGoodProbesNeeded({ MINSKY_RECOVER_GOOD_PROBES: "0" })).toBeUndefined();
   });
 });
 
