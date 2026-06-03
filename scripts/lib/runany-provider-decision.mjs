@@ -143,3 +143,111 @@ function localFallback(catalog, backends) {
     reason: `local-fallback: all remote backends down [${downIds}] — switched fully to local`,
   };
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Recover-probe flip-back (runtime-token-limit-auto-pivot-local-and-back).
+//
+// `decideRunAnyProvider` answers "which provider this iteration?" forward —
+// it drops to local in ≤1 iteration when remote is down/exhausted. But once a
+// run is on local, the forward decision keeps returning local for as long as
+// the budget snapshot / backend liveness reads stale-down. `decideRecoverFlip-
+// Back` answers the SEPARATE, smaller question: "having dropped to local at
+// `localSinceMs`, and seeing this recover-probe verdict, should the run flip
+// BACK to remote NOW?" It is the hysteresis gate around the forward decision —
+// pure, no I/O, so the bash runner only does the probe I/O and the persistence.
+//
+// Decision (anti-flap, Schmidt et al. 2000 "Pattern-Oriented Software
+// Architecture vol.2" — debounce; Beyer SRE 2016 — flap suppression):
+//   - hold local until BOTH the minimum dwell has elapsed AND N consecutive
+//     good probes have accrued (a single transient good probe never flips);
+//   - any bad probe resets the consecutive-good counter to 0 (transient-fail-
+//     no-flip);
+//   - when both gates pass, flip back to remote — the caller then re-pins to
+//     `MINSKY_STRATEGIC_PIN_MODEL` (pin-precedence) or lets the forward
+//     decider re-pick.
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Anti-flap defaults. Conservative: a full minute of dwell plus two
+ * consecutive good probes before a flip-back. The Pivot widens these
+ * (dwell↑, goodProbesNeeded≥3) if the recover-probe still oscillates.
+ */
+export const DEFAULT_RECOVER_DWELL_MS = 60_000;
+export const DEFAULT_RECOVER_GOOD_PROBES = 2;
+
+/**
+ * Input shape for {@link decideRecoverFlipBack}. All numbers; no I/O. The
+ * caller (`scripts/runany-resolve-model.mjs`) reads the persisted `local_since`
+ * marker, runs the cheap remote recover-probe, and threads the results here.
+ *
+ * @typedef {Object} RecoverFlipBackInput
+ * @property {"local" | "remote"} currentMode The mode the run is in right now.
+ * @property {boolean} probeOk Did this iteration's remote recover-probe succeed?
+ * @property {number} nowMs Epoch-ms clock reading (injected — pure).
+ * @property {number} localSinceMs Epoch-ms when the run dropped to local. `0`/absent ⇒ never dropped.
+ * @property {number} [dwellMs] Minimum ms on local before a flip-back is allowed. Default {@link DEFAULT_RECOVER_DWELL_MS}.
+ * @property {number} [goodProbesNeeded] Consecutive good probes required. Default {@link DEFAULT_RECOVER_GOOD_PROBES}.
+ * @property {number} [priorGoodProbes] Consecutive good probes accrued BEFORE this one (the persisted counter).
+ */
+
+/**
+ * Output shape. `flipBack` is the only actionable bit; the rest is ledger
+ * fuel (the caller stamps `reason` + `goodProbes` into the persisted marker
+ * and the `provider-mode-transition` record).
+ *
+ * @typedef {Object} RecoverFlipBackDecision
+ * @property {boolean} flipBack `true` ⇒ switch the run back to remote this iteration.
+ * @property {number} goodProbes The updated consecutive-good-probe counter (persist this).
+ * @property {string} reason Short machine-readable cause.
+ */
+
+/**
+ * Pure recover-probe flip-back decision (anti-flap, dwell + N-consecutive-good).
+ *
+ * @otel tick-loop.runany-provider-decision.recover-flip-back
+ *
+ * @param {RecoverFlipBackInput} input
+ * @returns {RecoverFlipBackDecision}
+ */
+export function decideRecoverFlipBack(input) {
+  const dwellMs = input.dwellMs ?? DEFAULT_RECOVER_DWELL_MS;
+  const goodProbesNeeded = input.goodProbesNeeded ?? DEFAULT_RECOVER_GOOD_PROBES;
+  const priorGood = Number.isFinite(input.priorGoodProbes)
+    ? Math.max(0, /** @type {number} */ (input.priorGoodProbes))
+    : 0;
+
+  // Not on local ⇒ nothing to recover. Counter stays parked at 0.
+  if (input.currentMode !== "local") {
+    return { flipBack: false, goodProbes: 0, reason: "not-on-local" };
+  }
+
+  // A bad probe resets the consecutive-good counter — the heart of anti-flap.
+  if (input.probeOk !== true) {
+    return { flipBack: false, goodProbes: 0, reason: "probe-bad-reset" };
+  }
+
+  // This is a good probe — accrue it.
+  const goodProbes = priorGood + 1;
+
+  // Dwell gate: never flip before the run has spent the minimum time on local
+  // (suppresses a fast remote-flap that would oscillate the run every probe).
+  const dwellElapsed = input.nowMs - input.localSinceMs;
+  if (input.localSinceMs <= 0 || dwellElapsed < dwellMs) {
+    return { flipBack: false, goodProbes, reason: "dwell-not-elapsed" };
+  }
+
+  // Consecutive-good gate: require N good probes in a row.
+  if (goodProbes < goodProbesNeeded) {
+    return { flipBack: false, goodProbes, reason: "awaiting-consecutive-good-probes" };
+  }
+
+  // Both gates pass — flip back. The caller re-pins or lets the forward
+  // decider re-pick; the counter is consumed (reset to 0 for the next cycle).
+  return {
+    flipBack: true,
+    goodProbes: 0,
+    reason: `recover-flip-back: ${goodProbes} good probe(s) ≥ ${goodProbesNeeded}, dwell ${Math.round(
+      dwellElapsed / 1000,
+    )}s ≥ ${Math.round(dwellMs / 1000)}s`,
+  };
+}
