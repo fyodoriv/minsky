@@ -923,6 +923,143 @@ EOF
   ! grep -q '"pr_url":"https://github.com/old/repo/pull/1"' "$record_file"
 }
 
+@test "non-zero exit with a salvageable PR URL records validated (task runner-records-validated-when-pr-opened-despite-nonzero-exit)" {
+  # Real fleet path: the watchdog SIGTERMs the agent AFTER it ran
+  # `gh pr create` (it opened+merged the PR, then kept polling CI and
+  # got killed). Pre-fix, the generic non-zero branch recorded
+  # `spawn-failed, pr_url=""` the instant exit_code != 0 — throwing away
+  # the PR URL still in the stdout log and undercounting the
+  # cross-repo-pr-rate / agent-merge-rate metrics. Now the non-zero
+  # branch salvages the URL via scripts/extract_pr_url.py and records
+  # `validated` with a `signaled-but-pr-opened` marker.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+
+  # Fake openhands: print a PR URL, then exit non-zero (simulates the
+  # agent opening a PR then being killed / crashing on a follow-up step).
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Working..."
+echo "Opened https://github.com/team/example-app/pull/4242"
+echo "Polling CI..."
+exit 1
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(60)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-nonzero "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-prurl-nz.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  line="$(head -1 "$record_file")"
+  echo "JSONL: $line"
+  # The salvaged URL is recorded and the verdict is upgraded to validated.
+  [ "$(echo "$line" | jq -r .pr_url)" = "https://github.com/team/example-app/pull/4242" ]
+  [ "$(echo "$line" | jq -r .verdict)" = "validated" ]
+  # The notes field carries the signaled-but-pr-opened marker.
+  [[ "$(echo "$line" | jq -r .notes)" == *"signaled-but-pr-opened"* ]]
+}
+
+@test "non-zero exit with NO PR URL still records spawn-failed (salvage preserves today's behavior)" {
+  # Negative case: a genuine spawn failure (no PR opened) must keep the
+  # spawn-failed verdict. Proves the salvage only fires when an
+  # extractable URL is present and doesn't false-validate empty stdout.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Working..."
+echo "Crashed before opening a PR"
+exit 1
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(60)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-nonzero-none "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-prurl-nznone.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  line="$(head -1 "$record_file")"
+  echo "JSONL: $line"
+  # No salvageable URL → verdict stays spawn-failed, pr_url is JSON null.
+  [ "$(echo "$line" | jq -r .verdict)" = "spawn-failed" ]
+  [ "$(echo "$line" | jq -r '.pr_url | type')" = "null" ]
+  [[ "$(echo "$line" | jq -r .notes)" != *"signaled-but-pr-opened"* ]]
+}
+
 @test "pr_url backstop: query gh pr list --head when stdout has no URL (parity port of TS ensurePrUrl stage 2)" {
   # Real silent-failure path: agent runs successfully, commits + pushes,
   # but stdout doesn't contain a parseable PR URL (e.g. truncated by
