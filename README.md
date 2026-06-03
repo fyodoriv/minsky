@@ -14,7 +14,7 @@ It runs from Claude Code, Devin, or **local models** — same core behavior, no 
 ## What this is not
 
 - **Not an agent runtime.** [OpenHands](https://github.com/All-Hands-AI/OpenHands) spawns models and edits files; Minsky makes that ship-safe.
-- **Not a config dump.** Per-machine setup lives in [INSTALL.md](./INSTALL.md); `~/.minsky/` stays out of the repo.
+- **Not a config dump.** Per-machine setup lives in [INSTALL.md](INSTALL.md); `~/.minsky/` stays out of the repo.
 - **Not the roadmap.** See [MILESTONES.md](./MILESTONES.md) for the live M1 scorecard.
 
 ## Install
@@ -23,7 +23,7 @@ It runs from Claude Code, Devin, or **local models** — same core behavior, no 
 cd /any/git/repo && npx -y minsky
 ```
 
-`npx minsky` installs + bootstraps `~/.minsky/config.json` + starts an iteration. **Uninstall**: `minsky uninstall --force`. Runbook: [INSTALL.md](./INSTALL.md). Contributors: `git clone` + `pnpm install` + `./bin/minsky`.
+`npx minsky` installs + bootstraps [`~/.minsky/config.json`](docs/example-config.json) + starts an iteration. **Uninstall**: `minsky uninstall --force`. Runbook: [INSTALL.md](INSTALL.md). Contributors: `git clone` + `pnpm install` + `bin/minsky`.
 
 ## Run
 

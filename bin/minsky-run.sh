@@ -83,6 +83,13 @@ while [[ $# -gt 0 ]]; do
     --hosts-dir) HOSTS_DIR="$2"; shift 2 ;;
     --host) SINGLE_HOST="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
+    # `--once` is the single-iteration alias (`--max-iterations 1`). The
+    # top-level `bin/minsky --once <host>` wrapper already speaks this verb;
+    # accepting it here too means the documented dry-run preview
+    # (`minsky-run.sh --once --dry-run`) works verbatim from either entry
+    # point. Config-as-code discoverability: the operator can confirm which
+    # provider the NEXT iteration would use without spawning an agent.
+    --once) MAX_ITERATIONS=1; shift ;;
     --self-check) SELF_CHECK=1; shift ;;
     --max-iterations) MAX_ITERATIONS="$2"; shift 2 ;;
     --iterations-per-host) ITERATIONS_PER_HOST="$2"; shift 2 ;;
@@ -91,8 +98,8 @@ while [[ $# -gt 0 ]]; do
     --loop) LOOP_FOREVER=1; shift ;;
     --help|-h)
       cat <<'EOF'
-Usage: minsky-run [--hosts-dir <parent> | --host <repo>] [--dry-run] [--self-check]
-                  [--max-iterations N] [--iterations-per-host N]
+Usage: minsky-run [--hosts-dir <parent> | --host <repo>] [--dry-run] [--once]
+                  [--self-check] [--max-iterations N] [--iterations-per-host N]
                   [--tick-interval-ms N]
 
 Walks N host repos under <parent> in round-robin (--hosts-dir mode), OR
@@ -107,6 +114,7 @@ Flags:
   --host <repo>             Iterate exactly THIS host (filter mode);
                             mutually exclusive with --hosts-dir
   --dry-run                 Plan + record "planned" verdict, don't spawn
+  --once                    Single-iteration alias for --max-iterations 1
   --self-check              Run all 5 runtime invariants and exit 0
   --max-iterations N        Stop after N total iterations across all hosts
                             (default 0 = unbounded)
@@ -1510,6 +1518,45 @@ record_iteration() {
 invariant_config_loadable
 [[ "$DRY_RUN" == "1" ]] || invariant_openhands_in_path
 invariant_pick_task_present
+
+# --- 7-pre. Dry-run provider-resolution banner -----------------------------
+# Config-as-code discoverability (task minsky-config-json-support-local-llm-pref,
+# rule #4 — everything visible). When the operator has expressed the full
+# local-LLM-fallback preference declaratively in ~/.minsky/config.json
+# (`local_llm_enabled: true`), a dry-run resolves + logs which provider the
+# NEXT real iteration WOULD use — BEFORE the host walk and WITHOUT a host or an
+# agent spawn. This lets the operator verify the file was honored with zero
+# env-var ceremony: `MINSKY_CONFIG=… DRY_RUN=1 minsky-run.sh --once --dry-run`
+# prints `local_llm=on model=<openhands.model> base-url=<local_llm.base_url>`.
+# The same `local_llm=on` token appears later in the live spawn path (the
+# per-iteration emit) so the dry-run preview and live behavior stay in lockstep.
+# `MINSKY_LOCAL_LLM=1` env override is honored too (matches the live path).
+if [[ "$DRY_RUN" == "1" ]]; then
+  _banner_local_enabled="$(jq -r '.local_llm_enabled // false' "$CONFIG_FILE" 2>/dev/null || echo "false")"
+  [[ "${MINSKY_LOCAL_LLM:-}" == "1" ]] && _banner_local_enabled="true"
+  if [[ "$_banner_local_enabled" == "true" ]]; then
+    _banner_model="$(jq -r '.local_llm.model // .openhands.model // "ollama_chat/qwen3-coder:30b"' "$CONFIG_FILE" 2>/dev/null || echo "ollama_chat/qwen3-coder:30b")"
+    _banner_base_url="$(jq -r '.local_llm.base_url // "http://localhost:11434"' "$CONFIG_FILE" 2>/dev/null || echo "http://localhost:11434")"
+    # Emit the machine-readable resolution line to STDOUT (this is the operator-
+    # facing preview the config-as-code measurement greps for); mirror a human
+    # log to stderr so the daemon log stays consistent with the live spawn path.
+    echo "config: local_llm=on model=$_banner_model base-url=$_banner_base_url (from $CONFIG_FILE) [dry-run]"
+    echo "config: local_llm=on model=$_banner_model base-url=$_banner_base_url (from $CONFIG_FILE) [dry-run]" >&2
+    # With local-LLM enabled AND no host configured, a dry-run is a pure
+    # config-resolution preview: print the banner above and exit 0 rather than
+    # failing the hosts-dir invariant. This is the zero-ceremony "what would the
+    # next iteration do?" check — `MINSKY_CONFIG=… DRY_RUN=1 minsky-run.sh --once
+    # --dry-run` with no --host/--hosts-dir. With a host, the dry-run falls
+    # through to walk_hosts and records the usual per-host "planned" verdict. The
+    # no-local-config path keeps the historical invariant failure (a bare
+    # `--dry-run` with no host is still an error — pinned by tests/minsky-run.bats
+    # "missing --hosts-dir fails the invariant").
+    if [[ -z "$HOSTS_DIR" && -z "$SINGLE_HOST" ]]; then
+      echo "dry-run: no --host/--hosts-dir given; config preview only, no host walk" >&2
+      exit 0
+    fi
+  fi
+fi
 
 # --- 7a. Ollama daemon-scoped warm/unload (user-story 020) -----------------
 # When `local_llm_enabled: true` AND the operator hasn't disabled the
