@@ -95,6 +95,23 @@ export interface AutoscalerState {
    * per-step step size (no doubling — ramp by ≤1 toward the budget).
    */
   lastTargets: number[];
+  /**
+   * The local-LLM server's single-inference concurrency cap, set ONLY when
+   * the daemon is routing local-only and the backend serialises inference
+   * (the default for `mlx_lm.server` and stock LM Studio — one request in
+   * flight at a time). When present, the controller bounds the worker target
+   * to `min(maxWorkersForBudget(...), cap)` in EVERY regime so it never ramps
+   * past the point where N local-routed workers would serialise behind one
+   * inference queue and divide effective throughput by N (Little's Law:
+   * past the server's concurrency, more workers add only contention).
+   *
+   * Default semantics live at the edge (the launchd/config read), not here:
+   * `1` for mlx/LM-Studio, operator-overridable upward for a concurrent
+   * backend (vLLM/sglang). `undefined` ⇒ the cap is inactive (cloud routing
+   * or a concurrent backend) and the controller free-runs to the budget
+   * ceiling exactly as before.
+   */
+  localServerConcurrencyCap?: number;
 }
 
 /** Why the controller chose the target it did — surfaced to the daemon log. */
@@ -160,14 +177,19 @@ export function resolveMachineBudgetPct(inputs: BudgetInputs = {}): number {
  *
  * The target is bounded to `[1, maxForBudget(cores, budgetPct)]` — the budget
  * sets the ceiling (e.g. 70% of 10 cores ≈ 7 concurrent workers as the upper
- * bound the ramp may reach).
+ * bound the ramp may reach). When {@link AutoscalerState.localServerConcurrencyCap}
+ * is set (local-only routing against a single-inference backend) the ceiling
+ * is lowered further to `min(maxForBudget(...), cap)`, so the controller never
+ * ramps past the local server's concurrency in ANY regime — ramp-up holds at
+ * the cap, knee-hold/at-budget never read a higher prior target through, and
+ * gridlock-backoff still halves but within the capped ceiling.
  *
  * @otel machine-budget.compute-worker-target
  * @param state the observed autoscaler state for this control step
  * @returns the next worker target plus the regime that produced it
  */
 export function computeWorkerTarget(state: AutoscalerState): WorkerTargetDecision {
-  const max = maxWorkersForBudget(state.cores, state.budgetPct);
+  const max = boundWorkerCeiling(state);
   const current = state.lastTargets.at(-1) ?? 1;
 
   // Gridlock circuit-breaker takes precedence over everything — a box that
@@ -203,6 +225,25 @@ export function computeWorkerTarget(state: AutoscalerState): WorkerTargetDecisio
 export function maxWorkersForBudget(cores: number, budgetPct: number): number {
   const ceiling = Math.floor((cores * budgetPct) / 100);
   return Math.max(1, ceiling);
+}
+
+/**
+ * The effective worker-count ceiling for one control step: the budget ceiling
+ * from {@link maxWorkersForBudget}, lowered to the local-server concurrency cap
+ * when one is set on the state. The cap is itself floored at 1 (a cap of 0 or a
+ * negative is treated as 1 — "never run" is `minsky daemon stop`, not a cap),
+ * so the result is always ≥1. With no cap (cloud routing or a concurrent
+ * backend) the budget ceiling is returned unchanged.
+ *
+ * @otel-exempt pure-function — arithmetic helper; caller's span covers it.
+ * @param state the observed autoscaler state for this control step
+ * @returns the worker-count ceiling honouring both the budget and the cap, ≥1
+ */
+export function boundWorkerCeiling(state: AutoscalerState): number {
+  const budgetMax = maxWorkersForBudget(state.cores, state.budgetPct);
+  const cap = state.localServerConcurrencyCap;
+  if (cap === undefined || !Number.isFinite(cap)) return budgetMax;
+  return Math.min(budgetMax, Math.max(1, Math.floor(cap)));
 }
 
 /**
