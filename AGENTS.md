@@ -24,11 +24,11 @@ The `## Orchestrator discipline` and `### 15. Milestone alignment gate` sections
 ```bash
 git clone https://github.com/fyodoriv/minsky.git
 cd minsky
-pnpm install   # prepare hook: (a) tsc -b builds all workspace dist/; (b) lefthook installs git hooks
-pnpm minsky doctor   # verify health
+pnpm install            # prepare hook: (a) tsc -b builds all workspace dist/; (b) lefthook installs git hooks
+minsky daemon doctor    # verify health (no separate build step)
 ```
 
-No separate build step needed. `pnpm install` runs the root `prepare` hook which calls `tsc -b` to compile every workspace package's `dist/` (including `@minsky/tick-loop`). If `dist/` is missing at runtime, `pnpm minsky` exits 1 with a one-line actionable message rather than a node stack trace.
+No separate build step needed. `pnpm install` runs the root `prepare` hook which calls `tsc -b` to compile every workspace package's `dist/` (including `@minsky/tick-loop`). If no runnable entrypoint is built at runtime (interrupted/partial install), `bin/minsky` exits 1 with a one-line `minsky: run \`pnpm install\`` hint naming the repo root, rather than a raw node `ERR_MODULE_NOT_FOUND` stack trace. The contract is pinned by `tests/fresh-clone-bootstrap.bats` (the `prepare`-script presence + the actionable-hint branch via the `__assert-built` guard).
 
 ## Running minsky
 
