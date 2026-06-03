@@ -410,7 +410,7 @@ MIN_TOKENS_FOR_LOAD_BEARING = 1000
 def clamp_brief_to_tokens(brief: str, max_tokens: int) -> str:
     """Clamp `brief` to ≤ max_tokens (~max_tokens × 4 bytes).
 
-    Strategy (preserves rule-9 fields + FINAL STEP block):
+    Strategy (default brief shape — preserves rule-9 fields + FINAL STEP block):
       1. If the full brief fits under the budget, return unchanged.
       2. Otherwise, truncate the system-prompt overlay (the second `---`-separated
          half of the brief). The task block (which contains the rule-9 fields)
@@ -418,6 +418,20 @@ def clamp_brief_to_tokens(brief: str, max_tokens: int) -> str:
       3. If even the task block alone exceeds the budget, truncate it with an
          explicit `[truncated by build_brief.py --max-tokens=N — heal-brief]`
          marker at the cut.
+
+    Caveat under `--persona` mode (build-brief-clamp-docstring-persona-mode):
+    the split is on the FIRST `\\n---\\n`, so what `parts[0]` preserves depends
+    on the brief's section order. `build_brief` front-loads the persona overlay
+    under `--persona` (persona overlay → `---` → task block → `---` → system
+    overlay), so the FIRST separator is the persona/task boundary. In that
+    layout `parts[0]` is the PERSONA OVERLAY (not the task block), and the
+    truncated tail (`parts[1]`) is the task block + system overlay — i.e. the
+    rule-9 fields land in the truncatable tail, not the preserved head. This is
+    benign today: the M2 pipeline driver (`bin/minsky-multi-persona.sh`) never
+    combines `--persona` with `--max-tokens`, so the persona path is always
+    rendered unclamped. A future caller that DOES combine them must not rely on
+    the rule-9 fields surviving truncation under `--persona`; rsplit-on-last-`---`
+    is the option (b) fix tracked in the task body if that combination ships.
     """
     if max_tokens <= 0:
         return brief
