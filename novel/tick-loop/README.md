@@ -217,9 +217,12 @@ const { target, reason } = computeWorkerTarget({
   recentActiveSubprocs, // measured effective work, never nominal worker count
   recentPrRate,
   lastTargets, // controller history → knee detection
+  localServerConcurrencyCap, // optional: see below — undefined ⇒ free-run to budget
 });
 // reason ∈ ramp-up | knee-hold | gridlock-backoff | at-budget
 ```
+
+**Local-server concurrency cap.** When the daemon routes inference local-only against a single-inference backend (`mlx_lm.server` and stock LM Studio serve one request at a time), set `localServerConcurrencyCap` so the controller bounds the worker target to `min(maxWorkersForBudget(cores, budgetPct), cap)` in **every** regime (ramp-up, knee-hold/at-budget, gridlock-backoff). Without it, N local-routed workers serialise behind one inference queue and divide effective throughput by N (Little's Law — past the server's concurrency, more workers add only contention, not throughput). The cap is floored at 1 (a `0`/negative cap is treated as `1`; "never run" is `minsky daemon stop`, not a cap) and a non-finite cap is ignored. Leave it `undefined` for cloud routing or a concurrent backend (vLLM/sglang) and the controller free-runs to the budget ceiling exactly as before. The per-backend default lives at the launchd/config edge (`1` for mlx/LM-Studio, operator-overridable upward) — see [`docs/local-llm-fallback.md`](../../docs/local-llm-fallback.md) for the cap matrix.
 
 The `os-throttle-detect` core flags host throttles that make the budget unreachable and renders durable mirror-repo fixes (rule #1):
 

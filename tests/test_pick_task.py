@@ -20,6 +20,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 import pick_task  # noqa: E402  pylint: disable=wrong-import-position
 
+REPO_ROOT = Path(__file__).parent.parent
+LIVE_TASKS_MD = REPO_ROOT / "TASKS.md"
+
 # --- Fixture lifted verbatim from task-finder.test.ts ---------------------
 
 SAMPLE_TASKS_MD = """# Tasks
@@ -940,6 +943,35 @@ class TestTaskSourcePort:
         )
         assert chosen is not None
         assert chosen.id == "low-priority-task"
+
+
+class TestLiveTasksMdRealWorldFixture:
+    """REAL-WORLD FIXTURE: parse minsky's own live TASKS.md, not a synthetic literal.
+
+    The SAMPLE_*_TASKS_MD literals above are convenient hand-written shapes that
+    drift from the real file (Fake Fixture smell, Meszaros 2007 — PR #494 shipped
+    exactly this bug). These cases feed the picker the actual TASKS.md the daemon
+    reads, so a real format change (a new metadata field, an indent shift) fails
+    here instead of passing green against synthetic-only input.
+    """
+
+    def test_live_tasks_md_exists(self) -> None:
+        assert LIVE_TASKS_MD.is_file()
+
+    def test_parses_many_tasks_from_live_file(self) -> None:
+        content = LIVE_TASKS_MD.read_text(encoding="utf-8")
+        tasks = pick_task.parse_tasks_md(content)
+        # The live queue is large; a parser that silently skips real input would
+        # return a near-empty list (the PR #494 failure shape).
+        assert len(tasks) >= 10
+        # Every parsed task carries an ID (the checkbox+ID contract holds live).
+        assert all(t.id is not None for t in tasks)
+
+    def test_picks_a_rule_9_compliant_task_from_live_file(self) -> None:
+        content = LIVE_TASKS_MD.read_text(encoding="utf-8")
+        chosen = pick_task.pick_host_task(content)
+        assert chosen is not None
+        assert pick_task.is_rule_9_compliant(chosen)
 
 
 def _build_tasks_md_with_one_task(task_id: str) -> str:
