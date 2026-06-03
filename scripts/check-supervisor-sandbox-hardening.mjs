@@ -27,13 +27,36 @@
 // staged ramp is abandoned (e.g., upstream removes a directive), this
 // lint is retired in the same PR that removes the directive.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 const SYSTEMD_DIR = resolve(REPO_ROOT, "distribution", "systemd");
+const LAUNCHD_DIR = resolve(REPO_ROOT, "distribution", "launchd");
+
+/**
+ * The macOS sandbox-exec (SBPL) profile that slices the tick-loop
+ * supervisor's filesystem + network reach (`supervisor-sandbox-syscall-
+ * restriction`). Filename is load-bearing: the plist's ProgramArguments
+ * references it by name and this lint pins the cohesion.
+ */
+export const MACOS_SANDBOX_PROFILE = "com.minsky.tick-loop.sb";
+
+/**
+ * The launchd LaunchAgent whose ProgramArguments must wrap the supervisor
+ * in `sandbox-exec -f <profile>`.
+ */
+export const MACOS_TICK_LOOP_PLIST = "com.minsky.tick-loop.plist";
+
+/**
+ * SBPL fail-safe-defaults header (Saltzer & Schroeder 1975). The profile
+ * MUST open with `(deny default)` — an allow-default profile would silently
+ * widen the supervisor's reach back to the operator's full UID, which is
+ * exactly the regression this gate exists to catch.
+ */
+export const SBPL_DENY_DEFAULT = "(deny default)";
 
 /**
  * Unit files that must carry the safe hardening directive set. Every
@@ -123,6 +146,78 @@ export function checkSupervisorSandboxHardening({
 }
 
 /**
+ * @typedef {{ ok: true } | { ok: false, problems: string[] }} MacosCheckResult
+ */
+
+/**
+ * Pure function. Asserts the macOS supervisor-sandbox slice is wired:
+ *   1. the SBPL profile body exists and opens with `(deny default)`
+ *      (fail-safe defaults — an allow-default profile is a silent
+ *      reach-widening regression);
+ *   2. the tick-loop launchd plist references the profile via a
+ *      `sandbox-exec -f <...>/com.minsky.tick-loop.sb` ProgramArguments
+ *      entry (so a future PR can't drop the wrap and lose the sandbox).
+ *
+ * Both inputs are injected so the test drives every branch without touching
+ * the filesystem (rule #2 — I/O at the boundary).
+ *
+ * @param {{
+ *   profileBody: string | undefined,
+ *   plistBody: string | undefined,
+ *   profileName?: string,
+ * }} args
+ * @returns {MacosCheckResult}
+ */
+export function checkMacosSandboxProfile({ profileBody, plistBody, profileName }) {
+  const name = profileName ?? MACOS_SANDBOX_PROFILE;
+  const problems = [...profileProblems(profileBody, name), ...plistProblems(plistBody, name)];
+  if (problems.length === 0) return { ok: true };
+  return { ok: false, problems };
+}
+
+/**
+ * @param {string | undefined} profileBody
+ * @param {string} name
+ * @returns {string[]}
+ */
+function profileProblems(profileBody, name) {
+  if (typeof profileBody !== "string" || profileBody.length === 0) {
+    return [`SBPL profile ${name} is missing or empty`];
+  }
+  if (!profileBody.includes(SBPL_DENY_DEFAULT)) {
+    return [
+      `SBPL profile ${name} does not open with \`${SBPL_DENY_DEFAULT}\` — an allow-default profile silently widens the supervisor's reach (Saltzer & Schroeder 1975, fail-safe defaults)`,
+    ];
+  }
+  return [];
+}
+
+/**
+ * @param {string | undefined} plistBody
+ * @param {string} name
+ * @returns {string[]}
+ */
+function plistProblems(plistBody, name) {
+  if (typeof plistBody !== "string" || plistBody.length === 0) {
+    return [`plist ${MACOS_TICK_LOOP_PLIST} is missing or empty`];
+  }
+  /** @type {string[]} */
+  const problems = [];
+  if (!/\/usr\/bin\/sandbox-exec/.test(plistBody)) {
+    problems.push(
+      `plist ${MACOS_TICK_LOOP_PLIST} ProgramArguments does not invoke /usr/bin/sandbox-exec`,
+    );
+  }
+  // The `-f <profile>` reference must name THIS profile so renaming the .sb
+  // file without updating the plist (or vice versa) trips the gate.
+  const refRe = new RegExp(`-f[\\s\\S]*?${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+  if (!refRe.test(plistBody)) {
+    problems.push(`plist ${MACOS_TICK_LOOP_PLIST} does not reference the SBPL profile ${name}`);
+  }
+  return problems;
+}
+
+/**
  * @param {string} dir
  * @param {ReadonlyArray<string>} units
  * @returns {Record<string, string>}
@@ -161,10 +256,40 @@ async function main() {
     );
     return 1;
   }
+
+  if (!reportMacosSlice()) return 1;
+
   process.stdout.write(
-    `supervisor-sandbox-hardening ok: all ${REQUIRED_DIRECTIVES.length} safe directives present in all ${REQUIRED_UNIT_FILES.length} systemd units.\n`,
+    `supervisor-sandbox-hardening ok: all ${REQUIRED_DIRECTIVES.length} safe directives present in all ${REQUIRED_UNIT_FILES.length} systemd units; macOS ${MACOS_SANDBOX_PROFILE} (deny default) profile wired into ${MACOS_TICK_LOOP_PLIST}.\n`,
   );
   return 0;
+}
+
+/**
+ * macOS slice: the launchd plist must wrap the supervisor in the
+ * `(deny default)` sandbox-exec profile (`supervisor-sandbox-syscall-
+ * restriction`). Reading the profile + plist is the I/O boundary; the pure
+ * `checkMacosSandboxProfile` does the asserting. Returns true on pass,
+ * false (after writing the diagnostics) on violation.
+ *
+ * @returns {boolean}
+ */
+function reportMacosSlice() {
+  const profilePath = resolve(LAUNCHD_DIR, MACOS_SANDBOX_PROFILE);
+  const plistPath = resolve(LAUNCHD_DIR, MACOS_TICK_LOOP_PLIST);
+  const macos = checkMacosSandboxProfile({
+    profileBody: existsSync(profilePath) ? readFileSync(profilePath, "utf8") : undefined,
+    plistBody: existsSync(plistPath) ? readFileSync(plistPath, "utf8") : undefined,
+  });
+  if (macos.ok) return true;
+  process.stderr.write("supervisor-sandbox-hardening (macOS) violation(s):\n");
+  for (const problem of macos.problems) {
+    process.stderr.write(`  - ${problem}\n`);
+  }
+  process.stderr.write(
+    "\nFix: ship distribution/launchd/com.minsky.tick-loop.sb opening with `(deny default)` and wrap the plist's ProgramArguments with `/usr/bin/sandbox-exec -f <profile>`. Anchor: sandbox-exec(1) SBPL; Saltzer & Schroeder 1975 (least privilege); security-privacy task `supervisor-sandbox-syscall-restriction`.\n",
+  );
+  return false;
 }
 
 const invokedDirectly =
