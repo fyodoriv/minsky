@@ -14,7 +14,9 @@ goals: []
 
 ## What this is
 
-The Minsky constitution — the 18 non-negotiable rules every change must honour, plus the theoretical foundations and the pattern-conformance index that maps every artifact to a named, published pattern. This file is the behavioural specification: when code and constitution disagree, the constitution wins until amended.
+Minsky is a background program you point at your code projects. It picks the most important unfinished task from each project's to-do list, asks a coding assistant to do it, and hands you a draft to review — never changing anything without your say-so. It runs on your own machine, around the clock, under your own name.
+
+This file is the Minsky **constitution**: the 18 non-negotiable rules every change must honour, the theoretical foundations behind them, and the pattern-conformance index that maps every artifact to a named, published pattern. ("Constitution" is the one permitted metaphor for the project's behavioural specification — the numbered, non-negotiable invariants; the anchor is Lamport 1983.) When code and constitution disagree, the constitution wins until amended.
 
 ## What this is not
 
@@ -25,9 +27,11 @@ The Minsky constitution — the 18 non-negotiable rules every change must honour
 
 ## 30-second TL;DR
 
-Minsky is a **discipline pack** for OpenHands — a small bash-and-markdown layer (~5–10K LOC after the 2026-05 Path-A aggressive cut, down from ~70K LOC of TypeScript at peak) that you attach to any git repo, and it makes that repo follow Minsky's discipline: strict lint, strict tests, observability, chaos engineering, hypothesis-driven development, pattern-conformance. It is **not** a framework. The agent layer is OpenHands. The discipline pack composes existing tools through versioned adapters and adds only what nobody else is building — constitutional rules, deterministic CI lints, the MAPE-K observation loop, and the 18-rule pre-PR gate.
+Minsky does not write code itself. It drives an **agent** — a coding assistant such as OpenHands, Claude Code, Devin, or Aider — and makes the agent's work follow strict discipline: strict lint, strict tests, observability, chaos engineering, hypothesis-driven development, pattern-conformance. In that sense Minsky is a **discipline pack** for the agent: a small bash-and-markdown layer (~5–10K LOC after the 2026-05 Path-A aggressive cut, down from ~70K LOC of TypeScript at peak) that you attach to any git repo. It is **not** a framework. The default agent layer is OpenHands. The discipline pack composes existing tools through versioned adapters and adds only what nobody else is building — constitutional rules, deterministic CI lints, the MAPE-K observation loop, and the 18-rule pre-PR gate.
 
-Minsky operates at the **orchestrator tier** (managing daemon lifecycle, MAPE-K loop, prompt evolution, cross-repo task queue, supervisor restart). It sits ABOVE the agents (Claude / Devin / Aider) it composes. Its peers are other orchestrators (MetaGPT, AutoGen, CrewAI, LangGraph), not the agents it consumes.
+Minsky operates at the **orchestrator tier**: it manages the long-running background program (the daemon), the self-improvement loop, prompt evolution, the cross-repo task queue, and supervisor restart. It sits ABOVE the agents (Claude / Devin / Aider) it composes. Its peers are other orchestrators (MetaGPT, AutoGen, CrewAI, LangGraph), not the agents it consumes.
+
+The **MAPE-K observation loop** named above is Minsky's self-improvement engine: it Monitors each round of work, Analyzes the outcome, Plans a fix, and Executes it, all over a shared Knowledge base of past results. The component that runs this loop is the **autonomic manager**. The anchor is the autonomic-computing reference architecture (Kephart & Chess, 2003).
 
 The constitution is **18 non-negotiable rules**, each enforced by a deterministic CI lint. The rules are below. The pattern conformance index (~700 lines later in this file) maps every artifact in the repo to a named, published pattern.
 
@@ -59,7 +63,7 @@ Five phrases, each tagged with shipping status (status reflects state 2026-05-22
 | **enforces 18 constitutional rules deterministically** | 18 rules × 53 pre-pr-lint stages × 65 CI jobs run on every PR the daemon opens; LLM-driven checks are advisory only, never load-bearing | ✅ ships |
 | **observes itself to queue improvements** | MAPE-K substrate (experiment-store + spec-monitor + observer) records every iteration's outcome; the daemon files TASKS.md entries against its own weak spots | ✅ ships (L1) — 🟡 closed-loop A/B prompt tuning (L2) is spec-only per `user-stories/003-mape-k-improves-prompts.md`; constitutional self-revision (L3) is M3+ aspirational |
 
-Attach Minsky to any git repository and it runs continuously against it. The repo can be a host (`minsky bootstrap <host-dir>` materialises a per-host gitignored `.minsky/` sidecar; `minsky run <task-id>` ships work against it) or Minsky's own repo (the supervisor runs the same loop against `~/apps/minsky` so the toolchain self-improves).
+Attach Minsky to any git repository and it runs continuously against it. Each such repository is a **host** — one code project Minsky works on. Pointing Minsky at several hosts in turn is a cross-repo fleet. `minsky bootstrap <host-dir>` materialises a per-host gitignored `.minsky/` sidecar; `minsky run <task-id>` ships work against it. A host can be any repo you own, or Minsky's own repo — the **supervisor** (the outer watchdog that restarts Minsky if it dies and survives reboots, anchored on OTP supervision, Armstrong 2007) runs the same loop against `<minsky-repo>` so the toolchain self-improves.
 
 Both surfaces aim at **medium-to-long-term improvements**. Minsky is not a one-off fixer; it's the durable, slow, principle-respecting improvement loop a repo runs on indefinitely. Every change in any repo Minsky governs is a pre-registered experiment under rule #9 (hypothesis-driven development) — bugfixes, refactors, docs included. If a candidate change can't state its expected metric movement in advance, either the metric source is missing (ship a preparation PR first) or the change doesn't justify the discipline overhead and belongs elsewhere.
 

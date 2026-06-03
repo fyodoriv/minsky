@@ -1,83 +1,187 @@
-# Story 014 — Minsky is the same no matter which agent chat installed it
+# Story 014 — Minsky behaves the same no matter which agent chat installed it
 
 **Milestone(s)**: M1
 
-> **The launcher is a doorway, not a runtime.** Minsky's install runbook lives at `INSTALL.md` and is followed by whatever AI coding agent the operator already has open — Claude Code, Cursor, Devin, Windsurf, Codex, Aider, or a local model talking to one of them. Once the install finishes, the agent that drove the install is *out of the picture*. The daemon that runs Minsky on the operator's machine is the same daemon, with the same tick-loop, the same `TASKS.md` picker, the same OpenHands-backed agent runtime, and the same observable surfaces, regardless of which chat opened the door. This story names that invariant and pins it down so a future regression can't silently smuggle launcher-dependent behavior into the runtime.
+> The agent chat you used to install Minsky is a doorway, not a runtime. Whatever door you walked through, the room behind it is the same room.
+
+## What this is
+
+Minsky is a background program (a daemon — a program that keeps running in the
+background on your machine) that picks up to-do tasks and works on them on its
+own. You install it by asking whatever AI coding assistant you already have open
+to follow Minsky's install runbook, `INSTALL.md`. That assistant — Claude Code,
+Cursor, Devin, Windsurf, Codex, Aider, or a local model driving one of them — is
+called the **launcher**.
+
+This story pins down one invariant: the launcher only opens the door. Once the
+install finishes, the launcher is out of the picture. The daemon that runs is
+the same daemon — same timer-driven loop, same `TASKS.md` task picker, same
+coding agent it drives to do the work, same things you can watch — no matter
+which launcher installed it. (`TASKS.md` is the plain-text Markdown to-do list
+at a project's root that Minsky reads to pick work. The **agent** is the coding
+assistant Minsky drives to do the work; here that agent is OpenHands.)
+
+This story names that invariant and writes a chaos test that fails CI if a
+future change ever smuggles launcher-specific behavior into the runtime.
+
+## What this is not
+
+- Not a "Claude edition" and a separate "Cursor edition" of Minsky. There is one
+  runtime.
+- Not a claim that launchers are interchangeable for installing — any of them
+  works, but none of them leaves a fingerprint on what runs afterward.
+- Not the same axis as two sibling stories: story 013 decouples your *repo* from
+  Minsky, and story 012 says Minsky runs *as you* on your own machine, not in a
+  cloud sandbox. This story adds the *launcher* axis on top of both.
 
 ## Story
 
-I'm an operator with three machines. On my MacBook I asked Claude Code to install Minsky for `~/apps/my-side-project`. On my Linux desktop I asked Cursor to do the same against `~/repos/another-project`. On my work Mac I asked Devin (via its CLI) to do it against `~/work/that-thing`. All three runbooks were `INSTALL.md`; all three install paths completed in ≤90s; all three machines now have a daemon running at exactly the same revision of `bin/minsky`.
+I am an **operator** — the human who runs Minsky — with three machines. (Work
+runs as me, under my own git and SSH credentials.)
 
-When I run `minsky watch` on any of the three, I see:
+- On my MacBook I asked Claude Code to install Minsky for one local repo.
+- On my Linux desktop I asked Cursor to install it for a different repo.
+- On my work Mac I asked Devin (via its CLI) to install it for a third repo.
 
-- The same tick-loop iteration log shape.
-- The same `TASKS.md` picker decisions (under identical task inputs).
-- The same OpenHands shim invocation envelope (`{"agent":"openhands","sdk_version":...,"files_changed":N,"diff_bytes":B,"ok":true}`).
-- The same set of pre-pr-lint stages running on PRs the daemon opens.
-- The same observable failure modes and the same recovery handles (`minsky doctor`, `minsky stop`, `minsky consent`).
+All three runbooks were `INSTALL.md`. All three install paths completed in ≤90s.
+All three machines now run a daemon at exactly the same revision of `bin/minsky`.
+
+When I run `minsky watch` on any of the three, I see the same things:
+
+- The same iteration-log shape. (An *iteration* is one round of work: pick a
+  task, ask the agent to do it, capture the result, open a draft.)
+- The same `TASKS.md` picker decisions, given identical task inputs.
+- The same OpenHands invocation envelope:
+  `{"agent":"openhands","sdk_version":...,"files_changed":N,"diff_bytes":B,"ok":true}`.
+- The same set of pre-pr-lint stages running on the PRs the daemon opens.
+- The same failure modes and the same recovery handles: `minsky doctor`,
+  `minsky stop`, `minsky consent`.
 
 What I do NOT see:
 
 - A "Minsky-Claude-edition" vs. "Minsky-Cursor-edition" runtime.
-- Skill discovery that only fires when `.claude/skills/` exists but not when `.cursor/rules/` exists.
-- Telemetry-consent records that differ in shape per launcher.
+- Skill discovery that fires only when `.claude/skills/` exists but not when
+  `.cursor/rules/` exists.
+- Telemetry-consent records whose shape changes per launcher.
 - A `cloud_agent` default that depends on which agent installed Minsky.
 - Worktree layout, env-var honoring, or commit identity that varies by launcher.
 
-The runtime invariant is: **whatever the agent-chat door looked like, the room behind it is the same room.**
+The invariant: whatever the agent-chat door looked like, the room behind it is
+the same room.
 
 ## Acceptance criteria
 
-1. `bin/minsky` reads no environment variable, file, or socket whose name encodes the identity of the agent that ran the install. The daemon does not branch on `CLAUDE_CODE=1`, `CURSOR=1`, `DEVIN_AGENT=1`, etc.
-2. The set of features exposed by `minsky` (subcommands, flags, env-var contract, file-layout under `~/.minsky/` and `.minsky/`) is identical across all installs irrespective of which agent ran `INSTALL.md`.
-3. The OpenHands shim invocation (model selection, base-url resolution, reasoning-effort override, extended-thinking flag) is purely a function of `~/.minsky/config.json` + repo-local `.minsky/repo.yaml` — never of the launcher.
-4. Skill discovery for the agent runtime (OpenHands' `~/.openhands/agents/` + `~/.openhands/skills/` tree) is populated by Minsky's own install step, not inherited from the launcher's skill directory. (`.claude/skills/`, `.cursor/rules/`, etc. are launcher-private; Minsky neither requires nor reads them at runtime.)
-5. The operator can swap launchers between installs (e.g., uninstall + reinstall from a different agent chat on the same machine) and observe zero runtime-behavior delta on the same `TASKS.md` against the same model.
-6. `minsky doctor` includes a `launcher-agnostic` invariant: it greps the live process env for any `*_AGENT*` / `*CHAT*` / `*COPILOT*` variable that influences runtime branching, and reports a hard FAIL if a non-empty match is found in branched code paths.
-7. The `INSTALL.md` document carries a "Step 0 — what 'install' means" paragraph stating this invariant verbatim, so an agent reading the runbook knows it is *not allowed* to inject launcher-specific behavior on the way through.
+1. `bin/minsky` reads no environment variable, file, or socket whose name
+   encodes the identity of the launcher that ran the install. The daemon does
+   not branch on `CLAUDE_CODE=1`, `CURSOR=1`, `DEVIN_AGENT=1`, etc.
+2. The set of features `minsky` exposes — subcommands, flags, env-var contract,
+   file layout under `~/.minsky/` and `.minsky/` — is identical across all
+   installs, no matter which launcher ran `INSTALL.md`.
+3. The OpenHands invocation (model selection, base-url resolution,
+   reasoning-effort override, extended-thinking flag) is purely a function of
+   `~/.minsky/config.json` plus repo-local `.minsky/repo.yaml` — never of the
+   launcher.
+4. Skill discovery for the agent runtime (OpenHands' `~/.openhands/agents/` and
+   `~/.openhands/skills/` tree) is populated by Minsky's own install step, not
+   inherited from the launcher's skill directory. (`.claude/skills/`,
+   `.cursor/rules/`, etc. are launcher-private; Minsky neither requires nor reads
+   them at runtime.)
+5. The operator can swap launchers between installs — uninstall, then reinstall
+   from a different agent chat on the same machine — and observe zero
+   runtime-behavior delta on the same `TASKS.md` against the same model.
+6. `minsky doctor` includes a `launcher-agnostic` invariant: it greps the live
+   process env for any `*_AGENT*` / `*CHAT*` / `*COPILOT*` variable that
+   influences runtime branching, and reports a hard FAIL if a non-empty match is
+   found in a branched code path.
+7. The `INSTALL.md` document carries a "Step 0 — what 'install' means" paragraph
+   stating this invariant verbatim, so an agent reading the runbook knows it is
+   *not allowed* to inject launcher-specific behavior on the way through.
 
 ## Metric
 
 - **Name**: `launcher-agnostic-runtime-divergence-count`
-- **Definition**: Count of distinct runtime-observable deltas (iteration-log shape, picker decision under identical input, OpenHands envelope fields, pre-pr-lint stage list, `~/.minsky/` layout) between two Minsky installs on the same OS+repo+task driven by two different launcher agents.
-- **Threshold**: `0` (iron) — any non-zero count is a violation. The only permitted delta is the `agent` string in the telemetry-consent record (which records *who turned the doorknob*, not *who lives in the room*).
-- **Source**: `test/chaos/launcher-agnostic-feature-parity.test.ts` (**shipped** — closes TASKS.md `launcher-agnostic-feature-parity-chaos-test`). The chaos test installs Minsky twice through the same INSTALL.md steps driven by two stubbed launchers (`test/fixtures/launchers/fake-claude.mjs`, `fake-cursor.mjs`) against the same fixture repo, builds normalized snapshots via `scripts/snapshot-minsky-install.mjs` (config.json + telemetry-consent.json + `minsky --help` subcommand set + the OpenHands spawn envelope built purely from config), and fails on any delta other than the allowlisted `telemetryConsent.agent`. A `scripts/check-launcher-agnostic-parity.mjs` static-analysis lint is the named P1 follow-up (Pivot path) if the chaos fixture ever grows past 500 LOC.
+- **Definition**: Count of distinct runtime-observable deltas — iteration-log
+  shape, picker decision under identical input, OpenHands envelope fields,
+  pre-pr-lint stage list, `~/.minsky/` layout — between two Minsky installs on
+  the same OS, repo, and task, driven by two different launchers.
+- **Threshold**: `0` (iron). Any non-zero count is a violation. The only
+  permitted delta is the `agent` string in the telemetry-consent record, which
+  records *who turned the doorknob*, not *who lives in the room*.
+- **Source**: `test/chaos/launcher-agnostic-feature-parity.test.ts`
+  (**shipped** — closes TASKS.md `launcher-agnostic-feature-parity-chaos-test`).
+  The chaos test installs Minsky twice through the same `INSTALL.md` steps,
+  driven by two stubbed launchers (`test/fixtures/launchers/fake-claude.mjs`,
+  `fake-cursor.mjs`) against the same fixture repo. It builds normalized
+  snapshots via `scripts/snapshot-minsky-install.mjs` (config.json +
+  telemetry-consent.json + the `minsky --help` subcommand set + the OpenHands
+  spawn envelope built purely from config) and fails on any delta other than the
+  allowlisted `telemetryConsent.agent`. A `scripts/check-launcher-agnostic-parity.mjs`
+  static-analysis lint is the named P1 follow-up (the Pivot path) if the chaos
+  fixture ever grows past 500 LOC.
 
 ## Integration test
 
-`test/chaos/launcher-agnostic-feature-parity.test.ts` (**shipped** — closes P1 task `launcher-agnostic-feature-parity-chaos-test`):
+`test/chaos/launcher-agnostic-feature-parity.test.ts` (**shipped** — closes P1
+task `launcher-agnostic-feature-parity-chaos-test`):
 
-1. Create a temp fixture repo with `TASKS.md` containing one P3 trivial task.
-2. Stub two "launcher agents" — `fake-claude` and `fake-cursor` — that each invoke the canonical `INSTALL.md` runbook against the fixture in mock mode. Both run on the same OS, same Node, same pnpm, same git, same model (`ollama_chat/qwen3-coder:30b`).
-3. After each install, snapshot: `bin/minsky --version`, `~/.minsky/config.json`, `.minsky/state.json`, the set of subcommands `minsky --help` reports, and the OpenHands spawn envelope for one stubbed iteration.
-4. Diff the two snapshots. The only permitted delta is the `agent` field in `~/.minsky/telemetry-consent.json`.
-5. Any other delta → fail the test with a per-field diff in the error.
+1. Create a temp fixture repo with `TASKS.md` containing one trivial P3 task.
+2. Stub two launchers — `fake-claude` and `fake-cursor` — that each invoke the
+   canonical `INSTALL.md` runbook against the fixture in mock mode. Both run on
+   the same OS, same Node, same pnpm, same git, same model
+   (`ollama_chat/qwen3-coder:30b`).
+3. After each install, snapshot: `bin/minsky --version`,
+   `~/.minsky/config.json`, `.minsky/state.json`, the set of subcommands
+   `minsky --help` reports, and the OpenHands spawn envelope for one stubbed
+   iteration.
+4. Diff the two snapshots. The only permitted delta is the `agent` field in
+   `~/.minsky/telemetry-consent.json`.
+5. Any other delta fails the test with a per-field diff in the error.
 
 ## Proof
 
-- `bin/minsky` is a single bash entrypoint that dispatches to `node ./dist/cli.js`; the dispatch logic reads no launcher-identifying env var.
-- `novel/tick-loop/src/cli-consent.ts` records `{consent, timestamp, host_path_hash, agent}` — the `agent` field is recorded for telemetry observability but is never re-read by runtime code (only by the consent ledger).
-- `novel/cross-repo-runner/bin/minsky-run.mjs` resolves model + base-url + reasoning flags from `~/.minsky/config.json`; no launcher branch.
-- `novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py` (the spawn shim) reads only its own CLI flags. The TS builder (`novel/adapters/agent-runtime-openhands/src/spawner.ts`) reads only config and the brief.
-- `INSTALL.md` Step 0 explicitly forbids launcher-specific behavior in the install steps.
+- `bin/minsky` is a single bash entrypoint that dispatches to
+  `node ./dist/cli.js`. The dispatch logic reads no launcher-identifying env
+  var.
+- `novel/tick-loop/src/cli-consent.ts` records
+  `{consent, timestamp, host_path_hash, agent}`. The `agent` field is recorded
+  for telemetry observability but is never re-read by runtime code — only by the
+  consent ledger.
+- `novel/cross-repo-runner/bin/minsky-run.mjs` resolves model, base-url, and
+  reasoning flags from `~/.minsky/config.json`. No launcher branch.
+- `novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py` (the
+  spawn shim) reads only its own CLI flags. The TS builder
+  (`novel/adapters/agent-runtime-openhands/src/spawner.ts`) reads only config
+  and the brief.
+- `INSTALL.md` Step 0 explicitly forbids launcher-specific behavior in the
+  install steps.
 
 ## Failure modes & chaos verification
 
+**Steady-state hypothesis**: two installs driven by different launchers produce
+byte-identical observable surfaces, except the telemetry-consent `agent` string.
+
+**Blast radius**: bounded to the install transaction. If a launcher leaks into
+the runtime, the chaos test catches it before the PR lands.
+
+**Escape hatch**: `minsky doctor --launcher-agnostic-check` exits non-zero if any
+launcher leak is detected, with a copy-paste-able remediation command per
+finding.
+
 | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
 |---|---|---|---|
-| Launcher injects `.claude/` or `.cursor/` config that the runtime accidentally reads | Operator installs from Claude Code, daemon then reads `.claude/skills/*` for the OpenHands agent runtime | `circuit-break-and-notify` — `launcher-agnostic` invariant in `minsky doctor` fires; daemon refuses to spawn until the leak is closed | `test/chaos/launcher-agnostic-feature-parity.test.ts` (**shipped** — this story's primary test) |
-| Two installs differ in `~/.minsky/config.json` defaults across launchers | INSTALL.md was patched per-launcher and accidentally writes different defaults | `loud-crash-supervisor-restart` — the parity diff in the chaos test fails CI; PR cannot land | same test, snapshot-diff path |
-| OpenHands env-var contract leaks launcher identity | An iteration env spawned by the daemon contains `MINSKY_LAUNCHER=claude-code` | `circuit-break-and-notify` — `minsky doctor` detects the env leak; iteration fails fast with a one-line diagnostic | `test/chaos/openhands-env-no-launcher-leak.test.ts` (sub-slice of the chaos test task) |
+| Launcher injects `.claude/` or `.cursor/` config that the runtime accidentally reads | Operator installs from Claude Code; daemon then reads `.claude/skills/*` for the OpenHands agent runtime | `circuit-break-and-notify` — the `launcher-agnostic` invariant in `minsky doctor` fires; daemon refuses to spawn until the leak is closed | `test/chaos/launcher-agnostic-feature-parity.test.ts` (**shipped** — this story's primary test) |
+| Two installs differ in `~/.minsky/config.json` defaults across launchers | `INSTALL.md` was patched per-launcher and accidentally writes different defaults | `loud-crash-supervisor-restart` — the parity diff in the chaos test fails CI; the PR cannot land | same test, snapshot-diff path |
+| OpenHands env-var contract leaks launcher identity | An iteration env spawned by the daemon contains `MINSKY_LAUNCHER=claude-code` | `circuit-break-and-notify` — `minsky doctor` detects the env leak; the iteration fails fast with a one-line diagnostic | `test/chaos/openhands-env-no-launcher-leak.test.ts` (sub-slice of the chaos-test task) |
 | Telemetry-consent record reuses a field for runtime branching | A future PR adds `if (consent.agent === "claude-code") { ... }` to runtime code | `circuit-break-and-notify` — the parity chaos test catches the divergence in step (4) and rejects | same test |
-| Skill discovery silently fails on one launcher | OpenHands' `~/.openhands/agents/security-reviewer.md` references `example-code-secure` which exists in `.claude/skills/` on Claude-launched installs but not on Cursor-launched installs | `loud-crash-supervisor-restart` — recorded by the existing `agentbrew-sync-missing-example-code-secure-to-openhands` P1 task (filed 2026-05-24); the daemon refuses to start until the skill is canonical under Minsky's own install. | (covered by that task's regression test once it ships) |
-
-**Blast radius**: bounded to the install transaction. If a launcher leaks into the runtime, the chaos test catches it before the PR lands.
-
-**Operator escape hatch**: `minsky doctor --launcher-agnostic-check` exits non-zero if any launcher leak is detected, with a copy-paste-able remediation command per finding.
+| Skill discovery silently fails on one launcher | OpenHands' `~/.openhands/agents/security-reviewer.md` references `example-code-secure`, which exists in `.claude/skills/` on Claude-launched installs but not on Cursor-launched installs | `loud-crash-supervisor-restart` — recorded by the existing `agentbrew-sync-missing-example-code-secure-to-openhands` P1 task (filed 2026-05-24); the daemon refuses to start until the skill is canonical under Minsky's own install | (covered by that task's regression test once it ships) |
 
 ## Pre-registered umbrella experiment
 
-`experiments/launcher-agnostic-feature-parity-2026-05-24.yaml` (filed alongside this story):
+This story follows pre-registered hypothesis-driven development (rule #9): every
+change states its hypothesis, success threshold, pivot threshold, measurement
+command, and literature anchor before code is written. The umbrella experiment
+lives at `experiments/launcher-agnostic-feature-parity-2026-05-24.yaml` (filed
+alongside this story):
 
 ```yaml
 id: launcher-agnostic-feature-parity
@@ -106,6 +210,14 @@ anchor: "INSTALL.md (this repo) — colocated agent-readable runbook is the
 
 ## Notes
 
-- This story complements but does not duplicate story 013 (daemon-not-framework — the operator's *repo* is decoupled from Minsky) and story 012 (operator-machine-identity — Minsky runs as the operator, not in a cloud sandbox). Story 014 adds the *launcher* axis: the agent chat that drove the install doesn't get to color the runtime either.
-- Pairs with the strategic stance recorded in `user-stories/015-local-models-until-stable.md`: because Minsky runs on local models until M1.1 stability hits 90%, the runtime is even less launcher-dependent than it would be on a cloud model (no cloud-key plumbing to vary across launchers).
-- Filed alongside the P1 task `launcher-agnostic-feature-parity-chaos-test` (TASKS.md) which carries the chaos-test implementation.
+- This story complements but does not duplicate story 013 (daemon-not-framework
+  — your *repo* is decoupled from Minsky) or story 012 (operator-machine-identity
+  — Minsky runs as you, not in a cloud sandbox). Story 014 adds the *launcher*
+  axis: the agent chat that drove the install doesn't get to color the runtime
+  either.
+- Pairs with the strategic stance in `user-stories/015-local-models-until-stable.md`:
+  because Minsky runs on local models until M1.1 stability hits 90%, the runtime
+  is even less launcher-dependent than it would be on a cloud model — there is no
+  cloud-key plumbing to vary across launchers.
+- Filed alongside the P1 task `launcher-agnostic-feature-parity-chaos-test`
+  (TASKS.md), which carries the chaos-test implementation.

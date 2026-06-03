@@ -1,56 +1,73 @@
 # Competitor: ComposioHQ Agent Orchestrator (AO)
 
-> Closest "autonomy + dashboard" competitor to Minsky's substrate, but framed PR-by-PR rather than as a 24/7 daemon.
+> A dashboard that runs several coding assistants at once, each in its own branch and pull request — the closest "autonomy + dashboard" rival to Minsky, but framed pull-request-by-pull-request rather than as a daemon (a background program that keeps running) that works around the clock.
 
 - **URL**: <https://github.com/ComposioHQ/agent-orchestrator>
 - **Package**: `@aoagents/ao` (install `npm install -g @aoagents/ao`; nightly `@aoagents/ao@nightly`)
 - **Status**: Active, MIT licensed (~7.4k★ as of June 2026 — distinct from `ComposioHQ/composio`, the toolkit repo)
-- **Relationship**: **Competitor** — closest "autonomy + dashboard" combo, but PR-centric framing
+- **Relationship**: **Competitor** — closest "autonomy + dashboard" combo, but pull-request-centric framing
+- **Pricing**: Free, open source (MIT)
 
-## What it is
+## What this is
 
-A full-automation orchestration system: multiple agents running in isolated Git worktrees, each with its own PR, supervised from a single dashboard. Pushes hardest of any tool we've evaluated past session management into autonomous PR handling — agents fix CI failures, respond to review comments, and manage PR lifecycle without per-edit approval.
+AO runs many agents at once and supervises them from one screen. An "agent" here is the coding assistant doing the actual work — Claude Code, Codex, Aider, Cursor, OpenCode, or KimiCode. Each agent works in its own git worktree (a separate checkout of the repo, so agents do not overwrite each other's files), opens its own pull request, and is watched from a single dashboard.
+
+AO pushes further toward autonomy than any other tool in this corpus. Its agents do not stop after one prompt-and-reply. They keep going long enough to fix continuous-integration (CI) failures, answer review comments, and carry a pull request through its lifecycle — all without asking for approval on each edit.
+
+## What this is not
+
+- Not a daemon. AO does not run around the clock. It spawns agents in sessions tied to your review cycle, then stops at the next review.
+- Not a viability engine. AO optimizes for "merge this pull request"; it does not aim to keep a project healthy over years.
+- Not governed by a constitution. AO has no numbered project rules enforced as CI gates over agent output.
+- Not self-improving across sessions. AO detects activity within one session but keeps no record of past iterations to learn from.
 
 ## Strengths
 
-- **True autonomy past session management** — agents persist long enough to handle CI failures and review comments, not just one prompt-response
-- **Per-agent worktree isolation** — each agent works in its own Git worktree, no stepping on each other
-- **Single dashboard** — supervisor view across all agents
-- **Production-grade PR lifecycle** — fixes CI, responds to review comments, manages branch state
-- **Fits CI/CD-shaped teams** — natural surface for engineering organizations
+- **True autonomy past one prompt** — agents persist long enough to handle CI failures and review comments, not just a single prompt-and-reply.
+- **Per-agent worktree isolation** — each agent works in its own git worktree, so they do not step on each other.
+- **Single dashboard** — one supervisor view across all agents.
+- **Full pull-request lifecycle** — fixes CI, answers review comments, manages branch state.
+- **Fits CI/CD-shaped teams** — a natural surface for engineering organizations.
 
-## Gaps (what Minsky differs on)
+## Weaknesses vs Minsky's vision
 
-1. **PR-centric, not viability-centric.** AO optimizes for "merge this PR autonomously"; Minsky optimizes for "stay alive and useful for years." Different objective functions.
-2. **No constitutional layer.** No vision-document grounding; no critique against a constitution.
-3. **No self-improvement of agent prompts.** Agents don't evolve based on outcome metrics over time.
+1. **Pull-request-centric, not viability-centric.** AO optimizes for "merge this pull request on its own"; Minsky optimizes for "stay alive and useful for years." Different objective functions.
+2. **No constitution layer.** No grounding in a vision document; no critique of work against a set of project rules.
+3. **No self-improvement of agent prompts.** Agents do not evolve based on outcome metrics over time.
 4. **No theoretical grounding** in cybernetic / VSM / supervision-tree literature; ad hoc engineering.
-5. **No mobile / Watch surface.** Dashboard is desktop-bound.
+5. **No mobile or Watch surface.** The dashboard is desktop-bound.
 6. **No token-economy awareness** for Claude Code Max subscription dynamics.
-7. **Team / organizational framing.** Built for teams; not solo-developer-organism shaped.
-8. **No tasks.md substrate.** Internal task representation.
+7. **Team framing.** Built for teams, not shaped for a solo developer.
+8. **No TASKS.md substrate.** AO uses an internal task representation, not a plain Markdown to-do list at the project root.
 
-## What we extract or learn
+## What we learn / steal
 
-- **Worktree-per-agent isolation** — strong pattern; OMC's `team` mode does similar with shared task list. Reinforces that worktree isolation is canonical.
-- **Autonomous PR lifecycle handling** — important capability for the operations layer; potentially addable as an OMC mode or as a Minsky persona that listens for review comments
-- **Dashboard supervising multiple agents** — UI inspiration for our web dashboard
-- **CI failure → autonomous fix** — useful pattern; should be in the persona repertoire
+- **Worktree-per-agent isolation** — a strong pattern. OMC's `team` mode does similar with a shared task list. This reinforces that worktree isolation is the canonical primitive.
+- **Autonomous pull-request lifecycle handling** — an important capability for the operations layer. Could be added as an OMC mode, or as a Minsky persona (a role the agent takes on) that listens for review comments.
+- **Dashboard supervising multiple agents** — UI inspiration for our web dashboard.
+- **CI failure → autonomous fix** — a useful pattern; it should live in the persona repertoire.
 
-## Why we don't just use it
+## Why choose Minsky over ComposioHQ AO
 
-- Wrong objective (PR-centric vs viability-centric)
-- Doesn't compose with Claude Code Max economy
-- No solo-developer / mobile / Watch surface
-- Adopting it would mean orienting the whole project around PR throughput — Minsky's whole framing is the long arc, not the next merge
+- Different objective: Minsky targets long-arc project viability; AO targets the next merge.
+- AO does not compose with the Claude Code Max economy.
+- AO has no solo-developer, mobile, or Watch surface.
+- Adopting AO would orient the whole project around pull-request throughput. Minsky's whole framing is the long arc, not the next merge.
 
-## Pin / integration
+## Why choose ComposioHQ AO over Minsky
 
-Not a dependency. No adapter. Worth periodic re-review for patterns to extract.
+- You want overnight, parallel pull-request automation for a CI/CD-shaped engineering team, reviewed each morning.
+- You want a single dashboard supervising many agents across vendors (Claude Code, Codex, Aider, Cursor, OpenCode, KimiCode) behind one interface.
+- You want a mature, declarative reaction state machine (`ci-failed` / `changes-requested` / `approved-and-green`) for pull-request handling out of the box.
+- You do not need an unattended daemon, a constitution-as-CI governance layer, or across-session self-improvement.
+
+## Should we wrap ComposioHQ AO instead?
+
+Not a dependency. No adapter (a small wrapper file that lets Minsky talk to one outside tool through a fixed interface). Worth periodic re-review for patterns to extract.
 
 ## Five pivot questions
 
-> The Five Pivot Questions framework formalizes the `## Gaps` and `## Why we don't just use it` analysis above into a structured, surface-by-surface decision. AO is the corpus's closest "parallel-worker pool + autonomous PR lifecycle + single dashboard" rival — the task Hypothesis pre-registered that it might cover ≥50% of `cross-repo-runner` surface and force a roadmap downgrade. The primary sources resolve that bet: the AO README ([github.com/ComposioHQ/agent-orchestrator](https://github.com/ComposioHQ/agent-orchestrator)) and the author's launch retrospective ([pkarnal.com/blog/open-sourcing-agent-orchestrator](https://pkarnal.com/blog/open-sourcing-agent-orchestrator)) both describe a **session-based, human-review-cadenced** orchestrator — *not* a 24/7 daemon — which keeps Minsky's tick-loop moat intact. (Provenance note: the parent task cited `ComposioHQ/composio, 28.4k★`, but that is Composio's *toolkit* repo — the orchestrator is the separate `ComposioHQ/agent-orchestrator` repo, ~7.4k★ as of June 2026; the package is `@aoagents/ao`, not `@aoagents/ao-cli`. Both fields above are corrected to the primary source.)
+> The Five Pivot Questions framework formalizes the `## Weaknesses vs Minsky's vision` and `## Why choose Minsky over ComposioHQ AO` analysis above into a structured, surface-by-surface decision. AO is the corpus's closest "parallel-worker pool + autonomous PR lifecycle + single dashboard" rival — the task Hypothesis pre-registered that it might cover ≥50% of `cross-repo-runner` surface and force a roadmap downgrade. The primary sources resolve that bet: the AO README ([github.com/ComposioHQ/agent-orchestrator](https://github.com/ComposioHQ/agent-orchestrator)) and the author's launch retrospective ([pkarnal.com/blog/open-sourcing-agent-orchestrator](https://pkarnal.com/blog/open-sourcing-agent-orchestrator)) both describe a **session-based, human-review-cadenced** orchestrator — *not* a 24/7 daemon — which keeps Minsky's tick-loop moat intact. (Provenance note: the parent task cited `ComposioHQ/composio, 28.4k★`, but that is Composio's *toolkit* repo — the orchestrator is the separate `ComposioHQ/agent-orchestrator` repo, ~7.4k★ as of June 2026; the package is `@aoagents/ao`, not `@aoagents/ao-cli`. Both fields above are corrected to the primary source.)
 
 ### 1. How is it different from Minsky?
 

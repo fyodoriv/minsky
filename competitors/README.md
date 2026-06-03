@@ -1,35 +1,41 @@
 # Competitors
 
-> Strategic landscape analysis. Where Minsky sits, what it does that nobody else does, what it doesn't do that others do.
+> The strategic landscape: where Minsky sits, what it does that nobody else does, and what it deliberately leaves to others.
 
-This directory holds one markdown research file per competitor in the M1.10 scorecard corpus. This README is the synthesised strategic view — read it to understand the LANDSCAPE; read each per-vendor file for the DETAILS.
+Minsky is a background program you point at your code projects. It picks the most important unfinished to-do, asks a coding assistant to do it, and hands you a draft to review — it never changes anything without your say-so. This directory compares Minsky against the other tools in the same space.
 
 ## What this is
 
-The navigational index for Minsky's competitive landscape: where Minsky sits in the orchestrator tier, the six-property moat no competitor fully matches, and a per-vendor file map. Read this first; descend into a per-vendor file only when you need that competitor's strengths, gaps, and delegate/contribute/absorb verdict.
+The navigational index for Minsky's competitive landscape. It answers three questions in plain terms:
+
+- Where Minsky sits among the tools that coordinate coding assistants.
+- The six combined properties no competitor fully matches (Minsky's moat).
+- Which per-vendor file to open for each competitor's details.
+
+Read this page first. Open a per-vendor file only when you need that competitor's strengths, gaps, and our build-or-buy verdict.
 
 ## What this is not
 
 - **Not a per-vendor analysis.** Each `competitors/<name>.md` holds one competitor's full research (strengths, gaps, wrap analysis, Five pivot questions).
 - **Not the scorecard data.** See [scorecard.md](./scorecard.md) for the generated metric snapshot from `bin/minsky competitive`.
-- **Not the product positioning.** See [README.md](../README.md) for how Minsky describes itself to operators.
+- **Not the product positioning.** See [README.md](../README.md) for how Minsky describes itself to operators (the human who runs it — you).
 
 ## TL;DR
 
-**Minsky is an orchestrator** (peer tier: MetaGPT, AutoGen, CrewAI, LangGraph, OpenAI Agents SDK). It sits ABOVE the agents (Claude / Devin / Aider) it composes.
+**Minsky is an orchestrator.** An orchestrator sits *above* the coding assistants — Claude, Devin, Aider — and drives them. In this document, "agent" means one of those coding assistants. Minsky is not an agent; it composes agents. Its peer tier is MetaGPT, AutoGen, CrewAI, LangGraph, and the OpenAI Agents SDK.
 
-**Minsky's distinctive moat** is the combination of six properties, no competitor has all six:
+**Minsky's moat is the combination of six properties. No competitor has all six.**
 
 | # | Property | What it means | Who else has it |
 |---|---|---|---|
-| 1 | **Daemon, not framework** | Operator attaches and walks away. Not a Python library / SDK / Flow you wrap your code in. | None — every orchestrator competitor is a framework |
-| 2 | **Operator-machine identity** | Runs as the operator's user with the operator's `~/.ssh`, `~/.gitconfig`, `~/.config/gh/`. Commits land as the operator. No cloud sandbox, no fresh clone. | None — Devin (Cognition Cloud + Devbox), CrewAI (Enterprise platform), AutoGen (whatever Python container) all run with separate identity. **OpenHands Agent Canvas (June 1, 2026) converged but did NOT match**: Dockerless self-host-on-VM still provisions a GitHub token *into* the managed agent-server rather than inheriting the operator's ambient `~/.config/gh` + `~/.gitconfig` + `~/.ssh` directly (per `competitors/openhands.md` weakness #6). |
-| 3 | **Constitution + deterministic enforcement** | 17 non-negotiable rules, each enforced by a CI lint. Not "best practices in docs" — `pnpm pre-pr-lint --stage=full` runs 53 checks. | None |
-| 4 | **MAPE-K self-improvement (substrate today, full loop forthcoming)** | The substrate ships: experiment-store + observer + spec monitor + task-filing audit (the daemon files tasks against its own weak spots). Closed-loop prompt A/B tuning is spec-only — `user-stories/003-mape-k-improves-prompts.md` status: Specification. CrewAI/AutoGen/MetaGPT have neither substrate nor closed loop; the substrate alone is already differentiated. | None (substrate); none plan a closed loop |
-| 5 | **Cross-repo fleet at operator scale** | Walks N hosts in round-robin on one machine. | None — CrewAI Flow = one workflow, LangGraph thread = one conversation, Devin session = one task. **OpenHands Agent Canvas (June 1, 2026) still one-repo-at-a-time**: the Dockerless self-host-on-VM mode runs one agent-server per conversation; cross-repo workflows remain Enterprise-Automations-only (Agent Control Plane license). |
-| 6 | **TASKS.md as operator surface** | Plain markdown file. No dashboard, no API, no DSL. | None |
+| 1 | **Daemon, not framework** | A daemon is a background program that keeps running on your machine. You attach Minsky to a repo and walk away. It is not a Python library, SDK, or Flow you wrap your code in. | None — every orchestrator competitor is a framework |
+| 2 | **Operator-machine identity** | Minsky runs as you, using your `~/.ssh`, `~/.gitconfig`, and `~/.config/gh/`. Commits land under your name. No cloud sandbox, no fresh clone. | None — Devin (Cognition Cloud + Devbox), CrewAI (Enterprise platform), AutoGen (whatever Python container) all run with separate identity. **OpenHands Agent Canvas (June 1, 2026) converged but did NOT match**: Dockerless self-host-on-VM still provisions a GitHub token *into* the managed agent-server rather than inheriting the operator's ambient `~/.config/gh` + `~/.gitconfig` + `~/.ssh` directly (per `competitors/openhands.md` weakness #6). |
+| 3 | **Constitution + deterministic enforcement** | The constitution is Minsky's 17 numbered, non-negotiable project rules. Each one is enforced by a CI lint, not left as advice in docs. `pnpm pre-pr-lint --stage=full` runs 53 checks. | None |
+| 4 | **MAPE-K self-improvement (substrate today, full loop forthcoming)** | MAPE-K is the self-improvement loop: Monitor, Analyze, Plan, Execute over a Knowledge base. The substrate ships: experiment-store + observer + spec monitor + task-filing audit (Minsky files tasks against its own weak spots). Closed-loop prompt A/B tuning is spec-only — `user-stories/003-mape-k-improves-prompts.md` status: Specification. CrewAI/AutoGen/MetaGPT have neither substrate nor closed loop; the substrate alone is already differentiated. | None (substrate); none plan a closed loop |
+| 5 | **Cross-repo fleet at operator scale** | A host is one code project (git repository). Minsky walks N hosts in round-robin on one machine. | None — CrewAI Flow = one workflow, LangGraph thread = one conversation, Devin session = one task. **OpenHands Agent Canvas (June 1, 2026) still one-repo-at-a-time**: the Dockerless self-host-on-VM mode runs one agent-server per conversation; cross-repo workflows remain Enterprise-Automations-only (Agent Control Plane license). |
+| 6 | **TASKS.md as operator surface** | The work queue is a plain Markdown to-do file at the project root. No dashboard, no API, no DSL. | None |
 
-**Minsky's honest gaps** vs competitors — things we DON'T do, by design or because we haven't shipped yet:
+**Minsky's honest gaps.** Things we do NOT do — by design, or because we have not shipped them yet. Each filed gap names a real `TASKS.md` id.
 
 | # | Gap | Who has it | Status |
 |---|---|---|---|
@@ -40,9 +46,9 @@ The navigational index for Minsky's competitive landscape: where Minsky sits in 
 | 5 | Python framework binding | CrewAI, AutoGen, MetaGPT, LangGraph, smolagents | Not planned — TypeScript is the orchestrator-tier surface |
 | 6 | GAIA benchmark | AutoGen (SOTA March 2024) | Filed: `gaia-benchmark-evaluation-substrate` |
 
-## The orchestrator tier in 2026
+## The orchestrator tier
 
-Five frameworks dominate the orchestrator tier:
+Five frameworks dominate the orchestrator tier. The column "Weakness vs Minsky" names what each gives up relative to Minsky.
 
 | Orchestrator | Shape | Primary metric | Strength | Weakness vs Minsky |
 |---|---|---|---|---|
@@ -52,26 +58,26 @@ Five frameworks dominate the orchestrator tier:
 | **LangGraph** (LangChain) | Graph-based state machine | Third-party 62% complex-task success; 100% tool execution success | Time-travel debugging via checkpoints; durable execution; thread_id model | Framework, not daemon; you build the graph |
 | **OpenAI Agents SDK** | Handoffs + guardrails + tracing | Production-ready March 2026; 26k+ stars (no headline benchmark yet) | OpenAI ecosystem distribution; production-grade tracing | Framework, not daemon; model-locked to OpenAI; no MAPE-K self-improvement |
 
-The agent tier (Claude Code, Devin, Aider, OpenHands, SWE-agent, Cursor agent, OpenAI Codex, Augment Code) sits BELOW the orchestrator tier — orchestrators compose them. Minsky-via-Claude inherits Claude Code's SWE-bench score; Minsky-via-Devin inherits Devin's PR merge rate. The orchestrator-tier delta is what Minsky's MAPE-K loop + 24/7 daemon + constitution adds on top.
+The agent tier sits *below* the orchestrator tier: Claude Code, Devin, Aider, OpenHands, SWE-agent, Cursor agent, OpenAI Codex, Augment Code. Orchestrators compose them. Minsky-via-Claude inherits Claude Code's SWE-bench score; Minsky-via-Devin inherits Devin's PR merge rate. The orchestrator-tier delta is what Minsky's MAPE-K loop + 24/7 daemon + constitution adds on top.
 
-## Architectural patterns we adopt or reject
+## Patterns we adopt or reject
 
 ### Adopt
 
 - **State persistence with checkpointing** (LangGraph thread_id + CrewAI @persist) — Minsky's `.minsky/orchestrate.jsonl` is the iteration-level analog. Could extend to per-iteration sub-states (mid-iteration crash recovery) — filed as `minsky-iteration-checkpoint-substrate`.
-- **Multi-role assembly line** (MetaGPT SoP) — Minsky's persona spawner (`novel/adapters/persona-spawner/`) is the equivalent, but Minsky's personas (researcher, planner, implementer) are bound to ONE agent per spawn. The MetaGPT pattern of role-handoff within ONE task is documented as a candidate experiment.
+- **Multi-role assembly line** (MetaGPT SoP) — Minsky's persona spawner (`novel/adapters/persona-spawner/`) is the equivalent. A persona is a role the agent takes on (researcher, planner, implementer). Minsky's personas are bound to ONE agent per spawn. The MetaGPT pattern of role-handoff within ONE task is documented as a candidate experiment.
 - **Handoffs + guardrails** (OpenAI Agents SDK) — Minsky's runtime invariants serve a similar role (gate before iteration); the handoff substrate is the candidate for multi-persona-per-task.
 
 ### Reject (by design)
 
 - **Graph DSL** (LangGraph) — operators don't want to write a graph definition. TASKS.md is simpler and stays simpler as the queue grows.
-- **Cloud sandbox** (Devin Devbox) — Minsky's identity is the operator's identity. Cloud sandbox introduces a separate identity boundary that complicates credentials, git config, and trust.
+- **Cloud sandbox** (Devin Devbox) — Minsky's identity is the operator's identity. A cloud sandbox introduces a separate identity boundary that complicates credentials, git config, and trust.
 - **Python framework binding** (CrewAI/AutoGen/MetaGPT) — orchestrator-tier work in 2026 is full-stack: orchestrator interface (TypeScript), agent adapter (TypeScript), prompt evolution (TypeScript). Python adds zero value here.
 - **Enterprise-platform deployment** (CrewAI Enterprise) — Minsky stays operator-owned. The platform model is a different product.
 
 ## The corpus + scorecard
 
-The M1.10 scorecard at `novel/competitive-benchmark/` measures Minsky against this set on shared metrics. Read [`novel/competitive-benchmark/README.md`](../novel/competitive-benchmark/README.md) for the metric catalogue + grid shape.
+The corpus is the data set of competitor benchmark numbers; the scorecard is the rendered table built from it. The M1.10 scorecard at `novel/competitive-benchmark/` measures Minsky against this set on shared metrics. Read [`novel/competitive-benchmark/README.md`](../novel/competitive-benchmark/README.md) for the metric catalogue + grid shape.
 
 Current corpus state (as of 2026-06-02):
 
@@ -80,7 +86,7 @@ Current corpus state (as of 2026-06-02):
 - **12 metrics** (DORA 4 + agentic 6 + public-benchmark 2: SWE-bench Verified + HumanEval Pass@1)
 - **Self-refreshing**: weekly `corpus-refresh-check` + quarterly `corpus-discover-quarterly` (PR #719); `/competitor-research <url>` skill is the on-ramp for new vendors (PR #718)
 
-## Deep-research backlog — Tier-S resolution
+### Deep-research backlog — Tier-S resolution
 
 The 2026-05-22 operator conversation produced five Tier-S competitor stubs to deep-research under the sharpened identity *"OpenHands that improves itself + follows hard rules and principles"*. LangGraph was demoted same-day (no concrete use case post-OpenHands-adoption); the remaining four were resolved by tasks `competitor-deepen-goose`, `competitor-deepen-claude-agent-sdk`, and `competitor-deep-research-tier-s-2026-05`. Final dispositions:
 
@@ -92,7 +98,21 @@ The 2026-05-22 operator conversation produced five Tier-S competitor stubs to de
 | **Cline** | **Reference** | DO-NOT-WRAP (no headless mode); absorb Plan/Act-as-pre-registration + per-task cost UX; no corpus entry (rule #4 — no model-dependent double-count) | `competitor-deep-research-tier-s-2026-05` |
 | **LangGraph** | Demoted from Tier-S (re-promote criterion on file) | None — see `competitors/langgraph.md` re-promote criterion | 2026-05-22 (demoted) |
 
-The single corpus-landing result of the four researched stubs is **Agentless** — the thesis falsifier that earns a permanent seat because a reason-for-existing that cannot be falsified is not engineering (rule #9). The other three resolve to a Dependency (Claude Agent SDK), a candidate agent-backend ADD (Goose), and a learn-from Reference (Cline); none adds a corpus reading, by the rule-#4 no-fabricated-readings discipline.
+The only stub that lands a corpus reading is **Agentless** — the thesis falsifier earns a permanent seat because a reason-for-existing that cannot be falsified is not engineering (rule #9, pre-registered hypothesis-driven development). The other three resolve to a Dependency (Claude Agent SDK), a candidate agent-backend ADD (Goose), and a learn-from Reference (Cline). None adds a corpus reading, by the rule-#4 no-fabricated-readings discipline.
+
+### Discovered but blocked on primary citation
+
+Vendors the discovery sweep identified but could not add (no vendor-primary number on the M1.10 catalogue):
+
+- **AutoGen** (`corpus-add-autogen-microsoft`) — Microsoft has MATH 69.48% as primary, but the orchestrator-tier metric is `humaneval-pass-at-1`. Wait for Magentic-One-style follow-up paper.
+- **CrewAI** (`corpus-add-crewai`) — 1.4B+ executions + 60% Fortune 500 published, but no benchmark.
+- **LangGraph** (`corpus-add-langgraph`) — third-party benchmarks (AImultiple, JetThoughts) only.
+- **OpenAI Agents SDK** (`corpus-add-openai-agents-sdk`) — March 2026 launch, no benchmark yet.
+- **GitHub Copilot Coding Agent** (`corpus-add-github-copilot-coding-agent`) — launch post doesn't cite SWE-bench; AIDev arxiv 2602.02345 has Copilot data but extraction pending.
+- **Goose** (Block, `corpus-add-goose-block`) — Block hasn't published official benchmarks (third-party 45% on SWE-bench).
+- **Factory Droid** (`corpus-add-factory-droid`) — factory.ai 2024 report has SWE-bench Full + Lite only, not Verified.
+
+The validator's published-primary rule (rule #4 — visible, no fabricated readings) is doing real work: these vendors all have substantial adoption, but the corpus stays honest about what's measurable.
 
 ## Per-vendor research files
 
@@ -126,20 +146,6 @@ Or invoke directly:
 ```bash
 /competitor-research https://www.example-orchestrator.com
 ```
-
-## Discovered but blocked on primary citation
-
-Vendors the discovery sweep identified but couldn't add (no vendor-primary number on the M1.10 catalogue):
-
-- **AutoGen** (`corpus-add-autogen-microsoft`) — Microsoft has MATH 69.48% as primary, but the orchestrator-tier metric is `humaneval-pass-at-1`. Wait for Magentic-One-style follow-up paper.
-- **CrewAI** (`corpus-add-crewai`) — 1.4B+ executions + 60% Fortune 500 published, but no benchmark.
-- **LangGraph** (`corpus-add-langgraph`) — third-party benchmarks (AImultiple, JetThoughts) only.
-- **OpenAI Agents SDK** (`corpus-add-openai-agents-sdk`) — March 2026 launch, no benchmark yet.
-- **GitHub Copilot Coding Agent** (`corpus-add-github-copilot-coding-agent`) — launch post doesn't cite SWE-bench; AIDev arxiv 2602.02345 has Copilot data but extraction pending.
-- **Goose** (Block, `corpus-add-goose-block`) — Block hasn't published official benchmarks (third-party 45% on SWE-bench).
-- **Factory Droid** (`corpus-add-factory-droid`) — factory.ai 2024 report has SWE-bench Full + Lite only, not Verified.
-
-The validator's published-primary rule (rule #4 — visible, no fabricated readings) is doing real work — these vendors all have substantial adoption, but the corpus stays honest about what's measurable.
 
 ## Anchor
 

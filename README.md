@@ -1,41 +1,50 @@
 # Minsky
 
-> A 24/7 self-improving code factory — a discipline pack on OpenHands.
+> Point Minsky at your code and it works through your to-do list while you're away — handing you drafts to review, never changing anything without your say-so.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
-[![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
 
 ## What this is
 
-Point Minsky at a repo and it works **unattended**: picks `TASKS.md` tasks, spawns an agent, ships draft PRs, never merges without you. It adds the discipline OpenHands lacks — a task picker, 18 constitutional rule lints, and a pre-registered-experiment harness where every change is a hypothesis with a measurement command.
+Minsky is a background program that does coding work. You point it at a git repo (a **host**) that keeps a plain-text to-do list; Minsky picks the most important unfinished task and asks a coding **agent** — Claude Code, Devin, Aider, or a local model — to do it.
 
-It runs from Claude Code, Devin, or **local models** — same core behavior, no cloud key required by default.
+Minsky isn't the agent — it drives the agent and hands you the result as a draft. It never pushes on its own, never touches `main`, runs through the night, and restarts if it crashes. Everything runs on your machine, as you, so the work shows up under your name.
+
+Minsky adds what a bare agent lacks: a task picker, 18 numbered rule-checks run as CI lints on every draft, and an experiment harness where each change states a measurable hypothesis before any code.
 
 ## What this is not
 
-- **Not an agent runtime.** [OpenHands](https://github.com/All-Hands-AI/OpenHands) spawns models and edits files; Minsky makes that ship-safe.
-- **Not a config dump.** Per-machine setup lives in [INSTALL.md](INSTALL.md); `~/.minsky/` stays out of the repo.
-- **Not the roadmap.** See [MILESTONES.md](./MILESTONES.md) for the live M1 scorecard.
+- **Not an agent runtime.** [OpenHands](https://github.com/All-Hands-AI/OpenHands) spawns models and edits files; Minsky drives such an agent and makes its output safe to ship — a dependency, not a competitor.
+- **Not a config dump.** Per-machine setup is in [INSTALL.md](INSTALL.md); runtime config stays under `~/.minsky/`.
+- **Not the roadmap.** See [MILESTONES.md](./MILESTONES.md).
 
 ## Install
+
+Inside any git repo:
 
 ```bash
 cd /any/git/repo && npx -y minsky
 ```
 
-`npx minsky` installs + bootstraps [`~/.minsky/config.json`](docs/example-config.json) + starts an iteration. **Uninstall**: `minsky uninstall --force`. Contributors: `git clone` + `pnpm install` (builds dist, no build) + `bin/minsky`.
+This installs Minsky, writes config to `~/.minsky/config.json`, and runs one round. No cloud key needed by default.
+
+**Uninstall:** `minsky uninstall --force`. **Contributors:** `git clone`, `pnpm install`, then `bin/minsky`.
 
 ## Run
 
-- **`minsky`** — the 24/7 daemon. Picks tasks, ships draft PRs, drives the **project** toward Minsky **standards** over an 8h session, captures **metrics** baselines per cycle.
-- **`minsky transform`** — one improvement session on the current folder with a before/after delta. The demo: `cd /any/repo && minsky transform`.
-- **`minsky solve <task-id>`** — one iteration of one task.
+- **`minsky`** — the daemon (runs in the background): picks tasks, ships draft PRs, and works an 8-hour session, recording metrics each round.
+- **`minsky transform`** — one improvement session on the current folder, as a before/after delta.
+- **`minsky solve <task-id>`** — one round on a single task.
 
-The daemon emits **fleet-wide stability reporting** and supports **remote** finding **submission** (`minsky submit-finding`) with an anonymized preview. **Agents** self-heal common failures without you. How it works: [docs/README-v1-detailed.md](docs/README-v1-detailed.md#how-it-works).
+Each finished task arrives as a **draft pull request** to approve. It also reports stability across watched projects and self-heals common failures.
 
-## Safety (mechanically enforced)
+## Safety
 
-Every PR ships as a draft · no direct pushes to `main` · destructive ops are human-blocked, never executed · 15 gates per PR (scope-leak / secret-scan / security-review).
+Enforced mechanically, not by convention:
+
+- Every PR ships as a **draft**; **no direct pushes to `main`**.
+- **Destructive operations are blocked** — a human decides.
+- **15 gates per PR**: scope-leak detection, secret scanning, security review.
 
 ## How Minsky compares
 
@@ -47,8 +56,8 @@ Every PR ships as a draft · no direct pushes to `main` · destructive ops are h
 | **Constitutional CI lints** | ✅ 18 rules | 🟡 | 🟡 | ❌ |
 | **Pre-registered HDD** | ✅ every PR | ❌ | ❌ | ❌ |
 
-OpenHands is the agent runtime Minsky depends on, not a row. Full table + tradeoffs: [docs/competitive-comparison.md](docs/competitive-comparison.md).
+Full table: [docs/competitive-comparison.md](docs/competitive-comparison.md).
 
 ## License
 
-MIT — [LICENSE](LICENSE). Read next: [docs/README.md](docs/README.md) · [AGENTS.md](AGENTS.md) · [vision.md](vision.md). Named after Marvin Minsky, *The Society of Mind* (1986).
+MIT — see [LICENSE](LICENSE). Read next: [docs/README.md](docs/README.md) · [AGENTS.md](AGENTS.md) · [vision.md](vision.md).
