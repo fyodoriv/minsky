@@ -31,6 +31,26 @@ set -euo pipefail
 # Resolution order: env var > ~/.minsky/config.json > built-in default.
 
 CONFIG_FILE="${MINSKY_CONFIG:-$HOME/.minsky/config.json}"
+
+# Epoch-milliseconds helper for the runany local-since marker (runtime-token-
+# limit-auto-pivot-local-and-back). bash has no native ms clock; prefer
+# `EPOCHREALTIME` (bash ≥5, microsecond), fall back to `date +%s%3N` (GNU
+# date), then to whole-seconds×1000 (BSD/macOS date) — every branch yields a
+# monotone-enough ms value for the dwell gate (rule #6: always returns a number).
+_now_ms() {
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    printf '%d' "$(( ${EPOCHREALTIME/./} / 1000 ))"
+  else
+    local ns
+    ns="$(date +%s%3N 2>/dev/null || true)"
+    if [[ "$ns" =~ ^[0-9]+$ && "${#ns}" -ge 13 ]]; then
+      printf '%s' "$ns"
+    else
+      printf '%d' "$(( $(date +%s) * 1000 ))"
+    fi
+  fi
+}
+
 HOSTS_DIR=""
 SINGLE_HOST=""  # --host <repo> filter mode (PR #875: closes the smoke
                 # finding that `minsky --once <repo>` was iterating every
@@ -557,6 +577,29 @@ iterate_host() {
   echo "host=$host iter=$iter_n task=$task_id branch=$branch" >&2
 
   if [[ "$DRY_RUN" == "1" ]]; then
+    # Provider-decision preview (runtime-token-limit-auto-pivot-local-and-back,
+    # Acceptance #2 + pre-registered measurement): a dry run still resolves +
+    # logs which provider the next real iteration WOULD use, so the operator
+    # can verify the forward fallback (`runany-provider=… → local`) and the
+    # recover flip-back without spawning an agent. No marker is persisted and
+    # no agent runs — this is observation only (rule #4: everything visible).
+    local dry_local_cfg
+    dry_local_cfg="$(jq -r '.local_llm_enabled // false' "$CONFIG_FILE" 2>/dev/null || echo "false")"
+    if [[ "$dry_local_cfg" != "true" ]]; then
+      local dry_resolver_json
+      dry_resolver_json="$(node "$script_dir/../scripts/runany-resolve-model.mjs" --json 2>/dev/null || true)"
+      if [[ -n "$dry_resolver_json" ]]; then
+        local dry_agent dry_kind dry_model
+        dry_agent="$(printf '%s' "$dry_resolver_json" | jq -r '.agent // empty' 2>/dev/null || echo "")"
+        dry_kind="$(printf '%s' "$dry_resolver_json" | jq -r '.kind // empty' 2>/dev/null || echo "")"
+        dry_model="$(printf '%s' "$dry_resolver_json" | jq -r '.model // empty' 2>/dev/null || echo "")"
+        if [[ "$dry_agent" == "local" ]]; then
+          echo "host=$host runany-provider=$dry_kind → local (auto fallback) [dry-run]" >&2
+        elif [[ "$dry_agent" == "claude" && -n "$dry_model" ]]; then
+          echo "host=$host runany-provider=$dry_kind model=$dry_model [dry-run]" >&2
+        fi
+      fi
+    fi
     record_iteration "$host" "$iter_n" "$task_id" "$branch" "planned" "" "dry-run; no spawn" "$gh_host"
     return 0
   fi
@@ -680,25 +723,94 @@ EOF
   # Rule #6 (stay alive): if node / the resolver fails for any reason the
   # `|| true` leaves `$resolved_agent` empty and we fall through to the
   # existing config-driven path — the agent always gets a model.
+  #
+  # Bidirectional runtime auto-pivot (runtime-token-limit-auto-pivot-local-and-
+  # back): the forward fallback (remote→local) already lived here. This block
+  # ALSO persists a `local_since` marker on the forward switch and, when the run
+  # is ALREADY on local, runs a cheap remote recover-probe FIRST — flipping
+  # back to remote (pin honored) within one probe interval of credits
+  # returning, with anti-flap dwell + N-consecutive-good probes in the pure
+  # `decideRecoverFlipBack`. The bash only does I/O; the decision is pure.
+  local marker_dir="$host/.minsky"
+  local marker_file="$marker_dir/runany-local-since.json"
+  export MINSKY_LOCAL_SINCE_PATH="$marker_file"
   local resolved_agent=""
   if [[ "$local_llm_enabled" != "true" ]]; then
-    local resolver_json
-    resolver_json="$(node "$script_dir/../scripts/runany-resolve-model.mjs" --json 2>/dev/null || true)"
-    if [[ -n "$resolver_json" ]]; then
-      resolved_agent="$(printf '%s' "$resolver_json" | jq -r '.agent // empty' 2>/dev/null || echo "")"
-      local resolved_model
-      resolved_model="$(printf '%s' "$resolver_json" | jq -r '.model // empty' 2>/dev/null || echo "")"
-      local resolved_kind
-      resolved_kind="$(printf '%s' "$resolver_json" | jq -r '.kind // empty' 2>/dev/null || echo "")"
-      if [[ "$resolved_agent" == "local" ]]; then
-        # Decision (2 budget-exhausted) or (3 all-remote-down): switch fully
-        # to local this iteration. Treat exactly like config `local_llm_enabled`.
+    # ── Recover-probe FIRST when a prior iteration already dropped to local.
+    # If the marker exists, the run is on local; probe the remote backend and
+    # ask the pure decider whether to flip back this iteration.
+    if [[ -f "$marker_file" ]]; then
+      local recover_json
+      recover_json="$(node "$script_dir/../scripts/runany-resolve-model.mjs" --recover-probe 2>/dev/null || true)"
+      if [[ -n "$recover_json" ]]; then
+        local flip_back good_probes recover_reason recover_pin
+        flip_back="$(printf '%s' "$recover_json" | jq -r '.flipBack // false' 2>/dev/null || echo "false")"
+        good_probes="$(printf '%s' "$recover_json" | jq -r '.goodProbes // 0' 2>/dev/null || echo "0")"
+        recover_reason="$(printf '%s' "$recover_json" | jq -r '.reason // ""' 2>/dev/null || echo "")"
+        recover_pin="$(printf '%s' "$recover_json" | jq -r '.pin // empty' 2>/dev/null || echo "")"
+        if [[ "$flip_back" == "true" ]]; then
+          # Credits are back AND anti-flap holds: flip the run BACK to remote.
+          # Pin precedence: re-pin to MINSKY_STRATEGIC_PIN_MODEL if set, else
+          # let decideRunAnyProvider re-pick below (resolved_agent stays empty).
+          rm -f "$marker_file" 2>/dev/null || true
+          if [[ -n "$recover_pin" ]]; then
+            model="$recover_pin"
+            echo "host=$host runany-provider=recover-flip-back → remote (pin=$model)" >&2
+          else
+            echo "host=$host runany-provider=recover-flip-back → remote (dynamic re-pick)" >&2
+          fi
+          node "$script_dir/../scripts/orchestrate.mjs" record-mode-transition \
+            --from=local --to=remote --trigger=recover-flip-back --model="$model" \
+            >/dev/null 2>&1 || true
+        else
+          # Stay on local; persist the updated consecutive-good-probe counter so
+          # the next iteration's anti-flap gate sees the running tally.
+          local local_since_ms
+          local_since_ms="$(jq -r '.localSinceMs // 0' "$marker_file" 2>/dev/null || echo "0")"
+          printf '{"localSinceMs":%s,"goodProbes":%s}\n' "$local_since_ms" "$good_probes" \
+            > "$marker_file" 2>/dev/null || true
+          local_llm_enabled="true"
+          echo "host=$host runany-provider=recover-probe hold-local ($recover_reason)" >&2
+        fi
+      else
+        # Probe failed to run (rule #6): stay on local rather than risk a
+        # spawn against an exhausted remote.
         local_llm_enabled="true"
-        echo "host=$host runany-provider=$resolved_kind → local (auto fallback)" >&2
-      elif [[ "$resolved_agent" == "claude" && -n "$resolved_model" ]]; then
-        # Decision (1 pin) or (2 dynamic-remote): use the resolved remote model.
-        model="$resolved_model"
-        echo "host=$host runany-provider=$resolved_kind model=$model" >&2
+        echo "host=$host runany-provider=recover-probe unavailable → hold-local" >&2
+      fi
+    fi
+
+    # ── Forward decision (only when we did not already flip to hold-local).
+    if [[ "$local_llm_enabled" != "true" ]]; then
+      local resolver_json
+      resolver_json="$(node "$script_dir/../scripts/runany-resolve-model.mjs" --json 2>/dev/null || true)"
+      if [[ -n "$resolver_json" ]]; then
+        resolved_agent="$(printf '%s' "$resolver_json" | jq -r '.agent // empty' 2>/dev/null || echo "")"
+        local resolved_model
+        resolved_model="$(printf '%s' "$resolver_json" | jq -r '.model // empty' 2>/dev/null || echo "")"
+        local resolved_kind
+        resolved_kind="$(printf '%s' "$resolver_json" | jq -r '.kind // empty' 2>/dev/null || echo "")"
+        if [[ "$resolved_agent" == "local" ]]; then
+          # Decision (2 budget-exhausted) or (3 all-remote-down): switch fully
+          # to local this iteration. Treat exactly like config `local_llm_enabled`.
+          local_llm_enabled="true"
+          echo "host=$host runany-provider=$resolved_kind → local (auto fallback)" >&2
+          # Persist the local_since marker (forward switch) — drives the
+          # recover-probe's dwell gate next iteration. Only stamp it on the
+          # FIRST drop, so the dwell measures from the true start.
+          if [[ ! -f "$marker_file" ]]; then
+            mkdir -p "$marker_dir" 2>/dev/null || true
+            printf '{"localSinceMs":%s,"goodProbes":0}\n' "$(_now_ms)" \
+              > "$marker_file" 2>/dev/null || true
+            node "$script_dir/../scripts/orchestrate.mjs" record-mode-transition \
+              --from=remote --to=local --trigger="$resolved_kind" \
+              >/dev/null 2>&1 || true
+          fi
+        elif [[ "$resolved_agent" == "claude" && -n "$resolved_model" ]]; then
+          # Decision (1 pin) or (2 dynamic-remote): use the resolved remote model.
+          model="$resolved_model"
+          echo "host=$host runany-provider=$resolved_kind model=$model" >&2
+        fi
       fi
     fi
   fi

@@ -42,7 +42,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 import { LivenessProbeCache, snapshotToRemaining } from "./lib/runany-backend-liveness.mjs";
-import { decideRunAnyProvider } from "./lib/runany-provider-decision.mjs";
+import { decideRecoverFlipBack, decideRunAnyProvider } from "./lib/runany-provider-decision.mjs";
 
 /** Default remote backend probed when `MINSKY_REMOTE_BACKENDS` is unset. */
 const DEFAULT_BACKENDS = "claude=api.anthropic.com:443";
@@ -184,34 +184,201 @@ export function resolvePin(env) {
 }
 
 /**
- * Parse `--json` / `--force-probe` from argv. Pure.
+ * Parse `--json` / `--force-probe` / `--recover-probe` from argv. Pure.
+ *
+ * `--recover-probe` switches the CLI from the forward provider decision to the
+ * recover-probe flip-back decision (runtime-token-limit-auto-pivot-local-and-
+ * back): given the persisted `local_since` marker + a fresh remote probe, it
+ * prints whether the run should flip BACK to remote this iteration.
  *
  * @param {string[]} argv
- * @returns {{ json: boolean, force: boolean }}
+ * @returns {{ json: boolean, force: boolean, recover: boolean }}
  */
 export function parseArgs(argv) {
-  return { json: argv.includes("--json"), force: argv.includes("--force-probe") };
+  return {
+    json: argv.includes("--json"),
+    force: argv.includes("--force-probe"),
+    recover: argv.includes("--recover-probe"),
+  };
+}
+
+/**
+ * Parse the persisted `.minsky/runany-local-since.json` marker. Pure over the
+ * raw file text. The marker records when the run dropped to local and how many
+ * consecutive good recover-probes have accrued since. An absent / corrupt /
+ * partial marker degrades to "never dropped" (`localSinceMs: 0`, `goodProbes:
+ * 0`) so a missing marker never crashes the resolver (rule #6).
+ *
+ * @param {string | undefined} raw
+ * @returns {{ localSinceMs: number, goodProbes: number }}
+ */
+export function parseLocalSinceMarker(raw) {
+  if (raw === undefined || raw.trim().length === 0) return { localSinceMs: 0, goodProbes: 0 };
+  try {
+    const obj = JSON.parse(raw);
+    const localSinceMs = Number.isFinite(obj?.localSinceMs) ? Number(obj.localSinceMs) : 0;
+    const goodProbes = Number.isFinite(obj?.goodProbes) ? Number(obj.goodProbes) : 0;
+    return { localSinceMs: Math.max(0, localSinceMs), goodProbes: Math.max(0, goodProbes) };
+  } catch {
+    return { localSinceMs: 0, goodProbes: 0 };
+  }
+}
+
+/**
+ * Read + parse the persisted local-since marker from
+ * `~/.minsky/runany-local-since.json` (or the host's `.minsky/` when
+ * `MINSKY_LOCAL_SINCE_PATH` overrides it). Returns the degraded "never
+ * dropped" state on any read error so the recover-probe never crashes a live
+ * run (rule #6).
+ *
+ * @param {string} [path]
+ * @returns {Promise<{ localSinceMs: number, goodProbes: number }>}
+ */
+async function readLocalSinceMarker(path) {
+  const file = path ?? join(homedir(), ".minsky", "runany-local-since.json");
+  try {
+    return parseLocalSinceMarker(await readFile(file, "utf8"));
+  } catch {
+    return { localSinceMs: 0, goodProbes: 0 };
+  }
+}
+
+/**
+ * `--recover-probe` mode. The run is currently on local; this runs the cheap
+ * remote recover-probe (reusing the TCP liveness probe `decideRunAnyProvider`
+ * already builds) and calls the pure `decideRecoverFlipBack` with the persisted
+ * dwell + consecutive-good state. Prints the flip-back decision as JSON so the
+ * bash runner can act (flip back, honoring the operator pin) and persist the
+ * updated counter. The pin is surfaced verbatim so the caller honors pin-
+ * precedence on the flip-back without re-resolving.
+ *
+ * @returns {Promise<number>}
+ */
+async function recoverProbeMain() {
+  const specs = parseBackends(process.env["MINSKY_REMOTE_BACKENDS"]);
+  const marker = await readLocalSinceMarker(process.env["MINSKY_LOCAL_SINCE_PATH"]);
+  const pin = resolvePin(process.env);
+
+  // A recover-probe is "good" only when at least one configured remote backend
+  // is reachable again — the same liveness probe the forward decision uses.
+  // `MINSKY_FORCE_EXHAUSTED` forces every backend down (the test seam), so the
+  // probe is deterministically bad and the run holds local. The recover-probe
+  // always bypasses the TTL cache (`force: true`) — a stale "reachable" entry
+  // would defeat the whole point of probing for recovery.
+  let backends;
+  if (forceExhausted(process.env)) {
+    backends = allDownBackends(specs.map((s) => s.id));
+  } else {
+    const cache = new LivenessProbeCache({ clock: () => Date.now(), probe: makeTcpProbe(specs) });
+    ({ backends } = await cache.liveness(
+      specs.map((s) => s.id),
+      { force: true },
+    ));
+  }
+  const probeOk = backends.some((b) => b.reachable === true);
+
+  const dwellMs = parseDwellMs(process.env);
+  const goodProbesNeeded = parseGoodProbesNeeded(process.env);
+  const decision = decideRecoverFlipBack({
+    currentMode: "local",
+    probeOk,
+    nowMs: Date.now(),
+    localSinceMs: marker.localSinceMs,
+    priorGoodProbes: marker.goodProbes,
+    ...(dwellMs === undefined ? {} : { dwellMs }),
+    ...(goodProbesNeeded === undefined ? {} : { goodProbesNeeded }),
+  });
+
+  process.stdout.write(
+    `${JSON.stringify({
+      ...decision,
+      probeOk,
+      backends,
+      ...(pin === undefined ? {} : { pin }),
+    })}\n`,
+  );
+  return 0;
+}
+
+/**
+ * Optional dwell override from `MINSKY_RECOVER_DWELL_MS`. Pure over env.
+ *
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {number | undefined}
+ */
+export function parseDwellMs(env) {
+  const raw = env["MINSKY_RECOVER_DWELL_MS"];
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+/**
+ * Optional consecutive-good-probes override from
+ * `MINSKY_RECOVER_GOOD_PROBES`. Pure over env.
+ *
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {number | undefined}
+ */
+export function parseGoodProbesNeeded(env) {
+  const raw = env["MINSKY_RECOVER_GOOD_PROBES"];
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : undefined;
+}
+
+/**
+ * `MINSKY_FORCE_EXHAUSTED=1` is the test/measurement seam: it deterministically
+ * forces "all remote backends down" without a real network outage, so the
+ * forced-exhaustion test (and the task's pre-registered measurement) can drive
+ * the forward fallback to local and a failing recover-probe without depending
+ * on a live socket. Pure over env.
+ *
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {boolean}
+ */
+export function forceExhausted(env) {
+  const raw = env["MINSKY_FORCE_EXHAUSTED"];
+  return raw === "1" || raw === "true";
+}
+
+/**
+ * Map a set of backend ids to all-unreachable liveness — the shape
+ * `decideRunAnyProvider` reads when `MINSKY_FORCE_EXHAUSTED` is set. Pure.
+ *
+ * @param {readonly string[]} ids
+ * @returns {import("./lib/runany-backend-liveness.mjs").RemoteBackendLiveness[]}
+ */
+export function allDownBackends(ids) {
+  return ids.map((id) => ({ id, reachable: false, reason: "force-exhausted" }));
 }
 
 /**
  * CLI entry — the only I/O boundary. Resolves the provider decision for the
  * next iteration and prints either the bare model id (default, for the
- * bash runner to capture) or the full decision (`--json`).
+ * bash runner to capture) or the full decision (`--json`). With
+ * `--recover-probe`, delegates to the recover-probe flip-back path.
  *
  * @returns {Promise<number>}
  */
 async function main() {
-  const { json, force } = parseArgs(process.argv.slice(2));
+  const { json, force, recover } = parseArgs(process.argv.slice(2));
+  if (recover) return recoverProbeMain();
   const specs = parseBackends(process.env["MINSKY_REMOTE_BACKENDS"]);
   const snapshot = await readSnapshot(process.env["MINSKY_TOKEN_SNAPSHOT"]);
   const remaining = snapshotToRemaining(snapshot);
   const pin = resolvePin(process.env);
 
-  const cache = new LivenessProbeCache({ clock: () => Date.now(), probe: makeTcpProbe(specs) });
-  const { backends } = await cache.liveness(
-    specs.map((s) => s.id),
-    { force },
-  );
+  let backends;
+  if (forceExhausted(process.env)) {
+    backends = allDownBackends(specs.map((s) => s.id));
+  } else {
+    const cache = new LivenessProbeCache({ clock: () => Date.now(), probe: makeTcpProbe(specs) });
+    ({ backends } = await cache.liveness(
+      specs.map((s) => s.id),
+      { force },
+    ));
+  }
 
   const decision = decideRunAnyProvider({
     remaining,

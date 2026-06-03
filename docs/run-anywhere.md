@@ -397,6 +397,63 @@ the task Pivot) so the per-iteration probe cost stays bounded; `--force-probe`
 (or a cache miss / TTL expiry) forces a fresh read. No flap state is held in
 the decider itself — hysteresis is the picker's job.
 
+## Runtime recover-probe — mid-run flip BACK to remote
+
+<!-- scope: human-approved `runtime-token-limit-auto-pivot-local-and-back` (P0 operator 2026-05-17 directive; this file is the operator-facing reference the task's Files list calls for). -->
+
+The forward fallback above drops a live run to local in ≤1 iteration when the
+remote is exhausted. The **recover-probe** closes the loop the other way: once
+a run is on local, every subsequent iteration runs a cheap remote recover-probe
+and flips the run **back** to remote within one probe interval of credits
+returning — bidirectional, mid-run, zero operator action.
+
+### How it works
+
+1. **Forward switch persists a marker.** The first iteration that drops to
+   local writes `.minsky/runany-local-since.json` (`{localSinceMs, goodProbes}`)
+   under the host and appends a `provider-mode-transition` (`remote→local`)
+   record to `.minsky/orchestrate.jsonl`.
+2. **Each later iteration recover-probes FIRST.** While the marker exists,
+   `bin/minsky-run.sh` calls `runany-resolve-model.mjs --recover-probe` before
+   the forward decision. The probe reuses the same TCP backend-liveness probe;
+   a probe is "good" only when at least one configured remote backend is
+   reachable again.
+3. **The flip-back decision is pure + anti-flap.** `decideRecoverFlipBack`
+   (`scripts/lib/runany-provider-decision.mjs`) flips back only when BOTH a
+   minimum dwell has elapsed AND N consecutive good probes have accrued. A
+   single bad probe resets the consecutive-good counter to 0 (transient-fail-
+   no-flip), so a flaky remote can't oscillate the run.
+4. **Pin precedence on flip-back.** When the gates pass, the run flips to
+   `MINSKY_STRATEGIC_PIN_MODEL` verbatim if set, else lets `decideRunAnyProvider`
+   re-pick by budget band. The marker is removed and a `provider-mode-transition`
+   (`local→remote`, `trigger: recover-flip-back`) record is appended.
+
+The bash does only I/O (probe, marker read/write, ledger append); the decision
+is the pure `decideRecoverFlipBack`, unit-tested for anti-flap, transient-fail-
+no-flip, and pin-precedence (Cockburn, *Hexagonal Architecture* — the decision
+is the port, exec/probe is the I/O).
+
+### Operator knobs
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `MINSKY_RECOVER_DWELL_MS` | `60000` | minimum ms on local before a flip-back is allowed |
+| `MINSKY_RECOVER_GOOD_PROBES` | `2` | consecutive good probes required before flip-back |
+| `MINSKY_FORCE_EXHAUSTED` | unset | `=1` forces all backends down (test/measurement seam) — drives the forward fallback and a failing recover-probe deterministically |
+
+### Pivot (rule #9)
+
+If the recover-probe oscillates (remote flaps in/out faster than the dwell
+window), widen `MINSKY_RECOVER_DWELL_MS` and require `MINSKY_RECOVER_GOOD_PROBES`
+≥ 3. If still too flappy to ship, retire the auto-flip-back and degrade to the
+forward-only fallback (today's behavior) with a logged reason — never regress
+the forward path, never require operator action for it.
+
+```bash
+node scripts/runany-resolve-model.mjs --recover-probe        # → flip-back JSON
+MINSKY_FORCE_EXHAUSTED=1 node scripts/runany-resolve-model.mjs --recover-probe  # forced-bad probe
+```
+
 ## Measurement (pre-registered, rule #9)
 
 The task's Success threshold is evaluated deterministically by the audit
@@ -426,7 +483,13 @@ mis-degrade.
 - **Slice 1** (shipped) — pure `decideRunAnyProvider` decision table + chaos tests.
 - **Slice 2** (shipped) — pre-registered measurement harness
   (`scripts/runany-model-audit.mjs`); decider + router ported to `scripts/lib/`.
-- **Slice 3** (this) — wired the decider + a multi-backend liveness probe
+- **Slice 3** (shipped) — wired the decider + a multi-backend liveness probe
   into the run-anywhere entrypoint. `scripts/runany-resolve-model.mjs` is the
   I/O boundary called from `bin/minsky-run.sh`; liveness is cached with a
   ≥60s TTL (`scripts/lib/runany-backend-liveness.mjs`) per the task Pivot.
+- **Recover-probe** (`runtime-token-limit-auto-pivot-local-and-back`) — added
+  the bidirectional mid-run auto-pivot: the run flips back to remote within one
+  recover-probe interval of credits returning, with anti-flap dwell +
+  N-consecutive-good probes in the pure `decideRecoverFlipBack`, and a
+  `provider-mode-transition` record on every flip. See § "Runtime recover-probe"
+  above.

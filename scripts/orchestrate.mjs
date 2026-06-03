@@ -339,6 +339,54 @@ export function buildRunanyPolicyRecords(res, ctx) {
 }
 
 /**
+ * Pure: build a `provider-mode-transition` ledger record for the runtime
+ * token-limit auto-pivot (runtime-token-limit-auto-pivot-local-and-back).
+ * Every forward-fallback (remote→local) AND recover-flip-back (local→remote)
+ * the runner performs appends one of these to `.minsky/orchestrate.jsonl`, so
+ * the bidirectional auto-pivot is observable (rule #4 — everything visible)
+ * and its human-intervention-rate is measurable. No I/O — the caller appends
+ * (rule #10, same input ⇒ same output).
+ *
+ * @param {{
+ *   from: "local" | "remote",
+ *   to: "local" | "remote",
+ *   trigger: string,
+ *   ts?: string,
+ *   model?: string,
+ *   runId?: string,
+ * }} ctx
+ * @returns {Record<string, unknown>}
+ */
+export function buildProviderModeTransition(ctx) {
+  return {
+    ts: ctx.ts ?? new Date().toISOString(),
+    event: "provider-mode-transition",
+    from: ctx.from,
+    to: ctx.to,
+    trigger: ctx.trigger,
+    ...(ctx.model ? { model: ctx.model } : {}),
+    ...(ctx.runId ? { runId: ctx.runId } : {}),
+  };
+}
+
+/**
+ * Best-effort append of a single record to `.minsky/orchestrate.jsonl`. Same
+ * fail-soft contract as the tick ledger: a missing `.minsky/` or a write
+ * error degrades to a blind metric for that transition, never crashes the
+ * caller (rule #6). Used by the `record-mode-transition` CLI the bash runner
+ * shells out to on every provider-mode flip.
+ * @param {Record<string, unknown>} record
+ */
+function appendOrchestrateLedger(record) {
+  if (!existsSync(join(REPO, ".minsky"))) return;
+  try {
+    appendFileSync(LEDGER, `${JSON.stringify(record)}\n`);
+  } catch {
+    /* rule #6: ledger best-effort, never gates the caller */
+  }
+}
+
+/**
  * Best-effort append of the tick's policy records to
  * `.minsky/runany-policy.jsonl`. Same fail-soft contract as the
  * orchestrate ledger: a failed write (no `.minsky/`, EACCES) degrades to a
@@ -493,6 +541,29 @@ if (isMain) {
     });
     log(`orchestrate: land-local ${args[1] ?? "(none)"} — ${res.outcome} (${res.reason})\n`);
     process.exit(res.outcome === "landed" ? 0 : 1);
+  }
+  if (args[0] === "record-mode-transition") {
+    // The bash runner shells out here on every provider-mode flip so the
+    // bidirectional auto-pivot lands in `.minsky/orchestrate.jsonl`
+    // (runtime-token-limit-auto-pivot-local-and-back, Acceptance #4). Pure
+    // builder + best-effort append; a flag-less call degrades to safe
+    // defaults rather than crashing the live run (rule #6).
+    const flag = (/** @type {string} */ name, /** @type {string} */ dflt) => {
+      const a = args.find((x) => x.startsWith(`--${name}=`));
+      return a ? a.slice(name.length + 3) : dflt;
+    };
+    const from = /** @type {"local" | "remote"} */ (flag("from", "local"));
+    const to = /** @type {"local" | "remote"} */ (flag("to", "remote"));
+    const record = buildProviderModeTransition({
+      from,
+      to,
+      trigger: flag("trigger", "unspecified"),
+      ...(flag("model", "") ? { model: flag("model", "") } : {}),
+      runId: RUN_ID,
+    });
+    appendOrchestrateLedger(record);
+    log(`orchestrate: provider-mode-transition ${from}→${to} (${record["trigger"]})\n`);
+    process.exit(0);
   }
   // Wire the load-shed worker-pause seam into the gate (gate-host-load-shed):
   // every sweep vet launched from a conductor tick SIGSTOPs the worker daemon
