@@ -109,8 +109,38 @@ Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
         <string>1</string>
     </dict>
 
+    <!-- Supervisor sandbox (vision.md § 13.3 minimum-bar item 3 —
+         `supervisor-sandbox-syscall-restriction`). The supervisor + every
+         `claude --print` / `node` / `git` child it spawns runs inside the
+         `(deny default)` SBPL profile `com.minsky.tick-loop.sb`, cutting its
+         filesystem reach down to the repo + `~/.claude/projects` + `~/.minsky`
+         and its network reach to localhost + outbound HTTPS. A read of any
+         path outside the allow-list (`~/.ssh`, `~/.aws`, `~/Documents`) fails
+         with EPERM — see scripts/chaos-sandbox-disallowed-read.mjs.
+
+         The `-D` flags supply the profile's `(param ...)` placeholders:
+           MINSKY_HOME → the repo's writable subtree (envsubst'd by the installer)
+           HOME        → resolves `~/.claude`, `~/.minsky`, `~/.gitconfig`
+         Both are in the installer's envsubst whitelist (`${MINSKY_HOME} ${HOME}`).
+         The per-user temp dir is covered by the profile's `/private/var/folders`
+         subpath, so no TMPDIR param is needed.
+
+         Escape hatch (Beyer SRE 2016 Ch. 17): to disable the sandbox in 30s
+         (e.g., debugging a false EPERM), revert ProgramArguments to invoke
+         `/bin/bash <run-tick-loop.sh>` directly — `MINSKY_SANDBOX=off` is the
+         documented intent (docs/security/supervisor-sandbox.md § "Staged
+         rollout"). Pinned by scripts/check-supervisor-sandbox-hardening.mjs:
+         this `sandbox-exec -f .../com.minsky.tick-loop.sb` reference may not be
+         silently removed without the lint going red. -->
     <key>ProgramArguments</key>
     <array>
+        <string>/usr/bin/sandbox-exec</string>
+        <string>-D</string>
+        <string>MINSKY_HOME=${MINSKY_HOME}</string>
+        <string>-D</string>
+        <string>HOME=${HOME}</string>
+        <string>-f</string>
+        <string>${MINSKY_HOME}/distribution/launchd/com.minsky.tick-loop.sb</string>
         <string>/bin/bash</string>
         <string>${MINSKY_HOME}/distribution/systemd/run-tick-loop.sh</string>
     </array>
