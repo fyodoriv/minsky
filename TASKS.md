@@ -74,6 +74,36 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- fields update to cite novel/adapters/a2a.ts when their slices ship.   -->
 <!-- ===================================================================== -->
 
+- [ ] `gate-clone-temp-dir-collision` — local-gate-merge vetting fails with `git clone --shared … destination already exists` so NO PR can merge
+  - **ID**: gate-clone-temp-dir-collision
+  - **Tags**: p0, stability, gate-merge, self-heal, deployment-infra
+  - **Milestone**: M1
+  - **Touches**: `scripts/local-gate-merge.mjs`, `scripts/local-gate-merge.test.mjs`
+  - **Competitive-goal**: restores `autonomous-merge-rate` to non-zero — a vet that can't clone merges 0 PRs, so the brain's review loop is dead in the water.
+  - **Hypothesis**: the gate's per-PR scratch clone reuses a derived/leftover temp path; when a prior vet crashes (or two vets race) the dir already exists and `git clone --shared` aborts, so every vet SKIPs with `vet-error`. Observed live 2026-06-03 on the self-host run (PRs #1065, #1004 both SKIP). Using a fresh `mktemp -d` per attempt + cleaning it in a trap drops the vet-error rate from ~100% to ~0%.
+  - **Success**: each vet clones into a unique `mktemp -d` dir, removed on success AND failure (trap); a re-vet after a crashed vet succeeds; `autonomous-merge-rate` > 0 on the next run.
+  - **Pivot**: if `--shared` clones are inherently fragile under concurrency, vet via `git worktree add` off the existing repo instead of a fresh clone — no second object store to collide on.
+  - **Measurement**: `rg -c 'vet-error: Command failed: git clone' .minsky/orchestrate.out.log` trends to 0 after the fix (baseline today: every sweep); a unit test in `local-gate-merge.test.mjs` asserts two back-to-back vets of the same PR both get a fresh dir and neither throws `already exists`.
+  - **Anchor**: Meszaros, *xUnit Test Patterns*, 2007 (fresh fixture per test — here, fresh scratch dir per vet); rule #6 (clean up on crash, don't leave state that wedges the next run).
+  - **Details**: In `scripts/local-gate-merge.mjs`, replace the colliding clone-dir path with `mkdtempSync` (unique) and wrap the vet in try/finally that `rmSync(dir,{recursive,force})`. Surfaced while monitoring the self-host run; cleaning the stale dirs by hand unblocked it once, but the collision recurs on the next crash.
+  - **Files**: `scripts/local-gate-merge.mjs`, `scripts/local-gate-merge.test.mjs`
+  - **Acceptance**: (a) unique scratch dir per vet; (b) cleanup on success + failure; (c) regression test; (d) `vet-error: … git clone … already exists` no longer appears in a fresh run's ledger.
+
+- [ ] `tick-loop-openhands-preflight-gating` — the tick-loop worker crash-loops on an `openhands not importable` preflight even when `cloud_agent`/`local_agent` is `claude`
+  - **ID**: tick-loop-openhands-preflight-gating
+  - **Tags**: p0, stability, launchd, openhands, self-heal, deployment-infra
+  - **Milestone**: M1
+  - **Touches**: `bin/minsky-run.sh`, `novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py`
+  - **Competitive-goal**: `daemon-stability-pct` — a worker unit in a crash loop drags the run's uptime/throughput; the brain+workers moat needs the worker daemon to actually stay up.
+  - **Hypothesis**: `bin/minsky-run.sh`'s OpenHands importability preflight (the `INVARIANT FAIL: openhands not importable` path) runs even when the resolved agent is `claude`, so a claude/Sonnet-worker config still hard-requires `openhands` to import. Under launchd's stripped env the arm64 venv python fails `import openhands` (it succeeds in an interactive shell — an x64-Rosetta-node-under-launchd env gap), so the tick-loop exits 1 and KeepAlive restart-loops. Gating the preflight on `agent == openhands` lets claude-backed workers run without openhands, dropping tick-loop exit-1 to 0.
+  - **Success**: with `cloud_agent=claude` + `local_agent=claude`, `com.minsky.tick-loop` stays up (no `openhands not importable` in its err log, exit 0 across a 20-min window); the openhands preflight only fires when an openhands backend is actually selected.
+  - **Pivot**: if openhands must be a baseline capability regardless of backend, instead fix the launchd-env import (export the venv's required PATH/env in the unit per the `launchd-safe-paths` discipline) so the daemon's python imports openhands — but do NOT force claude-only operators to install openhands.
+  - **Measurement**: `launchctl print gui/$(id -u)/com.minsky.tick-loop | rg "last exit code"` is 0 after the fix; `rg -c 'openhands not importable' .minsky/tick-loop.err.log` is 0 on a fresh claude-config run (baseline today: every restart).
+  - **Anchor**: `launchd-safe-paths` skill (stripped-env binary resolution); rule #2 (the backend is a seam — selecting `claude` must not transitively require the `openhands` seam's deps).
+  - **Details**: Surfaced 2026-06-03 on the self-host run (Opus brain + Sonnet workers, `cloud_agent=claude`). `opus-sonnet-run` (the conductor's Sonnet worker) runs fine; only `tick-loop` crash-loops. Find the preflight caller in `bin/minsky-run.sh` and guard it behind the resolved-agent check that line ~1615 already computes (`jq -r '.cloud_agent // "openhands"'`).
+  - **Files**: `bin/minsky-run.sh` (+ a bats/test asserting the preflight is skipped for `cloud_agent=claude`)
+  - **Acceptance**: (a) preflight gated on agent==openhands; (b) tick-loop stays up under a claude config; (c) test pins the gating; (d) no regression for openhands operators.
+
 - [ ] `local-gate-merge-test-anti-flake` — make `scripts/local-gate-merge.test.mjs` deterministic under host-oversubscription. During parallel delivery waves (many worktree agents at once) its subprocess-heavy cases time out and red the worker's `pnpm pre-pr-lint --stage=full`, causing agents to spuriously self-mark tasks blocked even though CI (a single un-oversubscribed job) passes the same test. Multiple 2026-06 grind agents hit this.
   - **ID**: local-gate-merge-test-anti-flake
   - **Tags**: p0, milestone-m1, stability, anti-flake, flake-guard, test-determinism
