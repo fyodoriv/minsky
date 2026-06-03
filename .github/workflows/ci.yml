@@ -1419,6 +1419,37 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-skill-rule-cap.test.mjs
 
+  watch-surface-cap:
+    # rule #10 enforcement of the calm-tech 3-value Watch invariant:
+    # user-story 005 + vision.md success #6 (wrist dwell) fix the Watch
+    # surface at exactly three readings, but the cap lived only as prose
+    # plus the `WATCH_METRIC_IDS` literal in
+    # `novel/dashboard-web/src/watch.ts`. Without a deterministic gate, a
+    # future PR could add a fourth key and silently bloat the glanceable
+    # surface back into a notification-heavy dashboard. This job parses the
+    # literal and fails if the key count exceeds 3. Runs on pull_request
+    # only — push-to-main is skipped (matching pr-self-grade / pattern-index
+    # / skill-rule-cap precedent). Anchor: rule #10 (deterministic
+    # enforcement); rule #6 (failure-mode discipline — close "did anyone
+    # notice?" mechanically); Card, Mackinlay, Shneiderman 1999 (glanceable
+    # 3-number display).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: watch-surface-cap lint
+        run: node scripts/check-watch-surface-cap.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-watch-surface-cap.test.mjs
+
   pivot-success-margin:
     # rule #10 ratchet applied to spec-monitor advisory rule A2: a pivot
     # threshold that equals (or sits within <1 % of) the success threshold
@@ -2338,6 +2369,7 @@ jobs:
       - pr-security-review
       - privacy-data-egress
       - skill-rule-cap
+      - watch-surface-cap
       - rule-1-novel-justification
       - rule-2-dep-coverage
       - rule-3-doc-first
@@ -2488,13 +2520,14 @@ jobs:
               *) fail=1 ;;
             esac
           done
-          # pr-self-grade, pr-security-review, pattern-index, and
-          # skill-rule-cap may be `skipped` (push event) OR `success` (PR);
-          # only `failure` / `cancelled` should fail.
+          # pr-self-grade, pr-security-review, pattern-index, skill-rule-cap,
+          # and watch-surface-cap may be `skipped` (push event) OR `success`
+          # (PR); only `failure` / `cancelled` should fail.
           for r in "${{ needs.pr-self-grade.result }}" \
                    "${{ needs.pr-security-review.result }}" \
                    "${{ needs.pattern-index.result }}" \
-                   "${{ needs.skill-rule-cap.result }}"; do
+                   "${{ needs.skill-rule-cap.result }}" \
+                   "${{ needs.watch-surface-cap.result }}"; do
             case "$r" in
               success|skipped) ;;
               *) fail=1 ;;
