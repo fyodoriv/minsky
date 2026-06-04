@@ -51,6 +51,21 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- Operator directive 2026-05-18 (ABSOLUTE PRIORITY — supersedes ALL other P0s including self-metrics-competitive-benchmark): the milestone-alignment-gate task below must be picked FIRST by any agent. No implementation task may be claimed until the 7 surfaces are verified aligned. This is the pre-condition for all other work. -->
 
+- [ ] `metrics-md-stub-overwrite-blocks-pushes` — `metrics-render` overwrites committed real metric values with `(stub)` → milestone-alignment fails → pre-push hook blocks ALL pushes
+  - **ID**: metrics-md-stub-overwrite-blocks-pushes
+  - **Tags**: p0, stability, deployment-infra, observability, self-heal
+  - **Milestone**: M1
+  - **Touches**: `scripts/metrics-render.mjs`, `scripts/generate-metrics-md.mjs`, `scripts/metrics-render.test.mjs`, `docs/METRICS.md`
+  - **Competitive-goal**: protects `autonomous-merge-rate` and operator push-throughput — a regen that silently destroys committed data and wedges the only pre-push gate halts every contributor (daemon and human) at once.
+  - **Hypothesis**: `metrics-render` (via `loadSnapshot` + `buildMetricsMd`) renders `(stub)` for every metric whose id is absent from the daily snapshot, then writes `docs/METRICS.md` in place — overwriting committed real values (e.g. `11% (27/238)`, `88.0% (88/100)`) because the snapshot id namespace is not yet `SUCCESS_METRICS`-aligned. The all-stub render flips milestone-alignment from 14/14 to 5/14, which the pre-push fast gate enforces, so EVERY push fails until the file is hand-restored. Observed live 2026-06-03: a dirty all-stub `docs/METRICS.md` blocked PR #1166's push until restored to HEAD. Guarding the writer so it never replaces a non-stub committed value with a stub drops the gate-induced push-block rate from intermittent-fatal to 0.
+  - **Success**: a regen run with a non-aligned (or missing) snapshot leaves any already-committed non-stub value intact (does not downgrade real→stub); milestone-alignment stays ≥10/14 across the regen; `git diff --quiet docs/METRICS.md` after a no-new-observation regen.
+  - **Pivot**: if value-preservation can't be made deterministic (rule #10 — same input, same output is violated by reading prior on-disk state), instead move milestone-alignment OUT of the pre-push fast stage to CI-only, so a stale render degrades a dashboard rather than wedging all pushes.
+  - **Measurement**: `node scripts/metrics-render.mjs` on a checkout with real committed values + today's snapshot, then `git diff --stat docs/METRICS.md` shows 0 real→stub downgrades; `node scripts/check-milestone-alignment.mjs --strict --min-aligned=10; echo $?` returns 0 after the regen.
+  - **Anchor**: Helland 2007 (visible-not-silent — but a stub that ERASES a known real value is worse than no data, the inverse of the intent); Ries 2011 (wrong/empty data is worse than real data); rule #10 (deterministic gates must not depend on lossy generated state).
+  - **Details**: Either (a) make `buildMetricsMd` merge: keep the last committed non-stub value when no fresh observation exists (read the existing `docs/METRICS.md` as a fallback source, annotated `(stale)` not `(stub)`), or (b) make `metrics-render` a no-op when it would only produce stubs for already-real entries, or (c) relocate the milestone-alignment metric check to CI-only. Root cause found while getting the self-host run productive (PR #1167); the 2026-06-03 snapshot exists but its keys don't map to `SUCCESS_METRICS` ids, so the render is all-stub by design (see `metrics-render.mjs` header comment) — that design assumes a genesis empty file, not an overwrite of real committed values.
+  - **Files**: `scripts/metrics-render.mjs`, `scripts/generate-metrics-md.mjs`, `scripts/metrics-render.test.mjs`, `docs/METRICS.md`
+  - **Acceptance**: (a) a no-new-observation regen never downgrades a committed real value to `(stub)`; (b) milestone-alignment stays green across regen; (c) a regression test in `metrics-render.test.mjs` pins "real value + empty snapshot → value preserved (or `(stale)`), never `(stub)`"; (d) the pre-push hook no longer blocks on a daemon-triggered render.
+
 <!-- Operator directive 2026-05-27 (UI = P0-P1 by definition): every user-facing CLI surface (bin/minsky subcommands, pnpm minsky:* scripts) defaults to P0-P1 priority — never P2-P3. UX friction compounds: a flag operators have to remember on every debugging session is a 5-second tax × N sessions × M operators = real wasted hours. Backfill any UI task currently at P2-P3 to P1 unless explicitly deferred with a written reason. -->
 
 <!-- ===================================================================== -->
@@ -612,6 +627,21 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) `pnpm vitest run novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` passes; (2) `pnpm typecheck` clean; (3) Operator runs `cat <minsky-repo>/.git/config | grep bare` → sees `bare = true` (today's state); runs `git config core.bare false`; runs `git status` → works; the next iteration's self-diagnose drops the finding (no longer fires); (4) When run against a fresh bare-misset fixture, the daemon's self-diagnose emits a suggestedFix containing `git config core.bare false`.
 
 ## P1
+
+- [ ] `sidecar-bootstrap-unbuilt-breaks-picker-cli` — `@minsky/sidecar-bootstrap` is linked but has no built `index.js`, so `pickHostTask` import crashes
+  - **ID**: sidecar-bootstrap-unbuilt-breaks-picker-cli
+  - **Tags**: p1, build, dx, tooling
+  - **Milestone**: M1
+  - **Touches**: `novel/sidecar-bootstrap`, `novel/cross-repo-runner/dist/repo-config-loader.js`, `package.json`
+  - **Competitive-goal**: keeps the documented operator validation path (`pickHostTask(readFileSync("TASKS.md"))`) runnable — a broken import means contributors can't verify task eligibility before committing, eroding the rule-9 picker's trust surface.
+  - **Hypothesis**: `novel/cross-repo-runner/dist/repo-config-loader.js` imports `@minsky/sidecar-bootstrap`, whose workspace symlink resolves to `novel/sidecar-bootstrap` but the package has no built entrypoint (`index.js` missing), so any `node -e "import(... cross-repo-runner/dist/index.js)"` throws `Cannot find package '.../@minsky/sidecar-bootstrap/index.js'`. Building `sidecar-bootstrap` (or fixing its `package.json` `main`/`exports`) in the workspace build graph makes the CLI picker import resolve, dropping the import-crash rate from 100% to 0%.
+  - **Success**: `node --input-type=module -e 'import { pickHostTask } from "./novel/cross-repo-runner/dist/index.js"; import { readFileSync } from "node:fs"; console.log(pickHostTask(readFileSync("TASKS.md","utf8"))?.id ?? "(none)")'` prints a task id (not an import error).
+  - **Pivot**: if `sidecar-bootstrap` is intentionally source-only (no build step), change `cross-repo-runner` to import its source entry directly (or inline the small dependency) rather than a `dist`-shaped `@minsky/` specifier.
+  - **Measurement**: the one-liner above exits 0 and prints a non-error line; a CI step that runs it on a clean `pnpm install && pnpm build` stays green.
+  - **Anchor**: rule #2 (every dependency behind a buildable interface — a linked-but-unbuilt package is a broken seam); Martin 2017 (composition at the I/O edge must be importable).
+  - **Details**: Surfaced 2026-06-03 while reproducing the daemon's task picker from the CLI (the bash daemon uses `scripts/pick_task.py` and is unaffected; only the documented Node `pickHostTask` path breaks). Confirm whether `novel/sidecar-bootstrap` is in the workspace build graph; add the build step or fix its `exports` so the `@minsky/sidecar-bootstrap` specifier resolves to a built file.
+  - **Files**: `novel/sidecar-bootstrap/package.json`, `novel/cross-repo-runner/dist/repo-config-loader.js`, root build config
+  - **Acceptance**: (a) the documented `pickHostTask` one-liner runs without an import error; (b) a fresh `pnpm install && pnpm build` produces the sidecar-bootstrap entrypoint; (c) the CLAUDE.md validation snippet works as written.
 
 <!-- COHORT: github-issues-task-source (2026-05-29 operator directive). Teach the daemon
      to pick tasks from GitHub Issues/Projects, not just TASKS.md, so minsky can drive
