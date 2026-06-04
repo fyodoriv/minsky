@@ -95,8 +95,16 @@
 ;; agent's `gh pr create`. Read-only: the auth token comes from the GITHUB_TOKEN
 ;; env var (launchctl setenv), not from this file, so granting read does not
 ;; widen the credential surface.
+;; ~/.gitconfig.local and ~/.gitignore_global are the conventional operator git
+;; dotfiles that ~/.gitconfig pulls in via `[include] path` and
+;; `core.excludesfile`. git treats an explicit include it cannot read as FATAL
+;; (`fatal: unable to access '...': operation not permitted`), which fails
+;; `git worktree add` → the iteration falls back to a non-isolated host-root
+;; spawn and then spawn-fails. Read-only operator config; no credential surface.
 (allow file-read*
   (literal (string-append (param "HOME") "/.gitconfig"))
+  (literal (string-append (param "HOME") "/.gitconfig.local"))
+  (literal (string-append (param "HOME") "/.gitignore_global"))
   (subpath (string-append (param "HOME") "/.config/git"))
   (subpath (string-append (param "HOME") "/.config/gh"))
   (subpath (string-append (param "HOME") "/.local/share/fnm"))
