@@ -10,6 +10,7 @@ import {
   buildTickLedgerLine,
   decideAgentForRole,
   decideDetachedWorkerAction,
+  decideGateAdmission,
   decideHeal,
   decideWorkerPausePids,
   parseLaunchctlRunning,
@@ -48,6 +49,38 @@ describe("buildProviderModeTransition (runtime token-limit auto-pivot ledger)", 
     expect("model" in r).toBe(false);
     expect("runId" in r).toBe(false);
     expect(typeof r["ts"]).toBe("string");
+  });
+});
+
+describe("decideGateAdmission (self-adjusting vet-sweep load gate)", () => {
+  it("defers the sweep when load1 exceeds the core budget", () => {
+    const d = decideGateAdmission({ load1: 13, cpuCount: 10 });
+    expect(d.admit).toBe(false);
+    expect(d.reason).toContain("oversubscribed");
+  });
+
+  it("admits the sweep when the host has headroom", () => {
+    expect(decideGateAdmission({ load1: 4, cpuCount: 10 }).admit).toBe(true);
+  });
+
+  it("uses the default factor 0.9 (defers at 90% of cores)", () => {
+    expect(decideGateAdmission({ load1: 9.1, cpuCount: 10 }).admit).toBe(false);
+    expect(decideGateAdmission({ load1: 8.9, cpuCount: 10 }).admit).toBe(true);
+  });
+
+  it("honors a custom factor", () => {
+    expect(decideGateAdmission({ load1: 6, cpuCount: 10, factor: 0.5 }).admit).toBe(false);
+    expect(decideGateAdmission({ load1: 4, cpuCount: 10, factor: 0.5 }).admit).toBe(true);
+  });
+
+  it("auto-recovers: the same gate admits once load drops below the ceiling", () => {
+    expect(decideGateAdmission({ load1: 12, cpuCount: 10 }).admit).toBe(false);
+    expect(decideGateAdmission({ load1: 3, cpuCount: 10 }).admit).toBe(true);
+  });
+
+  it("degrades safely on bad inputs (never blocks on an unreadable load)", () => {
+    expect(decideGateAdmission({ load1: Number.NaN, cpuCount: 10 }).admit).toBe(true);
+    expect(decideGateAdmission({ load1: 0.5, cpuCount: 0 }).admit).toBe(true); // cores floored to 1
   });
 });
 
