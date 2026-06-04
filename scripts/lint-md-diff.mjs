@@ -34,7 +34,7 @@
 //   diff-relative lints (rule-1/3/4/6/12).
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -42,6 +42,19 @@ import { resolveDiffBase } from "./run-pre-pr-lint-stack.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
+
+/**
+ * Resolve a working git binary. The dotfiles PATH-based wrapper may be
+ * blocked in sandbox environments (EPERM on ~/apps/tooling/dotfiles/bin/git).
+ * Probe well-known locations first; fall back to plain "git" only as last resort.
+ */
+function resolveGitBinary() {
+  for (const candidate of ["/opt/homebrew/bin/git", "/usr/local/bin/git"]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return "git";
+}
+const GIT_BIN = resolveGitBinary();
 
 /**
  * Mirror `package.json` "lint:md"'s exclusion globs. markdownlint-cli2 also
@@ -178,11 +191,15 @@ export function lintMdDiff(io) {
  * @returns {string}
  */
 function defaultListChangedFiles(diffBase) {
-  return execFileSync("git", ["diff", "--name-only", "--diff-filter=ACMR", `${diffBase}...HEAD`], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
+  return execFileSync(
+    GIT_BIN,
+    ["diff", "--name-only", "--diff-filter=ACMR", `${diffBase}...HEAD`],
+    {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    },
+  );
 }
 
 /**
