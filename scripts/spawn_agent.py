@@ -125,7 +125,34 @@ def resolve_configured_agent() -> str:
         return "openhands"
 
 
-def resolve_claude_argv(brief_file: str, model: str) -> list[str]:
+def resolve_claude_bin() -> str | None:
+    """Absolute path to the Claude Code CLI, robust to PATH not propagating.
+
+    The supervisor spawns this through node → bash → watchdog → python, each of
+    which may run with a minimal PATH that omits the operator's ``~/.local/bin``
+    where ``claude`` lives. ``shutil.which`` alone then returns ``None`` and the
+    dispatcher would silently downgrade a ``"claude"`` config to openhands (which
+    fails with no ``ANTHROPIC_API_KEY``). Search PATH first, then the Claude Code
+    installer's standard locations by absolute path so the lookup never depends
+    on PATH being threaded through the whole spawn chain.
+    """
+    found = shutil.which("claude")
+    if found:
+        return found
+    home = Path.home()
+    for cand in (
+        home / ".local" / "bin" / "claude",
+        home / "bin" / "claude",
+        home / ".npm-global" / "bin" / "claude",
+        Path("/opt/homebrew/bin/claude"),
+        Path("/usr/local/bin/claude"),
+    ):
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return str(cand)
+    return None
+
+
+def resolve_claude_argv(claude_bin: str, brief_file: str, model: str) -> list[str]:
     """Argv for a Claude Code (subscription) worker spawn — $0 API.
 
     Runs headless (``-p``) on the operator's Claude subscription (the same auth
@@ -134,12 +161,13 @@ def resolve_claude_argv(brief_file: str, model: str) -> list[str]:
     edits/commands — safe because the caller runs this with ``cwd`` set to an
     isolated, throwaway git worktree (rule #2 — the worktree IS the sandbox).
     The caller ships the resulting diff as a PR, same as the openhands path.
+    ``claude_bin`` is the resolved absolute path (see ``resolve_claude_bin``).
     """
     try:
         prompt = Path(brief_file).read_text()
     except OSError:
         prompt = "Work on the top unclaimed task in TASKS.md per AGENTS.md + vision.md."
-    return ["claude", "-p", prompt, "--model", model, "--dangerously-skip-permissions"]
+    return [claude_bin, "-p", prompt, "--model", model, "--dangerously-skip-permissions"]
 
 
 def resolve_agent_argv(
@@ -313,8 +341,23 @@ def _main(argv: Optional[list[str]] = None) -> int:
     # Claude Code (subscription) backend — runs claude headless in the worktree,
     # $0 API. Selected when config's role-resolved agent is "claude" (the
     # operator's "Opus brain + Sonnet workers on the subscription" setup).
-    if resolve_configured_agent() == "claude" and shutil.which("claude"):
-        claude_argv = resolve_claude_argv(args.brief_file, args.model)
+    if resolve_configured_agent() == "claude":
+        claude_bin = resolve_claude_bin()
+        if claude_bin is None:
+            # Configured for the Claude subscription backend but the CLI isn't
+            # resolvable. Refuse to fall through to openhands: openhands needs an
+            # ANTHROPIC_API_KEY the subscription-only setup deliberately lacks, so
+            # the fallback can only spawn-fail. Fail loudly with the fix instead
+            # of silently degrading (self-adjusting: detect + surface, never mask).
+            print(
+                "spawn_agent: agent is 'claude' but the claude CLI was not found on "
+                "PATH or in ~/.local/bin, ~/bin, ~/.npm-global/bin, /opt/homebrew/bin, "
+                "/usr/local/bin. NOT falling back to openhands (needs ANTHROPIC_API_KEY). "
+                "Install Claude Code or fix the supervisor PATH, then restart.",
+                file=sys.stderr,
+            )
+            return 127
+        claude_argv = resolve_claude_argv(claude_bin, args.brief_file, args.model)
         try:
             completed = subprocess.run(claude_argv, check=False, cwd=args.repo)
         except FileNotFoundError as exc:
