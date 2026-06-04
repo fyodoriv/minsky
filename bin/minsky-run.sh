@@ -213,6 +213,14 @@ invariant_config_loadable() {
 }
 
 invariant_openhands_in_path() {
+  # Gate: this invariant is the OpenHands backend's preflight. Skip it when the
+  # role-resolved agent is NOT openhands (e.g. claude on the subscription) — the
+  # spawn path is `scripts/spawn_agent.py`'s claude branch, which never touches
+  # openhands, so requiring openhands here would crash-loop a claude-only worker
+  # (tick-loop-openhands-preflight-gating; mirrors resolve_configured_agent()).
+  local _agent
+  _agent="$(jq -r 'if env.MINSKY_ROLE == "worker" then (.local_agent // "openhands") else (.cloud_agent // "openhands") end' "$CONFIG_FILE" 2>/dev/null || echo openhands)"
+  [[ "$_agent" == "openhands" ]] || return 0
   # Invariant 2: an OpenHands backend is reachable AND the python the
   # dispatcher will use can actually `import openhands`. Pre-2026-05-27
   # this invariant only checked shim/CLI EXISTENCE — it passed on every
