@@ -76,13 +76,19 @@
   (subpath (param "MINSKY_HOME")))
 
 ;; --- Filesystem: operator caches the supervisor legitimately reads -----------
-;; ~/.claude/projects holds the token-monitor JSONLs the daemon parses.
+;; ~/.claude/ holds the token-monitor JSONLs the daemon parses AND the worker's
+;; own session state: `claude -p` writes session transcripts under
+;; ~/.claude/projects/ and updates ~/.claude.json (config + account). Both are
+;; read+write so the worker runs without EPERM. The OAuth token itself is NOT
+;; on disk here — it is injected via the CLAUDE_CODE_OAUTH_TOKEN env var
+;; (launchctl setenv), so the worker authenticates WITHOUT the sandbox reaching
+;; the macOS Keychain (the keychain stays out of the worker's trust boundary).
 ;; ~/.minsky holds per-machine config + experiment store + PID file (the PID
 ;; file + daemon.log are writable; the rest is read-mostly but we grant write
 ;; to the whole subtree to avoid false EPERM on lock files).
-(allow file-read*
-  (subpath (string-append (param "HOME") "/.claude")))
 (allow file-read* file-write*
+  (subpath (string-append (param "HOME") "/.claude"))
+  (literal (string-append (param "HOME") "/.claude.json"))
   (subpath (string-append (param "HOME") "/.minsky")))
 
 ;; Read-only access to the operator's git identity + node version managers so
