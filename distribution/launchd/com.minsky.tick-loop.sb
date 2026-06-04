@@ -89,9 +89,16 @@
 ;; child git/node resolve config without tripping EPERM. NOT ~/.ssh — git over
 ;; https uses ~/.minsky creds, and ssh-based remotes are out of the supervisor's
 ;; trust boundary by design (the chaos test pins the ~/.ssh denial).
+;; ~/.config/gh holds the gh CLI's config.yml — gh reads it at startup to
+;; build its command tree, and a read-deny surfaces as `failed to create root
+;; command: ... operation not permitted`, which fails the open-PR scan and the
+;; agent's `gh pr create`. Read-only: the auth token comes from the GITHUB_TOKEN
+;; env var (launchctl setenv), not from this file, so granting read does not
+;; widen the credential surface.
 (allow file-read*
   (literal (string-append (param "HOME") "/.gitconfig"))
   (subpath (string-append (param "HOME") "/.config/git"))
+  (subpath (string-append (param "HOME") "/.config/gh"))
   (subpath (string-append (param "HOME") "/.local/share/fnm"))
   (subpath (string-append (param "HOME") "/.nvm"))
   (subpath (string-append (param "HOME") "/.asdf")))

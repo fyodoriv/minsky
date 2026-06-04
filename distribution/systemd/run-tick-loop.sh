@@ -94,6 +94,30 @@ done
 for gh_dir in /opt/homebrew/bin /usr/local/bin "${HOME}"/.local/bin; do
   [ -x "${gh_dir}/gh" ] && PATH="${gh_dir}:${PATH}" && break
 done
+# Same problem as `node`, hardest axis: the task picker
+# (scripts/pick_task.py) runs under `python3`, and a silent failure here
+# aborts every iteration with "no eligible task". Three traps under the
+# sandbox profile (distribution/launchd/com.minsky.tick-loop.sb), which can
+# only exec binaries it can read (under /usr, /opt/homebrew, /Library,
+# MINSKY_HOME): (1) an operator PATH shim outside those (e.g. a dotfiles
+# ~/bin/python3) is read-denied; (2) /usr/bin/python3 is an Xcode stub that
+# shells out to xcrun, whose dylib lives under /Applications and is
+# read-denied; (3) /usr/local/bin/python3 is often a broken symlink. So
+# `-x` is not enough — test-execute each candidate and pick the first that
+# actually runs under the sandbox (self-adjusting: detects a dead interpreter
+# instead of trusting the path). Homebrew first (common case), then the
+# python.org framework (allowlisted under /Library), /usr/bin last resort.
+python_candidates=(/opt/homebrew/bin/python3 /usr/local/bin/python3)
+for fw in /Library/Frameworks/Python.framework/Versions/*/bin/python3; do
+  python_candidates+=("${fw}")
+done
+python_candidates+=(/usr/bin/python3)
+for py in "${python_candidates[@]}"; do
+  if [ -x "${py}" ] && "${py}" -c '' >/dev/null 2>&1; then
+    PATH="$(dirname "${py}"):${PATH}"
+    break
+  fi
+done
 # Same pattern for `opencode` — the local-LLM spawn target used when the
 # daemon falls back to Ollama/local models. Default install is
 # ~/.opencode/bin/opencode (the opencode CLI installer's standard location).
