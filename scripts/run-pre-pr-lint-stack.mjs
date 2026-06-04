@@ -461,6 +461,8 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["stop-gate", "fast", "full"],
     cmd: "npx",
     args: ["-y", "@tasks-md/lint@^0.7.0", "TASKS.md"],
+    // Use a writable temp cache in case ~/.npm has root-owned files (sandbox EPERM).
+    env: { NPM_CONFIG_CACHE: "/tmp/npm-cache-minsky" },
   },
   {
     name: "rule-2-dep-coverage",
