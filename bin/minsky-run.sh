@@ -1835,18 +1835,60 @@ trap '_minsky_unload_ollama_on_exit' EXIT
 # 75 propagates as the script's natural exit code.
 if [[ "$LOOP_FOREVER" == "1" ]]; then
   # --loop mode (supervisor / launchd default via run-tick-loop.sh).
-  # Outer sleep between walks. TICK_INTERVAL_MS=0 (default) → 5s sleep
-  # to avoid hot-looping when no tasks are pickable. Operators set
+  # Outer sleep between walks. TICK_INTERVAL_MS=0 (default) → 5s base
+  # sleep to avoid hot-looping when no tasks are pickable. Operators set
   # TICK_INTERVAL_MS=300000 (5 min) on noisy hosts.
+  #
+  # Adaptive backoff: when every iteration in the last walk ended in
+  # spawn-failed (a fork-storm signal), the outer sleep grows
+  # exponentially (5s → 10s → 20s → 40s → 80s → capped at 300s) so the
+  # runner backs off instead of hammering the host with fork-forks.
+  # A single successful verdict resets the counter to 0.
+  # Additionally, when host load1 > cpu_count * 0.9 the walk is skipped
+  # entirely and we sleep 60s — same admission criterion as orchestrate.mjs
+  # `runGatedSweep` (rule #9: self-adjusting algorithm that detects and
+  # prevents CPU oversubscription; operator directive 2026-06-04).
   outer_sleep_seconds=$(( TICK_INTERVAL_MS > 0 ? TICK_INTERVAL_MS / 1000 : 5 ))
   [[ "$outer_sleep_seconds" -lt 1 ]] && outer_sleep_seconds=1
+  _consecutive_fail_walks=0
   while true; do
+    # Load-gate: skip the walk when the host is oversubscribed.
+    # MINSKY_LOAD_GATE_SLEEP_S: how long to wait before re-checking load
+    # (default 60s; operator can lower for interactive testing).
+    _load_gate_sleep="${MINSKY_LOAD_GATE_SLEEP_S:-60}"
+    _load1="$(python3 -c 'import os; print(os.getloadavg()[0])' 2>/dev/null || echo 0)"
+    _cpus="$(python3 -c 'import os; print(os.cpu_count() or 1)' 2>/dev/null || echo 4)"
+    _load_ceiling="$(python3 -c "print(${_cpus} * 0.9)" 2>/dev/null || echo 3.6)"
+    if python3 -c "import sys; sys.exit(0 if ${_load1} > ${_load_ceiling} else 1)" 2>/dev/null; then
+      echo "loop: host oversubscribed (load1 ${_load1} > ${_load_ceiling}), skipping walk — sleeping ${_load_gate_sleep}s" >&2
+      sleep "$_load_gate_sleep"
+      continue
+    fi
+
     walk_hosts
     walk_exit=$?
     if [[ "$walk_exit" -eq 75 ]]; then
       exit 75
     fi
-    sleep "$outer_sleep_seconds"
+
+    # Count consecutive all-spawn-fail walks for backoff.
+    _tick_log="${MINSKY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/.minsky/tick-loop.err.log"
+    _this_walk_verdicts="$(grep -oE 'verdict=[a-z-]+' "$_tick_log" 2>/dev/null | tail -$(( ITERATIONS_PER_HOST * 2 )) | grep -v 'verdict=aborted' | sort -u)"
+    if [[ -n "$_this_walk_verdicts" ]] && echo "$_this_walk_verdicts" | grep -qvE '^verdict=spawn-failed$'; then
+      _consecutive_fail_walks=0
+    elif echo "$_this_walk_verdicts" | grep -q 'verdict=spawn-failed'; then
+      _consecutive_fail_walks=$(( _consecutive_fail_walks + 1 ))
+    fi
+
+    # Exponential backoff: 5 × 2^N capped at 300s.
+    if [[ "$_consecutive_fail_walks" -gt 0 ]]; then
+      _backoff_s=$(( outer_sleep_seconds * (1 << _consecutive_fail_walks) ))
+      [[ "$_backoff_s" -gt 300 ]] && _backoff_s=300
+      echo "loop: ${_consecutive_fail_walks} consecutive all-spawn-fail walk(s) — backing off ${_backoff_s}s" >&2
+      sleep "$_backoff_s"
+    else
+      sleep "$outer_sleep_seconds"
+    fi
   done
 else
   # Default mode (no --loop): one walk and exit. Preserves the pre-
