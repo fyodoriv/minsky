@@ -233,6 +233,7 @@ Then exit cleanly. Do not pick a task from the operator's host repo. Do not modi
 | `pnpm install` fails with engine error | Node < 22 | upgrade Node; do not auto-install — ask first |
 | `command not found: minsky` after PATH update | shell not re-sourced | use the absolute path `$INSTALL_DIR/bin/minsky` for the current shell |
 | Daemon won't start | launchd / systemd permissions | run `$INSTALL_DIR/bin/minsky doctor` and surface the report to the operator |
+| Worker spawn-fails silently (no PR opens) on macOS | SBPL profile blocks the operator toolchain (python3 / git includes / gh config / claude / ~/.local/share/uv / `CLAUDE_CODE_OAUTH_TOKEN`) | run `$INSTALL_DIR/bin/minsky doctor --sandbox` — surfaces every allowlist / PATH / env gap in one command with the exact `.sb` / `launchctl setenv` remediation per gap |
 | `git clone` fails behind a corporate proxy | network policy | ask the operator for their HTTPS proxy URL and `git config --global http.proxy "$URL"` |
 | `~/.minsky/config.json` already exists with a different `default_host` | operator has Minsky on another host | DO NOT overwrite; ask the operator whether to add this host (multi-host mode requires `--hosts-dir`) |
 
