@@ -12,12 +12,13 @@ Algorithm (mirrors `computeDynamicSettings` in dynamic-timeouts.ts):
 2. Extract `(durationMs, verdict)` pairs by JSON-parsing each line and
    regex-extracting `(\\d+)ms` from the `notes` field.
 3. Filter to "completed work" — verdict in {validated, scope-leak} AND
-   duration > 10s (sub-10s spawn-failed are config errors, ≥10s are
-   prior watchdog kills; exclude both).
+   duration > 60s (sub-60s wins are backstop-PR fast-paths whose duration
+   is dominated by overhead, not task budget; including them collapses
+   p95 to the noise floor — see worker-claude-concurrent-auth-and-watchdog).
 4. If <5 samples: print the cold-start floor for the resolved model
    class (slow-remote > fast-remote > local=DEFAULT). With no model
    the floor is the conservative DEFAULT (1200 = 20 minutes).
-5. Else: p95(durations) × 1.5, clamped to [120s, 2700s] (2min–45min)
+5. Else: p95(durations) × 1.5, clamped to [600s, 2700s] (10min–45min)
    — model-agnostic, byte-identical to the pre-model behavior.
 
 Why the thin-history floor is model-aware (worker-watchdog-scale-by-
@@ -52,13 +53,31 @@ from typing import Iterable
 
 # --- Constants (must match dynamic-timeouts.ts) --------------------------
 
-MIN_WATCHDOG_S = 120              # 2 min — never lower
+MIN_WATCHDOG_S = 10 * 60          # 10 min — never lower (worker-claude-
+                                  # concurrent-auth-and-watchdog: a real claude
+                                  # task observed running 175s of productive
+                                  # work was SIGTERMed at exit 143 before
+                                  # opening a PR. p95×1.5 had collapsed to
+                                  # ~115s under a thick history of backstop-
+                                  # PR fast-paths. Raise the floor so a real
+                                  # worker always has ≥10 min of runway even
+                                  # when the p95 estimator is poisoned.)
 MAX_WATCHDOG_S = 45 * 60          # 45 min — never higher
 DEFAULT_WATCHDOG_S = 20 * 60      # 20 min — used when <5 samples
 HEADROOM = 1.5                    # p95 × 1.5
 MIN_SAMPLE_SIZE = 5
 SUCCESS_VERDICTS = ("validated", "scope-leak")
-MIN_SUCCESS_DURATION_MS = 10_000  # exclude sub-10s no-ops
+MIN_SUCCESS_DURATION_MS = 60_000  # exclude sub-60s no-ops (worker-claude-
+                                  # concurrent-auth-and-watchdog: was 10s.
+                                  # The post-spawn PR-creation backstop opens
+                                  # draft PRs in <20s on a clean worktree,
+                                  # which marks the iteration `validated` and
+                                  # poisons the p95 baseline. A real task —
+                                  # read brief, edit, test, commit, push, PR —
+                                  # exceeds 60s in every observed run. Above
+                                  # 60s, the duration is dominated by actual
+                                  # work and the p95 estimator reflects task
+                                  # budget, not backstop noise.)
 
 # Cold-start floors per resolved model class (worker-watchdog-scale-by-
 # pinned-model-latency). Used ONLY on the thin-history path (<5 samples)
