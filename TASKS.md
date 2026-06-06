@@ -119,21 +119,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- fields update to cite novel/adapters/a2a.ts when their slices ship.   -->
 <!-- ===================================================================== -->
 
-- [ ] `gate-clone-temp-dir-collision` — local-gate-merge vetting fails with `git clone --shared … destination already exists` so NO PR can merge
-  - **ID**: gate-clone-temp-dir-collision
-  - **Tags**: p0, stability, gate-merge, self-heal, deployment-infra
-  - **Milestone**: M1
-  - **Touches**: `scripts/local-gate-merge.mjs`, `scripts/local-gate-merge.test.mjs`
-  - **Competitive-goal**: restores `autonomous-merge-rate` to non-zero — a vet that can't clone merges 0 PRs, so the brain's review loop is dead in the water.
-  - **Hypothesis**: the gate's per-PR scratch clone reuses a derived/leftover temp path; when a prior vet crashes (or two vets race) the dir already exists and `git clone --shared` aborts, so every vet SKIPs with `vet-error`. Observed live 2026-06-03 on the self-host run (PRs #1065, #1004 both SKIP). Using a fresh `mktemp -d` per attempt + cleaning it in a trap drops the vet-error rate from ~100% to ~0%.
-  - **Success**: each vet clones into a unique `mktemp -d` dir, removed on success AND failure (trap); a re-vet after a crashed vet succeeds; `autonomous-merge-rate` > 0 on the next run.
-  - **Pivot**: if `--shared` clones are inherently fragile under concurrency, vet via `git worktree add` off the existing repo instead of a fresh clone — no second object store to collide on.
-  - **Measurement**: `rg -c 'vet-error: Command failed: git clone' .minsky/orchestrate.out.log` trends to 0 after the fix (baseline today: every sweep); a unit test in `local-gate-merge.test.mjs` asserts two back-to-back vets of the same PR both get a fresh dir and neither throws `already exists`.
-  - **Anchor**: Meszaros, *xUnit Test Patterns*, 2007 (fresh fixture per test — here, fresh scratch dir per vet); rule #6 (clean up on crash, don't leave state that wedges the next run).
-  - **Details**: In `scripts/local-gate-merge.mjs`, replace the colliding clone-dir path with `mkdtempSync` (unique) and wrap the vet in try/finally that `rmSync(dir,{recursive,force})`. Surfaced while monitoring the self-host run; cleaning the stale dirs by hand unblocked it once, but the collision recurs on the next crash.
-  - **Files**: `scripts/local-gate-merge.mjs`, `scripts/local-gate-merge.test.mjs`
-  - **Acceptance**: (a) unique scratch dir per vet; (b) cleanup on success + failure; (c) regression test; (d) `vet-error: … git clone … already exists` no longer appears in a fresh run's ledger.
-
 - [ ] `tick-loop-openhands-preflight-gating` — the tick-loop worker crash-loops on an `openhands not importable` preflight even when `cloud_agent`/`local_agent` is `claude`
   - **ID**: tick-loop-openhands-preflight-gating
   - **Tags**: p0, stability, launchd, openhands, self-heal, deployment-infra
