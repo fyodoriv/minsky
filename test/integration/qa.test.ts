@@ -1,5 +1,5 @@
-// Integration tests for `bin/minsky qa` — slice 3 of P0
-// `minsky-human-comm-via-file`.
+// Integration tests for `bin/minsky qa` — slice 3 of the shipped
+// human-loop module (see novel/human-loop/README.md).
 //
 // Hypothesis (rule #9): the `qa` subcommand provides the operator
 // surface for the agent↔human QA channel slices 1+2 established. A
@@ -18,8 +18,8 @@
 //
 // Measurement: this test file (10 cases).
 //
-// Anchor: rule #9 (pre-registered metrics); parent task
-// `minsky-human-comm-via-file` § Details (g); slices 1+2 establish the
+// Anchor: rule #9 (pre-registered metrics); novel/human-loop/README.md
+// for the agent↔human QA channel design; slices 1+2 establish the
 // qa-log-format and askHuman API this subcommand wraps.
 
 import { spawnSync } from "node:child_process";
