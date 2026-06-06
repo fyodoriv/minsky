@@ -159,12 +159,22 @@ describe("decidePrRepoPolicy (least-authority gate guard)", () => {
   });
 });
 
-describe("runGateSweep (injected seam)", () => {
+// Anti-flake: `runGateSweep` calls `runSweepStartGc → gcStaleScratchDirs()`
+// against the real `/tmp` unless `gcFn` is injected. Under ≥3x CPU
+// oversubscription (parallel grind waves) that scan races sibling daemons'
+// scratch dirs and triggers `execFileSync("sleep", ["1"])` retries inside
+// `bestEffortRmScratch`, pushing the test past vitest's per-test timeout.
+// Every `runGateSweep` test here is a pure-decision test, so inject a no-op
+// `gcFn` to keep them off the shared filesystem. `describe.sequential` +
+// generous `{ timeout }` are the belt-and-suspenders backstop for any
+// remaining contention (Fowler 2011, "Eradicating Non-Determinism in Tests").
+describe.sequential("runGateSweep (injected seam)", { timeout: 60_000 }, () => {
   const greenStdout = JSON.stringify({ summary: true, allPass: true, stepCount: 1 });
   const redStdout = [
     JSON.stringify({ name: "typecheck", verdict: "fail" }),
     JSON.stringify({ summary: true, allPass: false, stepCount: 1 }),
   ].join("\n");
+  const noGc = () => [];
 
   it("merges only the gate-green PR; skips the red one; never merges in dry-run", () => {
     const merged = /** @type {number[]} */ ([]);
@@ -175,6 +185,7 @@ describe("runGateSweep (injected seam)", () => {
       }),
       mergeFn: (/** @type {import("./local-gate-merge.mjs").PrSnapshot} */ p) =>
         merged.push(p.number),
+      gcFn: noGc,
       noReview: true,
       log: () => {
         /* no-op */
@@ -199,6 +210,7 @@ describe("runGateSweep (injected seam)", () => {
       mergeFn: () => {
         mergeCalls += 1;
       },
+      gcFn: noGc,
       log: () => {
         /* no-op */
       },
@@ -218,6 +230,7 @@ describe("runGateSweep (injected seam)", () => {
       // the merge did NOT happen. Inject explicitly so the test doesn't
       // spawn real `gh`.
       prStateFn: () => "OPEN",
+      gcFn: noGc,
       noReview: true,
       log: () => {
         /* no-op */
@@ -248,6 +261,7 @@ describe("runGateSweep (injected seam)", () => {
         );
       },
       prStateFn: () => "MERGED",
+      gcFn: noGc,
       noReview: true,
       log: () => {
         /* no-op */
@@ -269,6 +283,7 @@ describe("runGateSweep (injected seam)", () => {
         throw new Error("! Pull request fyodoriv/minsky#575 was already merged");
       },
       prStateFn: () => "MERGED",
+      gcFn: noGc,
       noReview: true,
       log: () => {
         /* no-op */
@@ -289,6 +304,7 @@ describe("runGateSweep (injected seam)", () => {
         throw new Error("gh: connection reset by peer");
       },
       prStateFn: () => null,
+      gcFn: noGc,
       noReview: true,
       log: () => {
         /* no-op */
@@ -310,6 +326,7 @@ describe("runGateSweep (injected seam)", () => {
       mergeFn: () => {
         /* no-op */
       },
+      gcFn: noGc,
       log: () => {
         /* no-op */
       },
@@ -644,12 +661,15 @@ describe("landLocalBranch (injected seam)", () => {
   });
 });
 
-describe("runGateSweep — two-layer authority (gate + Opus brain)", () => {
+describe.sequential("runGateSweep — two-layer authority (gate + Opus brain)", {
+  timeout: 60_000,
+}, () => {
   const greenStdout = JSON.stringify({ summary: true, allPass: true, stepCount: 1 });
   const redStdout = [
     JSON.stringify({ name: "vitest", verdict: "fail" }),
     JSON.stringify({ summary: true, allPass: false, stepCount: 1 }),
   ].join("\n");
+  const noGc = () => [];
 
   it("merges only when gate-green AND Opus approves; reviewFn skipped on gate-red (cost discipline)", () => {
     const reviewed = /** @type {number[]} */ ([]);
@@ -668,6 +688,7 @@ describe("runGateSweep — two-layer authority (gate + Opus brain)", () => {
       },
       mergeFn: (/** @type {import("./local-gate-merge.mjs").PrSnapshot} */ p) =>
         merged.push(p.number),
+      gcFn: noGc,
       log: () => {
         /* no-op */
       },
@@ -690,6 +711,7 @@ describe("runGateSweep — two-layer authority (gate + Opus brain)", () => {
       },
       mergeFn: (/** @type {import("./local-gate-merge.mjs").PrSnapshot} */ p) =>
         merged.push(p.number),
+      gcFn: noGc,
       log: () => {
         /* no-op */
       },
@@ -894,7 +916,14 @@ describe("decideStaleScratch (sweep-start GC decision — rule #6 hygiene)", () 
   });
 });
 
-describe("gcStaleScratchDirs (integration — seeded tmpdir, real removal)", () => {
+// Anti-flake: this block does real fs (mkdtemp + mkdir + rmSync) under a
+// seeded root. Under ≥3x CPU oversubscription the fs ops slow down enough to
+// blow past the per-test default; serialize with `describe.sequential` and
+// give the block a generous timeout backstop. Meszaros, *xUnit Test Patterns*,
+// 2007 § "Slow Tests" — bound external-process waits.
+describe.sequential("gcStaleScratchDirs (integration — seeded tmpdir, real removal)", {
+  timeout: 60_000,
+}, () => {
   /** @type {string} */
   let root;
   beforeEach(() => {
