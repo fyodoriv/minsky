@@ -96,6 +96,21 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `scripts/metrics-render.mjs`, `scripts/generate-metrics-md.mjs`, `scripts/metrics-render.test.mjs`, `docs/METRICS.md`
   - **Acceptance**: (a) a no-new-observation regen never downgrades a committed real value to `(stub)`; (b) milestone-alignment stays green across regen; (c) a regression test in `metrics-render.test.mjs` pins "real value + empty snapshot → value preserved (or `(stale)`), never `(stub)`"; (d) the pre-push hook no longer blocks on a daemon-triggered render.
 
+- [ ] `tasks-lint-npx-lock-contention-flakes-stop-gate` — concurrent sessions' stop-gate hooks contend on the shared `/tmp/npm-cache-minsky` npx lock → `npm ECOMPROMISED: Lock compromised` → tasks-lint flakes red on a clean TASKS.md
+  - **ID**: tasks-lint-npx-lock-contention-flakes-stop-gate
+  - **Tags**: p0, stability, anti-flake, lint-gate
+  - **Milestone**: M1
+  - **Touches**: `scripts/run-pre-pr-lint-stack.mjs`, `package.json`
+  - **Competitive-goal**: protects `autonomous-merge-rate` — a gate that flakes red on correct input blocks every concurrent session's turn/push and burns retry budget fleet-wide.
+  - **Hypothesis**: the `tasks-lint` step runs `npx -y @tasks-md/lint@^0.7.0` with a hardcoded shared `NPM_CONFIG_CACHE=/tmp/npm-cache-minsky`; when ≥2 sessions' stop-gate hooks fire concurrently, libnpmexec's with-lock touch-loop detects the sibling's lock steal and aborts with `ECOMPROMISED: Lock compromised` (observed live 2026-06-10, 3 contending `npm exec @tasks-md/lint` processes, TASKS.md itself lint-clean: direct `node_modules/.bin/tasks-lint TASKS.md` → 0 errors). Removing npx from the gate path (vendor `@tasks-md/lint` as a devDependency and call `pnpm exec tasks-lint`) eliminates the shared-lock dependency entirely, dropping the tasks-lint flake rate under concurrency from intermittent-fatal to 0.
+  - **Success**: 3 concurrent `pnpm pre-pr-lint --stage=stop-gate` runs all exit 0 on a clean TASKS.md (no ECOMPROMISED); tasks-lint step wall-clock drops from ~88s (cold npx reify) to <5s.
+  - **Pivot**: if vendoring is rejected (gate must track upstream ^0.7.0 floating), fall back to a per-process cache (`NPM_CONFIG_CACHE=/tmp/npm-cache-minsky-$PID`) — slower cold but contention-free; if that still flakes, serialize the step behind a repo-local flock.
+  - **Measurement**: `for i in 1 2 3; do pnpm pre-pr-lint --stage=stop-gate & done; wait; echo $?` exits 0 with zero `ECOMPROMISED` lines in output
+  - **Anchor**: Nygard, *Release It!* (2018) — Ch. 4 stability antipatterns: shared mutable resource without bulkhead; rule #10 (deterministic gates: same input must give same verdict regardless of sibling activity).
+  - **Details**: Observed 2026-06-10: stop-gate hook failed `tasks-lint` (88s, exit 1) with `npm error ECOMPROMISED / Lock compromised` from `/tmp/npm-cache-minsky/_logs/2026-06-10T14_50_58_936Z-debug-0.log`; two sibling `npm exec @tasks-md/lint@^0.7.0 TASKS.md` processes were live-contending the same cache. The npx-cache-installed binary at `/tmp/npm-cache-minsky/_npx/47602f057af92d6f/node_modules/.bin/tasks-lint` ran clean against TASKS.md, proving content-green. Preferred fix per rule #1 reuse-bias: add `@tasks-md/lint` to devDependencies and swap the step to `pnpm exec tasks-lint TASKS.md` (also makes the gate offline-capable and removes the 88s cold-reify tax). Cross-ref the existing P1 task (~L1962) that plans to expand tasks-lint usage — vendoring serves both.
+  - **Files**: `scripts/run-pre-pr-lint-stack.mjs`, `package.json`, `pnpm-lock.yaml`
+  - **Acceptance**: (a) the tasks-lint gate step no longer shells out to `npx` (no shared npm cache lock in the gate path); (b) 3 concurrent stop-gate runs are green on clean input; (c) step latency <5s warm; (d) the `NPM_CONFIG_CACHE` workaround comment is removed or updated.
+
 <!-- Operator directive 2026-05-27 (UI = P0-P1 by definition): every user-facing CLI surface (bin/minsky subcommands, pnpm minsky:* scripts) defaults to P0-P1 priority — never P2-P3. UX friction compounds: a flag operators have to remember on every debugging session is a 5-second tax × N sessions × M operators = real wasted hours. Backfill any UI task currently at P2-P3 to P1 unless explicitly deferred with a written reason. -->
 
 <!-- ===================================================================== -->
@@ -239,25 +254,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- Each task cites the upstream tool(s) where prior art exists, per      -->
 <!-- vision rule #1 (don't reinvent the wheel — GET, don't IMPLEMENT).    -->
 <!-- ===================================================================== -->
-
-- [ ] `minsky-npm-publish-v0-1-0` — operator-step: publish the first release of the `minsky` npm package so `npx minsky init` works for any operator on any machine. The publishable substrate (package.json bin + files, regression test, smoke test) shipped in PR (this PR) — what's left is the credentials-gated push to npmjs.com
-  - **ID**: minsky-npm-publish-v0-1-0
-  - **Tags**: p0, milestone-m1, m1-3, operator-step, install, distribution, blocked-needs-operator
-  - **Milestone**: M1
-  - **Competitive-goal**: drives `install-success-rate` (M1.3) toward "1 on fresh machine without git clone" — Devin / Cline / Aider all distribute via package managers (pip / vscode marketplace / brew). Minsky's `git clone + pnpm install` flow is the high outlier today; `npx -y minsky init` closes the gap.
-  - **Surfaced-by**: 2026-05-26 operator session on M1.3 substrate completion. The tarball builds + bin/minsky init runs end-to-end from the unpacked tarball (verified via `pnpm vitest run test/integration/npx-init-tarball.test.ts`). The remaining gap is exactly the credential-gated npmjs.com push.
-  - **Hypothesis**: a single `npm publish` from a CI environment with NPM_TOKEN secret (or operator's machine with `npm login`) at the `v0.1.0` git tag publishes the `minsky` package to npmjs.com. Once live, any operator on any machine runs `npx -y minsky init` → `minsky` and the daemon starts within 60s.
-  - **Success**: (1) `npm view minsky version` returns ≥`0.1.0` on npmjs.com. (2) `npx -y minsky --version` on a fresh `node:24-bookworm` Docker container prints the package version without errors. (3) `npx -y minsky init` writes `~/.minsky/config.json` correctly. (4) `npm view minsky size` returns ≤5 MB compressed (npm convention).
-  - **Pivot**: if the `minsky` name is unexpectedly taken on npmjs.com (it wasn't as of 2026-05-26 — `curl https://registry.npmjs.org/minsky` returned 404), publish as `@fyodoriv/minsky` instead and document `npx -y @fyodoriv/minsky init` as the canonical command. Operator updates README + the launchpad lines.
-  - **Measurement**: `curl -fsSL https://registry.npmjs.org/minsky 2>/dev/null | jq -r '.["dist-tags"].latest'` returns a non-null version string OR the equivalent for the pivot namespace.
-  - **Anchor**: rule #1 (npm is the universal Node distribution channel — don't reinvent); `user-stories/006-runner-on-any-repo.md` § Acceptance criterion §3 (one-command install); Krug *Don't Make Me Think* 2014 (one obvious path).
-  - **Details**: (a) Operator runs `npm login` (or sets `NPM_TOKEN` in GitHub Actions secrets); (b) verifies the package.json shape one more time (`bin`, `files`, version, license, repository, keywords); (c) tags the release (`git tag v0.1.0 && git push origin v0.1.0`); (d) runs `pnpm publish --access=public --no-git-checks` (the operator's machine; CI publishing is a follow-up); (e) smokes the result via `npx -y minsky --version` in a fresh Docker container.
-  - **Files**: `package.json` (bump version from `0.1.0-rc.0` → `0.1.0`), `README.md` (drop "release-candidate" language once live).
-  - **Touches**: package.json, README.md
-  - **Acceptance**: (1) `npx -y minsky --version` on a fresh machine prints the published version. (2) `npm view minsky` shows ≥0.1.0 and a tarball size ≤5MB. (3) the integration test `test/integration/npx-init-tarball.test.ts` continues to pass against the local tarball (the regression site for any future package.json regression).
-  - **Risk**: low. The publication is one shell command; the risk is forgetting to bump version BEFORE publish (publishing `0.1.0-rc.0` instead of `0.1.0`) or publishing with the wrong namespace. Mitigation: the integration test asserts `package.json.version` matches the bump pattern; the operator's checklist is the npm-publish skill in their dotfiles.
-  - **Blocked**: blocked-needs-operator-credentials — the actual `npm publish` requires npm credentials the daemon can't access. Operator-only step.
-  - **Note**: composes with the previously-filed `minsky-npx-install-and-run` (P1) for the FULL `npx minsky` (no subcommand) flow — once `init` works, the next step is the `npx minsky` (no subcommand) detect-and-init-then-start path. This task ships the `init` half; the `minsky-npx-install-and-run` task ships the integrated `npx minsky` flow on top.
 
 - [ ] `add-openhands-as-pluggable-backend` — add `openhands` as a 4th pluggable agent in `~/.minsky/config.json` (alongside `claude` / `devin` / `aider`) to inherit its 65.8% SWE-bench-verified single-task agent
   - **ID**: add-openhands-as-pluggable-backend
@@ -825,6 +821,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `minsky-npx-install-and-run` — `npx minsky` (no subcommand, no prior install) should both INSTALL minsky on the machine AND start a daemon iteration in a single command, so a new operator's literal first interaction is one shell line
   - **ID**: minsky-npx-install-and-run
   - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
+  - **Note**: 2026-06-10 — name pivot executed: npm rejects bare `minsky` permanently (403 "too similar to existing package minify", typosquat rule) and the `@minsky` scope is not ours; published as `@fyodoriv/minsky@0.1.0` instead. Canonical command is `npx -y @fyodoriv/minsky`. Do not retry `minsky` or `@minsky/cli`.
   - **Tags**: p1, milestone-m1, ux, install, distribution, operator-directive, observed-2026-05-20
   - **Milestone**: M1
   - **Surfaced-by**: operator 2026-05-20 reviewing README — "Add a P1 task to make it install+runnable with a super simple command eg with npx". Today the install path is `git clone + cd + pnpm install + minsky`. The existing P0 `minsky-init-one-command-bootstrap` covers `npx minsky init` (sets up the sidecar) but leaves the operator to run `minsky` separately as a second command. The simpler operator-mental-model is: type ONE line in your shell, get a running iteration.

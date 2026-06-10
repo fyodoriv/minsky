@@ -97,7 +97,8 @@ describe.skipIf(!RUN_INTEGRATION)("`npx minsky init` end-to-end (M1.3)", () => {
       env,
       stdio: "pipe",
     });
-    const tarballMatch = execSync(`ls "${packDir}"/minsky-*.tgz`, { encoding: "utf8" }).trim();
+    // Scoped packages pack as <scope>-<name>-<version>.tgz (e.g. fyodoriv-minsky-0.1.0.tgz).
+    const tarballMatch = execSync(`ls "${packDir}"/*minsky-*.tgz`, { encoding: "utf8" }).trim();
     // Unpack.
     execSync(`tar -xzf "${tarballMatch}" -C "${pkgDir}" --strip-components=1`, {
       env,
