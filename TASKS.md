@@ -658,6 +658,21 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P1
 
+- [ ] `dangerous-bash-guard-script-indirect-gap` — block-dangerous-bash only sees the literal Bash command; destructive git wrapped in a script or alias passes through
+  - **ID**: dangerous-bash-guard-script-indirect-gap
+  - **Tags**: p1, stability, multi-agent-git-safety, data-loss-defense
+  - **Milestone**: M1
+  - **Touches**: `.claude/hooks/`, `bin/`
+  - **Competitive-goal**: protects `autonomous-merge-rate` — an uncaught wholesale revert in the shared checkout silently destroys sibling agents' in-flight work (see the 2026-06-10 incident pinned in `scripts/block-dangerous-bash.test.mjs`).
+  - **Hypothesis**: the PreToolUse string-match guard cannot see destructive git invoked indirectly (`bash scripts/foo.sh` that internally hard-resets, a `git` alias, `sh -c '...'` with constructed strings); a `git` wrapper shim prepended to agent-session PATH that intercepts reset/restore/checkout/clean/stash argv directly closes the indirect path, reducing guard-evadable destructive-git surface from "any script" to ~0.
+  - **Success**: a script that internally runs a wholesale revert is blocked in the operator root (shim exit ≠ 0 with guidance) while the same script passes in `.worktrees/*`; direct git and all safe subcommands are unaffected (no measurable latency regression > 10ms/call).
+  - **Pivot**: if a PATH shim proves too invasive (breaks minsky's own bin scripts ≥1 time in a week of dogfooding), fall back to documenting the gap + a PostToolUse detector that diffs `git status` before/after Bash calls and ALERTS on unexplained tree-wide reverts instead of blocking.
+  - **Measurement**: `printf '#!/bin/sh\ngit restore .\n' > /tmp/evil.sh && chmod +x /tmp/evil.sh && PATH="$PWD/.claude/shims:$PATH" /tmp/evil.sh; echo exit=$?` prints non-zero in the main checkout and 0 under `.worktrees/*`; vitest fixture table in the shim's test.
+  - **Anchor**: Tuszynski 2026, "The Five Hooks That Change How You Ship With Claude Code" — safety nets must sit at the narrowest waist the action flows through; argv interception (shim) is a narrower waist than command-string matching (hook).
+  - **Details**: Residual gap accepted in the PR that shipped the wholesale-revert + operator-root branch-switch guard (P1 not P0: indirect invocation requires an agent to first WRITE a script containing destructive git — the direct path that caused the 2026-06-10 incident is now blocked; this hardens the remaining evasion route). A related known FP: a quoted-string mention (`git commit -m "docs about <forbidden>"`) still trips the hook — heredoc bodies are stripped but quoted args are not; the shim approach fixes that class too since it sees argv, not prose.
+  - **Files**: `.claude/shims/git`, `.claude/settings.json`, `scripts/git-shim-guard.test.mjs`
+  - **Acceptance**: (a) indirect destructive git via a script is blocked in the main checkout; (b) the same call passes in worktrees; (c) safe git subcommands pass everywhere; (d) the quoted-string-mention FP class is gone for shim-covered commands; (e) fixture test pins all four.
+
 - [ ] `sidecar-bootstrap-unbuilt-breaks-picker-cli` — `@minsky/sidecar-bootstrap` is linked but has no built `index.js`, so `pickHostTask` import crashes
   - **ID**: sidecar-bootstrap-unbuilt-breaks-picker-cli
   - **Tags**: p1, build, dx, tooling
