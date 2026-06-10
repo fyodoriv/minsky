@@ -4,8 +4,8 @@
 // `git restore .` wipe + feature-branch checkout in the shared operator
 // root) and the heredoc false-positive fix.
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const HOOK = path.join(
@@ -107,22 +107,12 @@ describe("block-dangerous-bash.sh heredoc false-positive fix", () => {
   });
 
   it("still blocks a forbidden command AFTER a heredoc ends", () => {
-    const cmd = [
-      "cat > /tmp/note.txt <<'EOF'",
-      "harmless text",
-      "EOF",
-      RESET_HARD,
-    ].join("\n");
+    const cmd = ["cat > /tmp/note.txt <<'EOF'", "harmless text", "EOF", RESET_HARD].join("\n");
     expect(runHook(cmd)).toBe(2);
   });
 
   it("still blocks a forbidden command BEFORE a heredoc", () => {
-    const cmd = [
-      RESET_HARD,
-      "cat > /tmp/note.txt <<'EOF'",
-      "harmless text",
-      "EOF",
-    ].join("\n");
+    const cmd = [RESET_HARD, "cat > /tmp/note.txt <<'EOF'", "harmless text", "EOF"].join("\n");
     expect(runHook(cmd)).toBe(2);
   });
 });
