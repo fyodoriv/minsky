@@ -1,11 +1,14 @@
-// Integration tests for `bin/minsky qa` — slice 3 of P0
-// `minsky-human-comm-via-file`.
+// Integration tests for `bin/minsky qa` — the operator-side surface of
+// the agent↔human QA channel. Design and rationale live in
+// `novel/human-loop/README.md`; this file pins the bin/minsky qa
+// subcommand's observable behaviour.
 //
 // Hypothesis (rule #9): the `qa` subcommand provides the operator
-// surface for the agent↔human QA channel slices 1+2 established. A
-// human running `minsky qa` first time finds an explanatory header in
-// the file; subsequent runs preserve their accumulated answers; the
-// path can be overridden via MINSKY_QA_LOG_PATH for fixture isolation.
+// surface for the agent↔human QA channel the human-loop package
+// established. A human running `minsky qa` first time finds an
+// explanatory header in the file; subsequent runs preserve their
+// accumulated answers; the path can be overridden via
+// MINSKY_QA_LOG_PATH for fixture isolation.
 //
 // Success: every test below passes against the real bin/minsky binary
 // driving a temporary MINSKY_QA_LOG_PATH; the file always exists after
@@ -18,9 +21,9 @@
 //
 // Measurement: this test file (10 cases).
 //
-// Anchor: rule #9 (pre-registered metrics); parent task
-// `minsky-human-comm-via-file` § Details (g); slices 1+2 establish the
-// qa-log-format and askHuman API this subcommand wraps.
+// Anchor: rule #9 (pre-registered metrics); `novel/human-loop/README.md`
+// § Operator surface; the qa-log-format and askHuman API this
+// subcommand wraps live in `novel/human-loop/src/`.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
