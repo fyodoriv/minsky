@@ -20,14 +20,22 @@
 // observed spawn-failure class becomes a hard gate the next time).
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const MINSKY_RUN = join(REPO_ROOT, "bin", "minsky-run.sh");
 const VENV_PYTHON = join(homedir(), ".minsky", "openhands-venv", "bin", "python");
+
+// Hermetic config fixture: the invariant first reads the agent from
+// MINSKY_CONFIG (default ~/.minsky/config.json) and SKIPS the openhands
+// probe entirely when the configured agent is not "openhands" — so on an
+// operator machine configured for claude these tests asserted against an
+// invariant that never ran. Pin the agent the tests assume.
+const FIXTURE_CONFIG = join(mkdtempSync(join(tmpdir(), "minsky-selfcheck-")), "config.json");
+writeFileSync(FIXTURE_CONFIG, JSON.stringify({ cloud_agent: "openhands" }));
 
 function runSelfCheck(env: Record<string, string>): {
   stdout: string;
@@ -38,7 +46,7 @@ function runSelfCheck(env: Record<string, string>): {
   // --self-check is `|| true`-gated so the invariant message lives in
   // stderr alongside exit 0. spawnSync captures both regardless.
   const result = spawnSync(MINSKY_RUN, ["--self-check"], {
-    env: { ...process.env, ...env },
+    env: { ...process.env, MINSKY_CONFIG: FIXTURE_CONFIG, ...env },
     encoding: "utf8",
   });
   return {
