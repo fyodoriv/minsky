@@ -1039,6 +1039,20 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P2
 
+- [ ] FrontierCode-style rubric hardening for the autonomous mergeability gate
+  - **ID**: frontiercode-mergeability-rubric-hardening
+  - **Competitive-goal**: raises autonomous-merge-quality by reducing false-positive Opus approvals in the local gate; also improves the self-metrics benchmark's quality dimension beyond raw merge throughput.
+  - **Tags**: p2, mergeability, quality-gate, rubric, frontiercode, local-gate
+  - **Milestone**: M2
+  - **Hypothesis**: If Minsky hardens its Opus review prompt and gate logs with FrontierCode-style blocker criteria, negative/adversarial examples, and false-positive/false-negative calibration, then fewer gate-green-but-low-quality PRs will be approved because the model will judge against explicit mergeability axes instead of one compressed prose line.
+  - **Success**: A fixture-backed calibration document or test suite covers at least 6 historical/synthetic PR diffs: 2 should approve, 2 should reject as blocker failures, and 2 should surface non-blocker quality concerns while preserving deterministic gate authority; `local-gate-merge` records the rubric version in its decision output.
+  - **Pivot**: If LLM review remains too nondeterministic for test assertions, keep deterministic checks as the only load-bearing gate and demote the Opus layer to advisory logging with a tracked false-positive/false-negative sample set for manual review.
+  - **Measurement**: `pnpm test -- local-gate-merge && node scripts/local-gate-merge.mjs --dry-run --limit=1` exits 0 and emits the rubric-version field; calibration fixture expected decisions match at least 5/6 cases over 3 repeated local runs.
+  - **Anchor**: Cognition FrontierCode (2026-06-08) "Beyond Unit Tests" and "Quality Control" sections; Basili/Caldiera/Rombach 1994 GQM for the success metric; Minsky vision.md §9 pre-registered hypothesis-driven development.
+  - **Details**: Source evidence: FrontierCode frames code-agent evaluation as "would the maintainer actually merge this PR?", uses blockers vs weighted non-blockers, reverse-classical tests for agent-written tests, scope checks, and adversarial hack reports to reduce false positives/negatives. Local evidence: `AGENTS.md:193-205` says 95%+ unit coverage is necessary but not sufficient and every production bug becomes a runtime invariant; `vision.md:157-172` requires every change to have a measurable hypothesis and deterministic enforcement before soft guidance; `scripts/local-gate-merge.mjs:13-17` describes the current deterministic pre-filter plus Opus review; `scripts/local-gate-merge.mjs:1075-1077` shows the current Opus rubric is one compressed prompt covering intent, hidden risk, scope creep, and title fidelity. Harden that existing review layer, do not replace the deterministic gate. Out of scope / future candidates: do not import FrontierCode tasks (not public), build a model leaderboard, or make the Opus review load-bearing without deterministic fallback; future work can add a full public benchmark comparison if an open FrontierCode-compatible corpus appears.
+  - **Files**: `scripts/local-gate-merge.mjs`, `scripts/local-gate-merge.test.mjs`, `docs/research/frontiercode-mergeability-rubric.md` (new, if docs are the cleanest calibration artifact).
+  - **Acceptance**: (a) local gate review prompt names explicit blocker axes for correctness, regression risk, scope, claimed behavior, and maintainability; (b) calibration fixtures include approve/reject/non-blocker examples with rationale; (c) decision output records rubric version and whether rejection was blocker vs advisory; (d) deterministic gate remains authoritative and `--no-review` still works.
+
 - [ ] `corpus-refresh-augment-code` — refresh the published readings for `augment-code` in `novel/competitive-benchmark/src/competitors.ts` (asOf 2025-03-31, 429 days stale; auto-filed by `scripts/auto-file-corpus-refresh-tasks.mjs`)
   - **ID**: corpus-refresh-augment-code
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-refresh, auto-filed
