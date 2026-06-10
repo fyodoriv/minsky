@@ -82,7 +82,7 @@ jobs:
 
       - name: open draft PR when findings > 0
         if: steps.dogfood.outputs.findings != '0'
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         env:
           # peter-evans/create-pull-request commits internally (not in a `run:`
           # block), so the lefthook bypass MUST be the env escape hatch — the
