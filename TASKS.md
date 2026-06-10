@@ -610,20 +610,20 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P1
 
-- [ ] `dangerous-bash-guard-script-indirect-gap` — block-dangerous-bash only sees the literal Bash command; destructive git wrapped in a script or alias passes through
-  - **ID**: dangerous-bash-guard-script-indirect-gap
-  - **Tags**: p1, stability, multi-agent-git-safety, data-loss-defense
+- [ ] `minsky-stop-host-pgrep-mock-mismatch` — `bin/minsky.test.mjs` "SIGTERMs only the minsky-run matching the --host dir" fails deterministically on origin/main; mock pgrep emits 0 PIDs
+  - **ID**: minsky-stop-host-pgrep-mock-mismatch
+  - **Tags**: p1, stability, test-flake, observed-2026-06-10
   - **Milestone**: M1
-  - **Touches**: `.claude/hooks/`, `bin/`
-  - **Competitive-goal**: protects `autonomous-merge-rate` — an uncaught wholesale revert in the shared checkout silently destroys sibling agents' in-flight work (see the 2026-06-10 incident pinned in `scripts/block-dangerous-bash.test.mjs`).
-  - **Hypothesis**: the PreToolUse string-match guard cannot see destructive git invoked indirectly (`bash scripts/foo.sh` that internally hard-resets, a `git` alias, `sh -c '...'` with constructed strings); a `git` wrapper shim prepended to agent-session PATH that intercepts reset/restore/checkout/clean/stash argv directly closes the indirect path, reducing guard-evadable destructive-git surface from "any script" to ~0.
-  - **Success**: a script that internally runs a wholesale revert is blocked in the operator root (shim exit ≠ 0 with guidance) while the same script passes in `.worktrees/*`; direct git and all safe subcommands are unaffected (no measurable latency regression > 10ms/call).
-  - **Pivot**: if a PATH shim proves too invasive (breaks minsky's own bin scripts ≥1 time in a week of dogfooding), fall back to documenting the gap + a PostToolUse detector that diffs `git status` before/after Bash calls and ALERTS on unexplained tree-wide reverts instead of blocking.
-  - **Measurement**: `printf '#!/bin/sh\ngit restore .\n' > /tmp/evil.sh && chmod +x /tmp/evil.sh && PATH="$PWD/.claude/shims:$PATH" /tmp/evil.sh; echo exit=$?` prints non-zero in the main checkout and 0 under `.worktrees/*`; vitest fixture table in the shim's test.
-  - **Anchor**: Tuszynski 2026, "The Five Hooks That Change How You Ship With Claude Code" — safety nets must sit at the narrowest waist the action flows through; argv interception (shim) is a narrower waist than command-string matching (hook).
-  - **Details**: Residual gap accepted in the PR that shipped the wholesale-revert + operator-root branch-switch guard (P1 not P0: indirect invocation requires an agent to first WRITE a script containing destructive git — the direct path that caused the 2026-06-10 incident is now blocked; this hardens the remaining evasion route). A related known FP: a quoted-string mention (`git commit -m "docs about <forbidden>"`) still trips the hook — heredoc bodies are stripped but quoted args are not; the shim approach fixes that class too since it sees argv, not prose.
-  - **Files**: `.claude/shims/git`, `.claude/settings.json`, `scripts/git-shim-guard.test.mjs`
-  - **Acceptance**: (a) indirect destructive git via a script is blocked in the main checkout; (b) the same call passes in worktrees; (c) safe git subcommands pass everywhere; (d) the quoted-string-mention FP class is gone for shim-covered commands; (e) fixture test pins all four.
+  - **Touches**: `bin/minsky` (`stop` subcommand), `bin/minsky.test.mjs` (mock pgrep)
+  - **Competitive-goal**: protects `autonomous-merge-rate` — a silently-broken `stop --host` SIGTERMs zero runners and leaves stale daemons consuming worker slots, which throttles concurrent throughput on the leaderboard run.
+  - **Hypothesis**: the `bin/minsky stop --host <dir>` shim no longer passes the canonical host path as the LAST argv element to `pgrep -f`, so the test's mock pgrep (which keys on `"${@: -1}"`) takes the default `*) ;;` branch and emits zero PIDs — making the shim report `SIGTERM sent to 0 runner(s)`. Either the shim was refactored to pass the pattern in a different position, or the mock's `pat="${@: -1}"` heuristic needs to grep `$*` for `--host <dir>` instead. Aligning the two restores the assertion.
+  - **Success**: `pnpm vitest run bin/minsky.test.mjs -t "SIGTERMs only the minsky-run"` exits 0 in three consecutive runs on origin/main without retries.
+  - **Pivot**: if the shim's argv shape is intentionally divergent (e.g. now uses `--exact` semantics that drop `--host` from the pattern), retire the host-filter mock entirely and add a real-process integration test under `test/integration/` that spawns a sleeper carrying the same argv the production runner carries.
+  - **Measurement**: `for i in 1 2 3; do pnpm vitest run bin/minsky.test.mjs -t "SIGTERMs only the minsky-run" 2>&1 | grep -c "1 failed"; done` prints `0\n0\n0`.
+  - **Anchor**: AGENTS.md §3b "CLI integration tests" + rule #6 (let-it-crash at the right boundary — a host-scoped kill that drops to 0 is a silent-failure regression).
+  - **Details**: Surfaced 2026-06-10 while running `pnpm check` from this worktree on the `dangerous-bash-guard-script-indirect-gap` PR. Test fails 3/3 in isolation on the merge base (no recent changes to `bin/minsky.test.mjs` since its introduction in `1038c2df`). Inspect with: `diff <(git show 1038c2df:bin/minsky) bin/minsky` to spot any argv-shape drift in the shim since the mock was written.
+  - **Files**: `bin/minsky`, `bin/minsky.test.mjs`
+  - **Acceptance**: (a) test passes 3/3 consecutive runs; (b) the fix either aligns the mock's argv heuristic with the shim's actual call OR replaces the mock with a real-process fixture; (c) `pnpm check` runs to completion with zero failed tests on a clean clone.
 
 - [ ] `sidecar-bootstrap-unbuilt-breaks-picker-cli` — `@minsky/sidecar-bootstrap` is linked but has no built `index.js`, so `pickHostTask` import crashes
   - **ID**: sidecar-bootstrap-unbuilt-breaks-picker-cli
