@@ -4,7 +4,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   classifyError,
   createErrorReporter,
@@ -76,7 +76,12 @@ describe("FileErrorReporter", () => {
 });
 
 describe("createErrorReporter", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("uses the file strategy with no DSN, sentry with one", () => {
+    vi.stubEnv("SENTRY_DSN", undefined); // dsn defaults to env — hermetic
     expect(createErrorReporter({ errorsFile: "/tmp/x.jsonl" }).kind).toBe("file");
     expect(
       createErrorReporter({ dsn: "https://k@sentry.io/1", errorsFile: "/tmp/x.jsonl" }).kind,
