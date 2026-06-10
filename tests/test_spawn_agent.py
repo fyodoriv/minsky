@@ -26,6 +26,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from spawn_agent import (  # noqa: E402  (after sys.path tweak)
     DEFAULT_SHIM_PATH,
+    claude_config_dir_for_worker,
     resolve_agent_argv,
 )
 
@@ -290,6 +291,21 @@ sys.exit(7)
         shim_path.chmod(0o755)
         return shim_path, args_dump
 
+    @pytest.fixture(autouse=True)
+    def _pin_home_to_empty_tmp(self, tmp_path: Path) -> None:
+        """Pin HOME so resolve_configured_agent() can't accidentally read the
+        operator's real `~/.minsky/config.json`.
+
+        The operator's actual config sets `cloud_agent: claude`, which would
+        route every CLI test down the claude backend and short-circuit the
+        openhands/shim-fallback path these tests exercise. Anchoring HOME to
+        an empty pytest tmp dir keeps the default-to-openhands branch live —
+        the dispatcher reads no config file, returns the default, and the
+        openhands/shim probes run. Local-test + CI behavior unify.
+        """
+        self._test_home = tmp_path / "spawn-agent-test-home"
+        self._test_home.mkdir(exist_ok=True)
+
     def _run_cli(
         self,
         *args: str,
@@ -299,6 +315,11 @@ sys.exit(7)
         # Strip ambient PATH that might contain `openhands`. The fixture
         # adds the fake-bin dir explicitly when needed.
         env["PATH"] = "/usr/bin:/bin"
+        env["HOME"] = str(self._test_home)
+        # MINSKY_ROLE leakage from a hosting test runner would flip the
+        # config key resolve_configured_agent() reads; drop it for the
+        # same hermeticity reason as the HOME override above.
+        env.pop("MINSKY_ROLE", None)
         if env_overrides:
             env.update(env_overrides)
         return subprocess.run(
@@ -809,4 +830,167 @@ class TestResolveAgentArgvMatrix:
         # failure message names the flag.
         assert dropped in argv, (
             f"live spawn argv dropped required flag {dropped}: {argv!r}"
+        )
+
+
+# --- Per-worker CLAUDE_CONFIG_DIR isolation -------------------------------
+# worker-claude-concurrent-auth-and-watchdog: concurrent `claude -p` spawns
+# against the shared default `~/.claude/` intermittently exit `Not logged in`
+# in ~1s when one worker holds a session-file write while another reads. A
+# per-worker config dir anchored to the throwaway worktree eliminates the
+# contention without serializing spawns. Auth still flows through the
+# CLAUDE_CODE_OAUTH_TOKEN env var the supervisor exports per PR #1172.
+
+
+class TestClaudeConfigDirForWorker:
+    """Pure-function tests for the per-worker isolated CLAUDE_CONFIG_DIR path."""
+
+    def test_path_is_under_the_worktree(self) -> None:
+        repo = "/host/repo/.worktrees/daemon-foo"
+        result = claude_config_dir_for_worker(repo)
+        # The dir lives inside the agent's isolated worktree — same sandbox
+        # boundary the agent's `git add -A` / `rm -rf` already respects.
+        assert str(result).startswith(repo)
+
+    def test_two_distinct_worktrees_get_distinct_paths(self) -> None:
+        a = claude_config_dir_for_worker("/host/repo/.worktrees/daemon-a")
+        b = claude_config_dir_for_worker("/host/repo/.worktrees/daemon-b")
+        assert a != b, (
+            "two concurrent workers must get distinct CLAUDE_CONFIG_DIR "
+            "paths, else they collide on `~/.claude/` contention"
+        )
+
+    def test_same_worktree_resolves_to_same_path_idempotent(self) -> None:
+        # Across iterations the same worktree must resolve to the same dir
+        # so session state can be reused (an iteration that successfully
+        # bootstrapped its session should not start fresh on the next tick).
+        repo = "/host/repo/.worktrees/daemon-foo"
+        assert claude_config_dir_for_worker(repo) == claude_config_dir_for_worker(repo)
+
+
+class TestClaudeBackendIsolationEndToEnd:
+    """End-to-end: the spawn_agent CLI sets CLAUDE_CONFIG_DIR for the claude path.
+
+    Drives the dispatcher with a fake `claude` binary that records its
+    received CLAUDE_CONFIG_DIR env var, and asserts the env reaches the child
+    AND the dir is created on disk under the worktree.
+    """
+
+    def _make_fake_claude_env(
+        self, tmp_path: Path, env_dump: Path, exit_code: int = 0
+    ) -> dict[str, str]:
+        fake_home = tmp_path / "home"
+        fake_bin = fake_home / ".local" / "bin"
+        fake_bin.mkdir(parents=True)
+        fake_minsky = fake_home / ".minsky"
+        fake_minsky.mkdir(parents=True)
+        # Tells resolve_configured_agent() to take the claude branch (the
+        # operator's "Opus brain + Sonnet workers" subscription setup).
+        (fake_minsky / "config.json").write_text(
+            '{"cloud_agent":"claude","local_agent":"claude"}'
+        )
+        fake_claude = fake_bin / "claude"
+        fake_claude.write_text(
+            "#!/usr/bin/env bash\n"
+            f'echo "CLAUDE_CONFIG_DIR=${{CLAUDE_CONFIG_DIR}}" > {env_dump}\n'
+            f'echo "PWD=$PWD" >> {env_dump}\n'
+            f"exit {exit_code}\n"
+        )
+        fake_claude.chmod(0o755)
+        env = os.environ.copy()
+        env["HOME"] = str(fake_home)
+        env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+        # Strip the agent role override so resolve_configured_agent reads
+        # cloud_agent (not local_agent) — both are set to "claude" in the
+        # config above; pinning the env makes the test self-contained.
+        env.pop("MINSKY_ROLE", None)
+        return env
+
+    def test_claude_path_sets_per_worker_config_dir(self, tmp_path: Path) -> None:
+        env_dump = tmp_path / "claude-env.txt"
+        env = self._make_fake_claude_env(tmp_path, env_dump)
+        repo = tmp_path / "worktree-a"
+        repo.mkdir()
+        brief = tmp_path / "brief.md"
+        brief.write_text("do work")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "spawn_agent.py"),
+                "--brief-file",
+                str(brief),
+                "--repo",
+                str(repo),
+                "--model",
+                "claude-opus-4-7",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        recorded = env_dump.read_text()
+        expected_dir = repo / ".minsky-claude-config"
+        assert f"CLAUDE_CONFIG_DIR={expected_dir}" in recorded, (
+            f"claude child did not receive isolated CLAUDE_CONFIG_DIR; got: {recorded}"
+        )
+        # Dir was materialised before claude ran (the child read it from env;
+        # the dispatcher's mkdir -p ran beforehand).
+        assert expected_dir.is_dir(), (
+            f"expected CLAUDE_CONFIG_DIR to be created at {expected_dir}"
+        )
+
+    def test_two_concurrent_workers_get_disjoint_config_dirs(
+        self, tmp_path: Path
+    ) -> None:
+        """Two distinct worktrees → two distinct CLAUDE_CONFIG_DIRs.
+
+        This is the load-bearing invariant: even if both children launched in
+        the same nanosecond, they never share `~/.claude/` state. Anchors the
+        worker-claude-concurrent-auth-and-watchdog hypothesis (a).
+        """
+        dump_a = tmp_path / "env-a.txt"
+        env_a = self._make_fake_claude_env(tmp_path, dump_a)
+        # Distinct fake-home for B so both can stand up independently in /tmp.
+        dump_b = tmp_path / "env-b.txt"
+        env_b = self._make_fake_claude_env(tmp_path / "b", dump_b)
+
+        repo_a = tmp_path / "wt-a"
+        repo_b = tmp_path / "wt-b"
+        repo_a.mkdir()
+        repo_b.mkdir()
+        brief = tmp_path / "brief.md"
+        brief.write_text("x")
+
+        def _spawn(env: dict[str, str], repo: Path) -> int:
+            return subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "spawn_agent.py"),
+                    "--brief-file",
+                    str(brief),
+                    "--repo",
+                    str(repo),
+                    "--model",
+                    "claude-opus-4-7",
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            ).returncode
+
+        assert _spawn(env_a, repo_a) == 0
+        assert _spawn(env_b, repo_b) == 0
+        recorded_a = dump_a.read_text()
+        recorded_b = dump_b.read_text()
+        assert str(repo_a / ".minsky-claude-config") in recorded_a
+        assert str(repo_b / ".minsky-claude-config") in recorded_b
+        # Disjoint paths — the contention vector is closed.
+        assert (
+            str(repo_a / ".minsky-claude-config")
+            != str(repo_b / ".minsky-claude-config")
         )

@@ -17,13 +17,23 @@ SCRIPT = str(Path(__file__).parent.parent / "scripts" / "spawn_with_watchdog.py"
 
 
 def run(args: list[str], capture: bool = False, timeout: float = 30) -> subprocess.CompletedProcess:
-    """Shell out to the script; returns CompletedProcess (no check)."""
+    """Shell out to the script; returns CompletedProcess (no check).
+
+    The pre-SIGKILL WIP stash defaults to on; without MINSKY_TIMEOUT_STASH_DIR
+    set explicitly, ``_stash_dir()`` falls back to ``os.getcwd()`` — which for
+    a pytest run IS the repo root. Tests that exercise the timeout path
+    (e.g. ``test_exits_124_when_command_exceeds_timeout``) would then stash
+    the test author's own uncommitted edits into ``git stash`` mid-test.
+    Disabling the stash here keeps these high-level tests hermetic; the
+    stash-specific tests below explicitly opt back in via their own env.
+    """
     return subprocess.run(
         [sys.executable, SCRIPT, *args],
         capture_output=capture,
         text=True,
         timeout=timeout,
         check=False,
+        env={**os.environ, "MINSKY_TIMEOUT_STASH": "0"},
     )
 
 

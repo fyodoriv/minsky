@@ -170,6 +170,26 @@ def resolve_claude_argv(claude_bin: str, brief_file: str, model: str) -> list[st
     return [claude_bin, "-p", prompt, "--model", model, "--dangerously-skip-permissions"]
 
 
+def claude_config_dir_for_worker(repo: str) -> Path:
+    """Per-worker isolated ``CLAUDE_CONFIG_DIR`` path under the worktree.
+
+    The Claude Code CLI stores session/token state at ``$CLAUDE_CONFIG_DIR``
+    (default ``~/.claude/``). When two ``claude -p`` workers spawn concurrently
+    against the SHARED default dir, the second worker intermittently observes
+    a half-written session file and exits ``Not logged in · Please run /login``
+    in ~1s (auth/session-file contention). Pointing each worker at its own
+    config dir — anchored to the throwaway worktree the agent already edits
+    against (rule #2 — the worktree IS the sandbox) — eliminates contention
+    without serializing spawns. Authentication still flows through the
+    ``CLAUDE_CODE_OAUTH_TOKEN`` env var the supervisor exports per PR #1172,
+    so the isolated dir starts empty and bootstraps its own session.
+
+    Anchor: Nygard, *Release It!* (2018) — bulkhead pattern (per-worker state
+    so one worker's contention can't propagate to its sibling).
+    """
+    return Path(repo) / ".minsky-claude-config"
+
+
 def resolve_agent_argv(
     brief_file: str,
     repo: str,
@@ -358,8 +378,29 @@ def _main(argv: Optional[list[str]] = None) -> int:
             )
             return 127
         claude_argv = resolve_claude_argv(claude_bin, args.brief_file, args.model)
+        # Per-worker CLAUDE_CONFIG_DIR isolation (worker-claude-concurrent-auth-
+        # and-watchdog). Concurrent `claude -p` spawns against the shared
+        # default `~/.claude/` intermittently fail `Not logged in` in ~1s when
+        # one worker's session-file write races another's read. Each worker
+        # gets its own dir under the throwaway worktree; auth flows through
+        # CLAUDE_CODE_OAUTH_TOKEN (env-exported by the supervisor per PR #1172)
+        # so the isolated dir bootstraps itself from the token.
+        worker_config_dir = claude_config_dir_for_worker(args.repo)
         try:
-            completed = subprocess.run(claude_argv, check=False, cwd=args.repo)
+            worker_config_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            # Rule #6 — fail at the boundary, not later. An unwritable worktree
+            # is an iteration-level problem, not a daemon-loop one; surface and
+            # exit so the bash caller records the spawn-failed verdict cleanly.
+            print(
+                f"spawn_agent: cannot create CLAUDE_CONFIG_DIR={worker_config_dir}: {exc}",
+                file=sys.stderr,
+            )
+            return 127
+        env = os.environ.copy()
+        env["CLAUDE_CONFIG_DIR"] = str(worker_config_dir)
+        try:
+            completed = subprocess.run(claude_argv, check=False, cwd=args.repo, env=env)
         except FileNotFoundError as exc:
             print(f"spawn_agent: claude CLI not executable: {exc}", file=sys.stderr)
             return 127

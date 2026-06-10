@@ -34,14 +34,18 @@ def test_returns_default_when_under_5_samples() -> None:
     assert dynamic_timeout.compute_watchdog_seconds(timings) == dynamic_timeout.DEFAULT_WATCHDOG_S
 
 
-def test_excludes_sub_10s_samples() -> None:
-    # 5 successes but 4 are sub-10s no-ops; should fall back to default
-    # because only 1 sample survives the >10_000ms filter.
+def test_excludes_sub_threshold_samples() -> None:
+    # 5 successes but 4 are sub-MIN_SUCCESS_DURATION_MS no-ops (e.g. fast
+    # backstop-PR completions); should fall back to default because only
+    # 1 sample survives the filter. Pins the contract: the threshold IS
+    # the constant, not a hardcoded 10s — worker-claude-concurrent-auth-
+    # and-watchdog raised the floor from 10s to 60s.
+    sub_threshold = dynamic_timeout.MIN_SUCCESS_DURATION_MS - 1
     timings = [
-        (5_000, "validated"),
-        (5_000, "validated"),
-        (5_000, "validated"),
-        (5_000, "validated"),
+        (sub_threshold, "validated"),
+        (sub_threshold, "validated"),
+        (sub_threshold, "validated"),
+        (sub_threshold, "validated"),
         (300_000, "validated"),
     ]
     assert dynamic_timeout.compute_watchdog_seconds(timings) == dynamic_timeout.DEFAULT_WATCHDOG_S
@@ -62,10 +66,26 @@ def test_computes_p95_times_1_5_when_history_is_thick() -> None:
     assert dynamic_timeout.compute_watchdog_seconds(timings) == 900
 
 
-def test_clamps_below_minimum_to_2_minutes() -> None:
-    # 5 fast (≈11s) samples — p95 ≈ 11s → 16s → clamps to 120s minimum.
-    timings = [(11_000, "validated")] * 5
+def test_clamps_below_minimum_to_floor() -> None:
+    # 5 samples all just above the success-duration filter — p95 is small,
+    # ×1.5 is below MIN_WATCHDOG_S, so the watchdog clamps to the floor.
+    # The exact floor is the constant (worker-claude-concurrent-auth-and-
+    # watchdog: bumped from 120s to 600s after a 175s SIGTERM kill).
+    sample_ms = dynamic_timeout.MIN_SUCCESS_DURATION_MS + 1_000
+    timings = [(sample_ms, "validated")] * 5
     assert dynamic_timeout.compute_watchdog_seconds(timings) == dynamic_timeout.MIN_WATCHDOG_S
+
+
+def test_min_watchdog_floor_fits_a_real_claude_task() -> None:
+    # Anchor the post-worker-claude-concurrent-auth-and-watchdog floor:
+    # the operator brief observed a 174549ms task SIGTERMed by a 175s
+    # watchdog. The floor MUST exceed that observation by a comfortable
+    # margin so a thick history of fast-paths can't poison the watchdog
+    # back to the prior failure mode.
+    assert dynamic_timeout.MIN_WATCHDOG_S >= 600, (
+        f"MIN_WATCHDOG_S regressed to {dynamic_timeout.MIN_WATCHDOG_S}s; "
+        "a real claude worker needs ≥10 min of runway."
+    )
 
 
 def test_clamps_above_maximum_to_45_minutes() -> None:
@@ -76,7 +96,10 @@ def test_clamps_above_maximum_to_45_minutes() -> None:
 
 def test_includes_scope_leak_in_successful_pool() -> None:
     # scope-leak counts as "completed work" for timing purposes.
-    durations_s = [120, 180, 240, 300, 360]
+    # Durations chosen to land above the post-worker-claude-concurrent-
+    # auth-and-watchdog MIN_WATCHDOG_S floor (600s) so we observe the
+    # p95×1.5 path, not the clamp.
+    durations_s = [600, 660, 720, 780, 840]
     timings: list[tuple[int, str]] = [
         (durations_s[0] * 1000, "validated"),
         (durations_s[1] * 1000, "scope-leak"),
@@ -84,8 +107,8 @@ def test_includes_scope_leak_in_successful_pool() -> None:
         (durations_s[3] * 1000, "scope-leak"),
         (durations_s[4] * 1000, "validated"),
     ]
-    # sorted=[120, 180, 240, 300, 360]; ceil(0.95*5)-1 = 4 → 360s × 1.5 = 540s.
-    assert dynamic_timeout.compute_watchdog_seconds(timings) == 540
+    # sorted=[600, 660, 720, 780, 840]; ceil(0.95*5)-1 = 4 → 840s × 1.5 = 1260s.
+    assert dynamic_timeout.compute_watchdog_seconds(timings) == 1260
 
 
 # --- model-aware cold-start floor ----------------------------------------
@@ -176,18 +199,21 @@ def test_host_path_threads_model_into_cold_start_floor(tmp_path: Path) -> None:
 
 def test_host_path_thick_history_ignores_model(tmp_path: Path) -> None:
     # ≥5 samples on a host: model must not change the p95×1.5 result.
+    # Durations land above MIN_WATCHDOG_S (600s) so the comparison
+    # observes the p95×1.5 path, not the floor clamp.
     store = tmp_path / ".minsky" / "experiment-store" / "cross-repo"
     store.mkdir(parents=True)
     lines = [
-        '{"verdict":"validated","notes":"120000ms"}',
-        '{"verdict":"validated","notes":"180000ms"}',
-        '{"verdict":"validated","notes":"240000ms"}',
-        '{"verdict":"validated","notes":"300000ms"}',
-        '{"verdict":"validated","notes":"360000ms"}',
+        '{"verdict":"validated","notes":"600000ms"}',
+        '{"verdict":"validated","notes":"660000ms"}',
+        '{"verdict":"validated","notes":"720000ms"}',
+        '{"verdict":"validated","notes":"780000ms"}',
+        '{"verdict":"validated","notes":"840000ms"}',
     ]
     (store / "task-a.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    assert dynamic_timeout.watchdog_seconds_for_host(tmp_path, model="claude-opus-4-7") == 540
-    assert dynamic_timeout.watchdog_seconds_for_host(tmp_path) == 540
+    # p95 of [600, 660, 720, 780, 840]s = 840s, × 1.5 = 1260s.
+    assert dynamic_timeout.watchdog_seconds_for_host(tmp_path, model="claude-opus-4-7") == 1260
+    assert dynamic_timeout.watchdog_seconds_for_host(tmp_path) == 1260
 
 
 # --- CLI arg parsing -----------------------------------------------------
@@ -282,18 +308,21 @@ def test_watchdog_for_empty_experiment_store_returns_default(tmp_path: Path) -> 
 
 
 def test_watchdog_for_host_with_5_validated_iterations(tmp_path: Path) -> None:
+    # Durations chosen to exceed the post-worker-claude-concurrent-auth-
+    # and-watchdog MIN_WATCHDOG_S floor (600s) so the assertion observes
+    # the p95×1.5 path, not the floor clamp.
     store = tmp_path / ".minsky" / "experiment-store" / "cross-repo"
     store.mkdir(parents=True)
     lines = [
-        '{"verdict":"validated","notes":"120000ms"}',
-        '{"verdict":"validated","notes":"180000ms"}',
-        '{"verdict":"validated","notes":"240000ms"}',
-        '{"verdict":"validated","notes":"300000ms"}',
-        '{"verdict":"validated","notes":"360000ms"}',
+        '{"verdict":"validated","notes":"600000ms"}',
+        '{"verdict":"validated","notes":"660000ms"}',
+        '{"verdict":"validated","notes":"720000ms"}',
+        '{"verdict":"validated","notes":"780000ms"}',
+        '{"verdict":"validated","notes":"840000ms"}',
     ]
     (store / "task-a.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    # p95 of [120, 180, 240, 300, 360] = 360s, × 1.5 = 540s.
-    assert dynamic_timeout.watchdog_seconds_for_host(tmp_path) == 540
+    # p95 of [600, 660, 720, 780, 840] = 840s, × 1.5 = 1260s.
+    assert dynamic_timeout.watchdog_seconds_for_host(tmp_path) == 1260
 
 
 def test_watchdog_aggregates_across_multiple_jsonl_files(tmp_path: Path) -> None:
