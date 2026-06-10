@@ -694,30 +694,12 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
      interface → github-issues impl → repo.yaml selector. Composes with agentbrew's
      `ghi-task-backend-contract`. Origin: managed-host RFC `github-issues-task-tracking`. -->
 
-- [ ] `ghi-task-source-github-issues-impl` — implement `novel/adapters/task-source.github-issues.ts` so the daemon can pick, claim, and close GitHub Issues via `gh`
-  - **ID**: ghi-task-source-github-issues-impl
-  - **Tags**: p1, milestone-m1, adapter, task-source, github-issues, projects-v2, rule-2-interface, operator-directive-2026-05-29
-  - **Status**: obsolete — blocked by ghi-task-source-interface which was superseded by Path A aggressive cut (2026-05-24). Re-scope this task if GitHub Issues task backend is still needed for the Python picker (`scripts/pick_task.py`).
-  - **Touches**: <none>
-  - **Milestone**: M1
-  - **Competitive-goal**: moves `task-backend-coverage` from TASKS.md-only to TASKS.md + github-issues — the daemon can now run an indefinite improvement loop on a repo whose queue is GitHub Issues, which is the prerequisite for driving managed-host after its migration.
-  - **Hypothesis**: A GitHub-Issues implementation of the `TaskSource` port — listing open issues on the host's org Project ordered by the Priority field, claiming by self-assigning the daemon's agent identity, and closing via the merged PR's `Closes #N` — lets the existing host loop drive an issues-backed repo with no host-loop changes.
-  - **Success**: `task-source.github-issues.ts` implements all four port verbs against `gh`/Projects v2, has a `selfTest()` that round-trips a fixture issue (create → list → claim → close), and an integration test drives the four verbs against a fixture repo; priority ordering matches the P0→P3 walk.
-  - **Pivot**: if Projects v2 GraphQL priority-ordering from `gh` is too brittle in CI, order by an `priority/P0..P3` label set instead of the Project single-select field, and document the label convention.
-  - **Measurement**: `pnpm vitest run novel/adapters/task-source.github-issues` exits 0 with ≥8 paired cases (4 verbs × success/error); `node novel/adapters/task-source.github-issues.selftest.mjs` round-trips a fixture issue and exits 0; `grep -rE "gh issue|gh api" novel/ | grep -v adapters/ | wc -l` returns 0 (rule #2 — gh only inside the adapter).
-  - **Anchor**: GitHub docs "Linking a pull request to an issue" (default-branch close keywords) + "Using the built-in automations" (Projects v2 "PR merged → Done"), GHES 3.18.4 (verified on a GitHub Enterprise host); Cockburn Ports & Adapters 2005.
-  - **Details**: Implement the four verbs: `listOpenTasks` = `gh issue list` on the host's Project filtered to open + ordered by Priority (from the agentbrew contract descriptor); `claim` = `gh issue edit --add-assignee <agentId>`; `close` is implicit via the agent's merged PR carrying `Closes #N` (the adapter's `close` is a safety net / no-op verify); `getTask` = `gh issue view --json`. Provide `selfTest()`. Reuse agentbrew's `gh-issues` helper shape where practical (don't duplicate the rate-limit/scope logic — cite it).
-  - **Files**: `novel/adapters/task-source.github-issues.ts` (new), `novel/adapters/task-source.github-issues.test.ts` (new), `novel/adapters/task-source.github-issues.selftest.mjs` (new), `test/integration/task-source-github-issues-fixture.test.ts` (new), `docs/ARCHITECTURE.md` (note the second adapter).
-  - **Acceptance**: (a) four verbs implemented, no `any`; (b) `selfTest()` round-trips a fixture issue; (c) integration test ≥8 cases green; (d) no `gh` calls outside the adapter; (e) priority ordering matches the P0→P3 walk; (f) `pnpm pre-pr-lint --stage=fast` exits 0.
-  - **Composes-with**: internal agentbrew helper (same gh-wrapper concerns); `ghi-repo-yaml-task-source-field` (the selector that activates this adapter).
-
 - [ ] `ghi-repo-yaml-task-source-field` — add a `task_source: tasks-md | github-issues` field to `.minsky/repo.yaml` so each host selects its backend, and wire the daemon to instantiate the right adapter
   - **ID**: ghi-repo-yaml-task-source-field
   - **Tags**: p1, milestone-m1, config, repo-yaml, task-source, github-issues, operator-directive-2026-05-29
-  - **Status**: obsolete — blocked by ghi-task-source-github-issues-impl which is itself obsolete due to Path A aggressive cut. Re-scope this task if GitHub Issues task backend is still needed for the Python picker (`scripts/pick_task.py`).
+  - **Status**: obsolete — references novel/cross-repo-runner/ which Path A aggressive cut (2026-05-24) deleted. Re-scope to scripts/pick_task.py + bin/minsky-run.sh + .minsky/repo.yaml if a per-host task-backend selector is still needed (a `GhIssueTaskSource` Python adapter now exists at scripts/gh_issue_task_source.py).
   - **Touches**: <none>
   - **Milestone**: M1
-  - **Blocked by**: ghi-task-source-github-issues-impl
   - **Competitive-goal**: makes `task-backend-coverage` operator-selectable per host — an operator flips one field and the daemon drives that host's Issues queue, with `tasks-md` remaining the default so all existing hosts are unaffected.
   - **Hypothesis**: Selecting the backend per host via the existing `.minsky/repo.yaml` overlay (which already carries `tasks_md_path`) is the lowest-friction switch — the daemon reads `task_source`, instantiates the matching adapter, and the rest of the loop is identical.
   - **Success**: `.minsky/repo.yaml` accepts `task_source` (default `tasks-md`); the host loop instantiates `task-source.github-issues` when set; `INSTALL.md`/`AGENTS.md` document the field; a host configured with `github-issues` is driven end-to-end (pick → branch → PR with `Closes #N` → issue auto-closes) in an integration test.
