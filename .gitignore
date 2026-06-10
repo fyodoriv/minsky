@@ -45,6 +45,10 @@ desktop.ini
 # Minsky setup.sh local state — reference template lives at distribution/state.example.json
 .minsky/
 
+# Claude Code per-session config materialized by the daemon spawn — purely
+# runtime state; never committed.
+.minsky-claude-config/
+
 # Throughput benchmark fixture fleet — the seed `TASKS.md` + resolved
 # `.minsky/repo.yaml` per fixture host are tracked fixtures (NOT runtime
 # state), so they must override the `TASKS.md` (operator global ignore)

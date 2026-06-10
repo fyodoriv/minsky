@@ -8,6 +8,7 @@
       "!**/coverage",
       "!.claude",
       "!.minsky",
+      "!.minsky-claude-config",
       "!.worktrees",
       "!.obsidian",
       "!.claire",
