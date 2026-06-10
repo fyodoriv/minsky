@@ -659,21 +659,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `.claude/shims/git`, `.claude/settings.json`, `scripts/git-shim-guard.test.mjs`
   - **Acceptance**: (a) indirect destructive git via a script is blocked in the main checkout; (b) the same call passes in worktrees; (c) safe git subcommands pass everywhere; (d) the quoted-string-mention FP class is gone for shim-covered commands; (e) fixture test pins all four.
 
-- [ ] `sidecar-bootstrap-unbuilt-breaks-picker-cli` — `@minsky/sidecar-bootstrap` is linked but has no built `index.js`, so `pickHostTask` import crashes
-  - **ID**: sidecar-bootstrap-unbuilt-breaks-picker-cli
-  - **Tags**: p1, build, dx, tooling
-  - **Milestone**: M1
-  - **Touches**: `novel/sidecar-bootstrap`, `novel/cross-repo-runner/dist/repo-config-loader.js`, `package.json`
-  - **Competitive-goal**: keeps the documented operator validation path (`pickHostTask(readFileSync("TASKS.md"))`) runnable — a broken import means contributors can't verify task eligibility before committing, eroding the rule-9 picker's trust surface.
-  - **Hypothesis**: `novel/cross-repo-runner/dist/repo-config-loader.js` imports `@minsky/sidecar-bootstrap`, whose workspace symlink resolves to `novel/sidecar-bootstrap` but the package has no built entrypoint (`index.js` missing), so any `node -e "import(... cross-repo-runner/dist/index.js)"` throws `Cannot find package '.../@minsky/sidecar-bootstrap/index.js'`. Building `sidecar-bootstrap` (or fixing its `package.json` `main`/`exports`) in the workspace build graph makes the CLI picker import resolve, dropping the import-crash rate from 100% to 0%.
-  - **Success**: `node --input-type=module -e 'import { pickHostTask } from "./novel/cross-repo-runner/dist/index.js"; import { readFileSync } from "node:fs"; console.log(pickHostTask(readFileSync("TASKS.md","utf8"))?.id ?? "(none)")'` prints a task id (not an import error).
-  - **Pivot**: if `sidecar-bootstrap` is intentionally source-only (no build step), change `cross-repo-runner` to import its source entry directly (or inline the small dependency) rather than a `dist`-shaped `@minsky/` specifier.
-  - **Measurement**: the one-liner above exits 0 and prints a non-error line; a CI step that runs it on a clean `pnpm install && pnpm build` stays green.
-  - **Anchor**: rule #2 (every dependency behind a buildable interface — a linked-but-unbuilt package is a broken seam); Martin 2017 (composition at the I/O edge must be importable).
-  - **Details**: Surfaced 2026-06-03 while reproducing the daemon's task picker from the CLI (the bash daemon uses `scripts/pick_task.py` and is unaffected; only the documented Node `pickHostTask` path breaks). Confirm whether `novel/sidecar-bootstrap` is in the workspace build graph; add the build step or fix its `exports` so the `@minsky/sidecar-bootstrap` specifier resolves to a built file.
-  - **Files**: `novel/sidecar-bootstrap/package.json`, `novel/cross-repo-runner/dist/repo-config-loader.js`, root build config
-  - **Acceptance**: (a) the documented `pickHostTask` one-liner runs without an import error; (b) a fresh `pnpm install && pnpm build` produces the sidecar-bootstrap entrypoint; (c) the CLAUDE.md validation snippet works as written.
-
 <!-- COHORT: github-issues-task-source (2026-05-29 operator directive). Teach the daemon
      to pick tasks from GitHub Issues/Projects, not just TASKS.md, so minsky can drive
      hosts that have retired TASKS.md (e.g. managed-host). Pure rule-#2 adapter work:
