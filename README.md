@@ -23,7 +23,7 @@ Minsky adds what a bare agent lacks: a task picker, 18 numbered rule-checks run 
 Inside any git repo:
 
 ```bash
-cd /any/git/repo && npx -y minsky
+npx -y @fyodoriv/minsky
 ```
 
 This installs Minsky, writes config to `~/.minsky/config.json`, and runs one round. No cloud key needed by default.

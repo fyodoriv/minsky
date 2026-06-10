@@ -1,13 +1,16 @@
 {
-  "name": "minsky",
+  "name": "@fyodoriv/minsky",
   "version": "0.1.0",
-  "description": "Autonomous coding agent — runs itself on any git repo via `npx minsky init`.",
+  "description": "Autonomous coding agent — runs itself on any git repo via `npx -y @fyodoriv/minsky init`.",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
   },
   "packageManager": "pnpm@9.12.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "minsky": "./bin/minsky"
   },
