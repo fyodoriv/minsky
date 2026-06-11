@@ -101,3 +101,8 @@ pr-body.md
 # heading rule and fail — but the file is pytest's, not ours.
 .pytest_cache/
 pr-body.md
+
+# Python bytecode — generated per-machine; tracked copies caused recurring
+# merge/stash conflicts (every python version + run mtime differs per host)
+__pycache__/
+*.pyc
