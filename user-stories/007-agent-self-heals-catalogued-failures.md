@@ -450,9 +450,31 @@ Per AGENTS.md rule #3 ("Acceptance-scenario gate"): every test file references o
 - **And** total elapsed wall-clock time (start of detect → end of verify) is `< 300_000ms`
 - **And** the fixture host is cleaned up on test teardown (no leaked files in `/tmp/`)
 
+### Scenario: heal-dispatch heals a stale pid file at the pre-walk boundary and writes the ledger row
+
+- **Given** a fixture host dir whose `.minsky/daemon.pid` contains dead pid `99999` (and `MINSKY_STATE_DIR` points at the fixture's `.minsky/`)
+- **When** `node scripts/heal-dispatch.mjs --host <fixture> --boundary pre-walk` runs
+- **Then** the process exits `0`
+- **And** the pid file is removed
+- **And** `<fixture>/.minsky/heal-events.jsonl` contains a row with `failure_class: "stale-pid"`, `outcome: "healed"`, and `duration_ms < 300_000`
+
+### Scenario: heal-dispatch is a no-op on a healthy host
+
+- **Given** a fixture host dir with no injected failure (no pid file, parseable `state.json` and `config.json`)
+- **When** `node scripts/heal-dispatch.mjs --host <fixture> --boundary pre-walk` runs
+- **Then** the process exits `0`
+- **And** no `heal-events.jsonl` ledger row is written (no heal fired)
+
+### Scenario: heal-dispatch never propagates a failure to the caller (rule #6)
+
+- **Given** any host dir — including one where a heal's `apply()` throws mid-cycle
+- **When** the dispatcher runs at either boundary (`pre-walk` or `pre-spawn`)
+- **Then** the process still exits `0` (the dispatcher must never make the loop worse than no dispatcher)
+- **And** the error is reported on stderr, one line per heal
+
 ## Status
 
-- **Phase**: Phase 1 of 2. Ships 4 automated heals + MTTR ledger + reporter + chaos test.
+- **Phase**: Phase 1 of 2 shipped 4 automated heals + MTTR ledger + reporter + chaos test. Phase 2 shipped the remaining 7 helpers (11 total, chaos-validated) and `scripts/heal-dispatch.mjs` — the production binding that fires the unambiguous-seam subset at the `pre-walk` boundary of `bin/minsky-run.sh --loop` and writes the live ledger.
 - **Phase 2 follow-up**: `promote-remaining-heal-recipes` (in TASKS.md) carries the ≥10-automated-heals target.
 - **Plan**: `docs/plans/agents-can-self-heal-minsky-m1-13.md` (reviewer-approved round 2).
 
