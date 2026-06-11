@@ -206,3 +206,62 @@ describe("stability-number.mjs ↔ stability-report.mjs regression", () => {
     expect(reportParsed[0].total).toBe(numberParsed.total);
   });
 });
+
+describe("valid-event qualification — drained records are not iterations", () => {
+  // Regression pin for drained-queue-not-an-iteration: ~6000 idle-tick
+  // records over 2 days drove 24h stability to 0% while the true
+  // task-attempt ratio was non-zero (Beyer et al. 2016, *SRE*, Ch. 4 —
+  // an SLI defines which events are valid before computing the ratio).
+
+  test("verdict=drained records are excluded from numerator and denominator", () => {
+    const host = makeFixtureHost([
+      { ts: isoMinusHours(1), verdict: "validated" },
+      { ts: isoMinusHours(1), verdict: "spawn-failed" },
+      { ts: isoMinusHours(1), verdict: "drained", notes: "no eligible task" },
+      { ts: isoMinusHours(1), verdict: "drained", notes: "no eligible task" },
+      { ts: isoMinusHours(1), verdict: "drained", notes: "no eligible task" },
+    ]);
+    const { stdout } = run(["--window=10h", "--json", "--host-dir", host, "--now", NOW], host);
+    const [w] = JSON.parse(stdout);
+    expect(w.total).toBe(2);
+    expect(w.successful).toBe(1);
+    expect(w.ratio).toBe(0.5);
+  });
+
+  test("legacy aborted + 'no eligible task' records are excluded too", () => {
+    const host = makeFixtureHost([
+      { ts: isoMinusHours(1), verdict: "validated" },
+      { ts: isoMinusHours(1), verdict: "aborted", notes: "no eligible task" },
+      { ts: isoMinusHours(1), verdict: "aborted", notes: "no eligible task" },
+    ]);
+    const { stdout } = run(["--window=10h", "--json", "--host-dir", host, "--now", NOW], host);
+    const [w] = JSON.parse(stdout);
+    expect(w.total).toBe(1);
+    expect(w.successful).toBe(1);
+    expect(w.ratio).toBe(1);
+  });
+
+  test("aborted records with other notes still count as failed iterations", () => {
+    const host = makeFixtureHost([
+      { ts: isoMinusHours(1), verdict: "validated" },
+      { ts: isoMinusHours(1), verdict: "aborted", notes: "invariant failed: git tree dirty" },
+    ]);
+    const { stdout } = run(["--window=10h", "--json", "--host-dir", host, "--now", NOW], host);
+    const [w] = JSON.parse(stdout);
+    expect(w.total).toBe(2);
+    expect(w.successful).toBe(1);
+    expect(w.ratio).toBe(0.5);
+  });
+
+  test("window with only drained records reports no-recent-data, not 0%", () => {
+    const host = makeFixtureHost([
+      { ts: isoMinusHours(1), verdict: "drained", notes: "no eligible task" },
+      { ts: isoMinusDays(20), verdict: "validated" },
+    ]);
+    const { stdout } = run(["--window=10h", "--json", "--host-dir", host, "--now", NOW], host);
+    const [w] = JSON.parse(stdout);
+    expect(w.total).toBe(0);
+    expect(w.ratio).toBeNull();
+    expect(w.source).toBe("no-recent-data");
+  });
+});

@@ -9,7 +9,8 @@
 #   (stability.mjs, iteration-ship-rate.ts, competitive-benchmark, etc).
 # - Per-host write path: `<host>/.minsky/experiment-store/cross-repo/<task-id>.jsonl`.
 # - --dry-run never spawns openhands and emits `verdict: "planned"`.
-# - Empty TASKS.md hosts emit `verdict: "aborted"` with `notes: "no eligible task"`.
+# - Empty TASKS.md hosts emit `verdict: "drained"` with `notes: "no eligible task"`
+#   (a bookkeeping event, excluded from the stability SLI denominator).
 # - --self-check exits 0 even when openhands isn't installed (operator-friendly).
 # - The picker is invoked with `--open-pr-branches=` so the daemon
 #   self-heals after a salvage-merge (2026-05-16 example-service-plugin
@@ -177,21 +178,21 @@ EOF
 
 # --- 5. No-eligible-task path ---------------------------------------------
 
-@test "empty TASKS.md produces 'aborted' verdict with no-eligible-task note" {
+@test "empty TASKS.md produces 'drained' verdict with no-eligible-task note" {
   host="$(make_host empty "$(printf '# Tasks\n\n## P0\n\n')")"
   run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
   [ "$status" -eq 0 ]
   jsonl="$host/.minsky/experiment-store/cross-repo/_no-task.jsonl"
   [ -f "$jsonl" ]
   line="$(head -1 "$jsonl")"
-  [ "$(echo "$line" | jq -r .verdict)" = "aborted" ]
+  [ "$(echo "$line" | jq -r .verdict)" = "drained" ]
   [ "$(echo "$line" | jq -r .experiment_id)" = "" ]
   [[ "$(echo "$line" | jq -r .notes)" == *"no eligible task"* ]]
 }
 
-@test "empty host writes exactly 1 aborted record per pass even when iterations-per-host>1" {
+@test "empty host writes exactly 1 drained record per pass even when iterations-per-host>1" {
   # Skip-empty-hosts behaviour: when a host has no eligible task, the
-  # walker breaks the inner round-robin loop after recording ONE aborted
+  # walker breaks the inner round-robin loop after recording ONE drained
   # record, instead of emitting iterations-per-host copies. Matches the
   # TypeScript host-walker.ts implementation (rule #1 — port behavior).
   host="$(make_host empty "$(printf '# Tasks\n\n## P0\n\n')")"
