@@ -11,9 +11,16 @@
 
 import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ROOT = process.cwd();
+// Sibling minsky scripts resolve against THIS file's directory, not the
+// cwd: `ROOT` is the host repo being measured (any bootstrapped repo),
+// while the collector pipeline ships with minsky. Resolving siblings
+// via cwd silently broke every python/node sub-collector when run from
+// a non-minsky host (FileNotFound -> null -> honest-but-empty values).
+const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 const TODAY = new Date().toISOString().slice(0, 10);
 const SNAPSHOT_DIR = resolve(ROOT, ".minsky/metric-snapshots");
 
@@ -47,7 +54,7 @@ function collectLoopUptime() {
   try {
     const stdout = execFileSync(
       "node",
-      ["scripts/stability-report.mjs", "--window=30d", "--json"],
+      [join(SCRIPTS_DIR, "stability-report.mjs"), "--window=30d", "--json"],
       { cwd: ROOT, encoding: "utf8", timeout: 5_000 },
     );
     const parsed = JSON.parse(stdout);
@@ -88,7 +95,7 @@ function collectCrossRepoPrRate() {
   try {
     const stdout = execFileSync(
       "node",
-      ["scripts/check-cross-repo-pr-rate.mjs", "--window=30d", "--json"],
+      [join(SCRIPTS_DIR, "check-cross-repo-pr-rate.mjs"), "--window=30d", "--json"],
       { cwd: ROOT, encoding: "utf8", timeout: 5_000 },
     );
     const parsed = JSON.parse(stdout);
@@ -136,7 +143,9 @@ function collectSpecAlignment() {
 
 /** dep-interface-coverage: run the rule-2 check */
 function collectDepInterfaceCoverage() {
-  const result = run("node scripts/check-rule-2-dep-coverage.mjs 2>&1");
+  const result = run(
+    `node ${JSON.stringify(join(SCRIPTS_DIR, "check-rule-2-dep-coverage.mjs"))} 2>&1`,
+  );
   if (result === null) return null;
   const pass =
     result.includes("pass") ||
@@ -193,7 +202,9 @@ function collectMttrSelfHeal() {
   // shape as the populated path closes Phase 1 success criterion #4
   // of `agents-can-self-heal-minsky-m1-13` (TASKS.md) which calls for
   // "a real number (not the OTEL-blocked stub)".
-  const raw = run("node scripts/heal-mttr-report.mjs --window=30d --json");
+  const raw = run(
+    `node ${JSON.stringify(join(SCRIPTS_DIR, "heal-mttr-report.mjs"))} --window=30d --json`,
+  );
   if (raw === null) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -367,14 +378,14 @@ function collectFleetStabilityAggregated() {
   const hostsDir = process.env["MINSKY_HOSTS_DIR"];
   if (!hostsDir) return formatFleetStability(undefined, null);
   const data = /** @type {Parameters<typeof formatFleetStability>[1]} */ (
-    runPyJson("scripts/transform_knowledge.py", ["--hosts-dir", hostsDir, "--json"])
+    runPyJson(join(SCRIPTS_DIR, "transform_knowledge.py"), ["--hosts-dir", hostsDir, "--json"])
   );
   return formatFleetStability(hostsDir, data);
 }
 
 function collectSessionConvertsRepo() {
   const data = /** @type {Parameters<typeof formatSessionConvertsRepo>[0]} */ (
-    runPyJson("scripts/transform_trend.py", ["--repo", ROOT, "--json"])
+    runPyJson(join(SCRIPTS_DIR, "transform_trend.py"), ["--repo", ROOT, "--json"])
   );
   return formatSessionConvertsRepo(data);
 }
@@ -486,7 +497,7 @@ function collectPathALoc(subtree) {
 
 function collectBaselineDeltaPerCycle() {
   const data = /** @type {Parameters<typeof formatBaselineDeltaPerCycle>[0]} */ (
-    runPyJson("scripts/transform_trend.py", ["--repo", ROOT, "--json"])
+    runPyJson(join(SCRIPTS_DIR, "transform_trend.py"), ["--repo", ROOT, "--json"])
   );
   return formatBaselineDeltaPerCycle(data);
 }
