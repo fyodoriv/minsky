@@ -5,9 +5,13 @@
 // bin-minsky-multi-agent-safety.test.ts` tests `reset-host-if-crashed`:
 // spawn the real `bin/minsky` with a fabricated PATH whose `pgrep` /
 // `pkill` / `launchctl` are deterministic mocks. `kill` is a bash
-// builtin (can't be PATH-mocked), so the per-host happy path uses REAL
-// throwaway `sleep` processes as the target pids and asserts they are
-// actually terminated — the real SIGTERM path, end to end.
+// builtin (so PATH-mocking won't reach it), and we can't rely on real
+// cross-process SIGTERM either — macOS process restrictions deny EPERM
+// when a bash subprocess tries to signal a node-spawned sibling
+// (reproduces 100% under the Claude Code sandbox and under launchd
+// child contexts; the pgrep-mock-mismatch task documents this). We
+// override `kill` via a BASH_ENV-loaded shell function instead, which
+// records each invocation to a log the test asserts against.
 //
 // Hypothesis (rule #9): `minsky stop --host <dir>` SIGTERMs ONLY the
 // minsky-run whose argv carries the matching `--host`, leaving every
@@ -85,19 +89,26 @@ function spawnSleeper() {
 }
 
 /**
- * Build a tmp dir holding mock `pgrep` / `pkill` / `launchctl` binaries.
- * `pgrep` emits the PIDs registered for the matched `--host <dir>`
- * pattern; with `-af` it emits a fake `ps`-style line per host so the
- * no-filter banner has something to list. `pkill` / `launchctl`
- * invocations are appended to `calls.log` for assertion. `launchctl
- * list` emits nothing, so the global path's bootout is a no-op.
+ * Build a tmp dir holding mock `pgrep` / `pkill` / `launchctl` binaries
+ * and a BASH_ENV file that overrides the `kill` bash builtin with a
+ * shell function. `pgrep` emits the PIDs registered for the matched
+ * `--host <dir>` pattern; with `-af` it emits a fake `ps`-style line
+ * per host so the no-filter banner has something to list. `pkill` /
+ * `launchctl` invocations are appended to `calls.log` for assertion.
+ * `launchctl list` emits nothing, so the global path's bootout is a
+ * no-op. Every `kill -<sig> <pid>` the shim invokes is appended to
+ * `kill.log` instead of being delivered as a real signal — works
+ * regardless of whether the host kernel would allow a bash subprocess
+ * to signal node-spawned siblings.
  *
  * @param {{ hostPids: Record<string, number[] | string[]>, allHosts?: string[] }} cfg
  */
 function makeMockBin(cfg) {
   const binDir = mkdtempSync(join(tmpdir(), "minsky-stop-bin-"));
   const callsLog = join(binDir, "calls.log");
+  const killLog = join(binDir, "kill.log");
   writeFileSync(callsLog, "");
+  writeFileSync(killLog, "");
 
   const hostBranches = Object.entries(cfg.hostPids)
     .map(([dir, pids]) => `    *"--host ${dir}"*) ${pids.map((p) => `echo "${p}"`).join("; ")} ;;`)
@@ -130,10 +141,24 @@ exit 0
     chmodSync(join(binDir, f), 0o755);
   }
 
+  // BASH_ENV-loaded `kill` mock. Bash sources BASH_ENV at startup for
+  // every non-interactive shell, so this function is in scope before
+  // the shim's first `set -euo pipefail`. The function records args
+  // and returns 0 — the shim's `if kill -TERM "$pid" ...; then` branch
+  // counts the kill as delivered.
+  const bashEnv = join(binDir, "bash-env.sh");
+  writeFileSync(
+    bashEnv,
+    `kill() {\n  echo "kill $*" >> "${killLog}"\n  return 0\n}\nexport -f kill\n`,
+  );
+
   return {
     binDir,
     callsLog,
+    killLog,
+    bashEnv,
     readCalls: () => readFileSync(callsLog, "utf8"),
+    readKills: () => readFileSync(killLog, "utf8"),
   };
 }
 
@@ -153,6 +178,7 @@ function runStop(args, opts) {
       ...process.env,
       PATH: `${opts.binDir}:${process.env.PATH ?? ""}`,
       MINSKY_STATE_DIR: stateDir,
+      BASH_ENV: join(opts.binDir, "bash-env.sh"),
       ...(opts.env ?? {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -160,33 +186,32 @@ function runStop(args, opts) {
 }
 
 describe("minsky stop --host <dir> — per-host kill switch", () => {
-  test("SIGTERMs only the minsky-run matching the --host dir; other host survives", async () => {
-    // Two real sleepers stand in for host-a's runner; one for host-b.
-    const a1 = spawnSleeper();
-    const a2 = spawnSleeper();
-    const b = spawnSleeper();
+  test("SIGTERMs only the minsky-run matching the --host dir; other host untouched", () => {
+    // Fake PIDs: the BASH_ENV-loaded `kill` mock records args instead
+    // of signalling, so we verify intent (the shim invoked `kill -TERM`
+    // on exactly the matched-host PIDs) rather than signal delivery
+    // (which a node-spawned sibling can't observe under macOS process
+    // restrictions / sandboxed test runners).
+    const aPids = [990001, 990002];
+    const bPid = 990003;
     const hostA = mkdtempSync(join(tmpdir(), "host-a-"));
     const hostB = mkdtempSync(join(tmpdir(), "host-b-"));
     const mock = makeMockBin({
-      hostPids: { [canonical(hostA)]: [a1.pid, a2.pid], [canonical(hostB)]: [b.pid] },
+      hostPids: { [canonical(hostA)]: aPids, [canonical(hostB)]: [bPid] },
     });
 
     const out = runStop(["--host", hostA], { binDir: mock.binDir });
 
-    expect(out).toContain(`pid ${a1.pid}`);
-    expect(out).toContain(`pid ${a2.pid}`);
+    expect(out).toContain(`pid ${aPids[0]}`);
+    expect(out).toContain(`pid ${aPids[1]}`);
     expect(out).toContain("SIGTERM sent to 2 runner(s)");
     expect(out).toContain("other hosts untouched");
 
-    // host-a's sleepers die; host-b's survives. Poll the event loop so
-    // the children's `exit` events are delivered (SIGTERM is async).
-    const deadline = Date.now() + 3000;
-    while ((a1.isAlive() || a2.isAlive()) && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    expect(a1.isAlive()).toBe(false);
-    expect(a2.isAlive()).toBe(false);
-    expect(b.isAlive()).toBe(true);
+    // The shim's `kill -TERM` ran for both host-a pids and nothing else.
+    const kills = mock.readKills();
+    expect(kills).toContain(`kill -TERM ${aPids[0]}`);
+    expect(kills).toContain(`kill -TERM ${aPids[1]}`);
+    expect(kills).not.toContain(`kill -TERM ${bPid}`);
 
     // No global pkill, no launchd bootout in --host mode.
     const calls = mock.readCalls();

@@ -573,21 +573,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P1
 
-- [ ] `minsky-stop-host-pgrep-mock-mismatch` — `bin/minsky.test.mjs` "SIGTERMs only the minsky-run matching the --host dir" fails deterministically on origin/main; mock pgrep emits 0 PIDs
-  - **ID**: minsky-stop-host-pgrep-mock-mismatch
-  - **Tags**: p1, stability, test-flake, observed-2026-06-10
-  - **Milestone**: M1
-  - **Touches**: `bin/minsky` (`stop` subcommand), `bin/minsky.test.mjs` (mock pgrep)
-  - **Competitive-goal**: protects `autonomous-merge-rate` — a silently-broken `stop --host` SIGTERMs zero runners and leaves stale daemons consuming worker slots, which throttles concurrent throughput on the leaderboard run.
-  - **Hypothesis**: the `bin/minsky stop --host <dir>` shim no longer passes the canonical host path as the LAST argv element to `pgrep -f`, so the test's mock pgrep (which keys on `"${@: -1}"`) takes the default `*) ;;` branch and emits zero PIDs — making the shim report `SIGTERM sent to 0 runner(s)`. Either the shim was refactored to pass the pattern in a different position, or the mock's `pat="${@: -1}"` heuristic needs to grep `$*` for `--host <dir>` instead. Aligning the two restores the assertion.
-  - **Success**: `pnpm vitest run bin/minsky.test.mjs -t "SIGTERMs only the minsky-run"` exits 0 in three consecutive runs on origin/main without retries.
-  - **Pivot**: if the shim's argv shape is intentionally divergent (e.g. now uses `--exact` semantics that drop `--host` from the pattern), retire the host-filter mock entirely and add a real-process integration test under `test/integration/` that spawns a sleeper carrying the same argv the production runner carries.
-  - **Measurement**: `for i in 1 2 3; do pnpm vitest run bin/minsky.test.mjs -t "SIGTERMs only the minsky-run" 2>&1 | grep -c "1 failed"; done` prints `0\n0\n0`.
-  - **Anchor**: AGENTS.md §3b "CLI integration tests" + rule #6 (let-it-crash at the right boundary — a host-scoped kill that drops to 0 is a silent-failure regression).
-  - **Details**: Surfaced 2026-06-10 while running `pnpm check` from this worktree on the `dangerous-bash-guard-script-indirect-gap` PR. Test fails 3/3 in isolation on the merge base (no recent changes to `bin/minsky.test.mjs` since its introduction in `1038c2df`). Inspect with: `diff <(git show 1038c2df:bin/minsky) bin/minsky` to spot any argv-shape drift in the shim since the mock was written.
-  - **Files**: `bin/minsky`, `bin/minsky.test.mjs`
-  - **Acceptance**: (a) test passes 3/3 consecutive runs; (b) the fix either aligns the mock's argv heuristic with the shim's actual call OR replaces the mock with a real-process fixture; (c) `pnpm check` runs to completion with zero failed tests on a clean clone.
-
 <!-- COHORT: github-issues-task-source (2026-05-29 operator directive). Teach the daemon
      to pick tasks from GitHub Issues/Projects, not just TASKS.md, so minsky can drive
      hosts that have retired TASKS.md (e.g. managed-host). Pure rule-#2 adapter work:
