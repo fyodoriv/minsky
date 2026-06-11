@@ -16,7 +16,7 @@
 #
 # Probes:
 #   python-version       → prints "X.Y" (e.g. "3.13"); exit 0 if ≥3.10, else 1
-#   openhands-sdk        → exit 0 if `import openhands` succeeds, prints version
+#   openhands-sdk        → exit 0 if resolved python can `import openhands`, prints version
 #   openhands-cli        → exit 0 if `openhands` is on PATH, prints version
 #   syntax <path>        → exit 0 if python3 -m py_compile <path> succeeds
 #   state-dir-writable [dir] → exit 0 if the minsky state dir is writable
@@ -34,6 +34,20 @@ set -euo pipefail
 
 PROBE="${1:-}"
 ARG="${2:-}"
+
+resolve_openhands_python() {
+  if [ -n "${MINSKY_OPENHANDS_PYTHON:-}" ] && [ -x "$MINSKY_OPENHANDS_PYTHON" ]; then
+    echo "$MINSKY_OPENHANDS_PYTHON"
+    return 0
+  fi
+  venv_py="$HOME/.minsky/openhands-venv/bin/python"
+  if [ -x "$venv_py" ]; then
+    echo "$venv_py"
+    return 0
+  fi
+  command -v python3 >/dev/null 2>&1 || return 1
+  command -v python3
+}
 
 case "$PROBE" in
   python-version)
@@ -53,11 +67,11 @@ case "$PROBE" in
     fi
     ;;
   openhands-sdk)
-    if ! command -v python3 >/dev/null 2>&1; then
+    if ! py=$(resolve_openhands_python); then
       exit 1
     fi
-    if python3 -c "import openhands" 2>/dev/null; then
-      ver=$(python3 -c "import openhands; print(getattr(openhands, '__version__', 'unknown'))" 2>/dev/null || echo "unknown")
+    if "$py" -c "import openhands" 2>/dev/null; then
+      ver=$("$py" -c "import openhands; print(getattr(openhands, '__version__', 'unknown'))" 2>/dev/null || echo "unknown")
       echo "$ver"
       exit 0
     fi
