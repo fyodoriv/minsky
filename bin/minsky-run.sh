@@ -1895,6 +1895,17 @@ if [[ "$LOOP_FOREVER" == "1" ]]; then
       continue
     fi
 
+    # Pre-walk self-heal sweep (M1.13 phase 2): fire the catalogued
+    # automated heals (stale-pid / corrupt-state-json /
+    # partial-config-write) before walking, recording HealEvents to
+    # `<home>/.minsky/heal-events.jsonl`. The dispatcher is exit-0-always
+    # by contract (rule #6); `|| true` belts-and-suspenders so a missing
+    # node/script can't kill the supervisor.
+    _minsky_home="${MINSKY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+    node "$(dirname "${BASH_SOURCE[0]}")/../scripts/heal-dispatch.mjs" \
+      --host "$_minsky_home" --boundary pre-walk \
+      2>>"${_minsky_home}/.minsky/tick-loop.err.log" || true
+
     walk_hosts
     walk_exit=$?
     if [[ "$walk_exit" -eq 75 ]]; then
