@@ -22,7 +22,19 @@
 host_repo: "${HOST_REPO}"
 
 # Path (relative to the host repo root) to the host's TASKS.md.
+# Meaningful only when `task_source: tasks-md` (the default).
 tasks_md_path: "${TASKS_MD_PATH}"
+
+# Backend the picker reads work from. One of:
+#   - "tasks-md"      — parse `tasks_md_path` (default; existing behaviour)
+#   - "github-issues" — query `gh issue list` on `host_repo`. Adapter at
+#                       `scripts/gh_issue_task_source.py`. Tasks live as
+#                       issues labelled `priority/P0` / `priority/P1`;
+#                       rule-#9 fields parsed from the issue body using
+#                       the same `**Field**:` regexes as TASKS.md.
+# An unknown value fails loud at picker start. Default `tasks-md` keeps
+# every existing host unchanged.
+task_source: "tasks-md"
 
 # Conventional commit subject template. Placeholders <TYPE> <TICKET>
 # <DESCRIPTION> are substituted by the runner; the host's commitlint
