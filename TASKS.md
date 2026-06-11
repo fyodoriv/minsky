@@ -594,23 +594,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
      interface → github-issues impl → repo.yaml selector. Composes with agentbrew's
      `ghi-task-backend-contract`. Origin: managed-host RFC `github-issues-task-tracking`. -->
 
-- [ ] `ghi-repo-yaml-task-source-field` — add a `task_source: tasks-md | github-issues` field to `.minsky/repo.yaml` so each host selects its backend, and wire the daemon to instantiate the right adapter
-  - **ID**: ghi-repo-yaml-task-source-field
-  - **Tags**: p1, milestone-m1, config, repo-yaml, task-source, github-issues, operator-directive-2026-05-29
-  - **Status**: obsolete — references novel/cross-repo-runner/ which Path A aggressive cut (2026-05-24) deleted. Re-scope to scripts/pick_task.py + bin/minsky-run.sh + .minsky/repo.yaml if a per-host task-backend selector is still needed (a `GhIssueTaskSource` Python adapter now exists at scripts/gh_issue_task_source.py).
-  - **Touches**: <none>
-  - **Milestone**: M1
-  - **Competitive-goal**: makes `task-backend-coverage` operator-selectable per host — an operator flips one field and the daemon drives that host's Issues queue, with `tasks-md` remaining the default so all existing hosts are unaffected.
-  - **Hypothesis**: Selecting the backend per host via the existing `.minsky/repo.yaml` overlay (which already carries `tasks_md_path`) is the lowest-friction switch — the daemon reads `task_source`, instantiates the matching adapter, and the rest of the loop is identical.
-  - **Success**: `.minsky/repo.yaml` accepts `task_source` (default `tasks-md`); the host loop instantiates `task-source.github-issues` when set; `INSTALL.md`/`AGENTS.md` document the field; a host configured with `github-issues` is driven end-to-end (pick → branch → PR with `Closes #N` → issue auto-closes) in an integration test.
-  - **Pivot**: if `repo.yaml` is the wrong layer (e.g. operators want a machine-wide default), fall back to a `~/.minsky/config.json` `default_task_source` with per-repo override, mirroring the existing agent-config resolution precedence.
-  - **Measurement**: `pnpm vitest run novel/cross-repo-runner -t "task_source"` exits 0; `node --input-type=module -e "import('./novel/cross-repo-runner/dist/index.js').then(m=>console.log(typeof m.pickHostTask))"` prints `function` (picker still resolves with the new selector); a github-issues fixture host drives one full iteration in the integration test.
-  - **Anchor**: minsky AGENTS.md § "Per-machine agent config" (the resolution-precedence pattern this mirrors); internal agentbrew task backend contract (same field semantics, kept consistent across tools).
-  - **Details**: Extend the `repo.yaml` schema + loader with `task_source` (validated enum, default `tasks-md`). In `host-loop.ts`, choose the adapter from the field. Keep `tasks_md_path` meaningful only for the tasks-md backend. Document in `INSTALL.md` + `AGENTS.md`. Add an integration test that runs one iteration against a github-issues fixture host.
-  - **Files**: `.minsky/repo.yaml` (schema + example), the repo.yaml loader in `novel/cross-repo-runner/src/`, `novel/cross-repo-runner/src/host-loop.ts` (adapter selection), `INSTALL.md`, `AGENTS.md`, `test/integration/task-source-selection.test.ts` (new).
-  - **Acceptance**: (a) `task_source` validated, defaults to `tasks-md`; (b) daemon instantiates the github-issues adapter when set; (c) docs updated; (d) end-to-end integration test green; (e) existing tasks-md hosts unaffected; (f) `pnpm pre-pr-lint --stage=fast` exits 0.
-  - **Composes-with**: internal agentbrew task backend contract; managed-host-plugin + managed-host-api-deployment cutover tasks (their `.minsky/repo.yaml` flips to `github-issues` once this ships).
-
 - [ ] `path-a-phase-13-agentbrew-discipline-pack-catalog-entry` — add a `minsky-discipline-pack` source entry to the agentbrew catalog so `agentbrew install minsky-discipline-pack` works. This is the third sub-deliverable of the parent path-a-phase-13 identity-promotion task; not strictly required for the README/vision rewrite (split off 2026-05-28) but completes the parent's full scope. Touches the agentbrew catalog repo, not this repo.
   - **ID**: path-a-phase-13-agentbrew-discipline-pack-catalog-entry
   - **Tags**: p1, milestone-m1, rule-1, path-a, agentbrew-catalog, observed-2026-05-28

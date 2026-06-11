@@ -225,6 +225,17 @@ Next: add tasks to <HOST_PATH>/TASKS.md with the rule-9 fields documented at
 
 Then exit cleanly. Do not pick a task from the operator's host repo. Do not modify code in the host repo. Do not push to any remote. The daemon is now running and will do that work itself in the background.
 
+### Switching a host to GitHub Issues (optional)
+
+Each host's `.minsky/repo.yaml` carries a `task_source` field. Default `tasks-md` parses the host's `TASKS.md`. Set it to `github-issues` to have the daemon pick work from `gh issue list` instead (issues labelled `priority/P0` / `priority/P1`, with the rule-#9 fields in the issue body):
+
+```bash
+# <HOST_PATH>/.minsky/repo.yaml
+task_source: "github-issues"
+```
+
+No other field changes. The daemon's PR carries `Closes #N` which auto-closes the source issue on merge (GitHub default-branch close keywords). The adapter is at [`scripts/gh_issue_task_source.py`](scripts/gh_issue_task_source.py); the field is documented in [`templates/repo.yaml`](templates/repo.yaml).
+
 ## What if something fails?
 
 | Failure mode | Diagnosis | Fix |
