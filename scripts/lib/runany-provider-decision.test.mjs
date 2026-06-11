@@ -36,10 +36,10 @@ describe("decideRunAnyProvider — operator pin", () => {
     const result = decideRunAnyProvider({
       remaining: EXHAUSTED,
       remoteBackends: [{ id: "claude", reachable: false, reason: "401" }],
-      operatorPin: "claude-opus-4-7",
+      operatorPin: "claude-sonnet-4-6",
     });
     expect(result.kind).toBe("operator-pin");
-    expect(result.model).toBe("claude-opus-4-7");
+    expect(result.model).toBe("claude-sonnet-4-6");
   });
 
   it("ignores empty-string pin and falls through to the dynamic walk", () => {
@@ -100,15 +100,15 @@ describe("decideRunAnyProvider — dynamic (delegates to picker)", () => {
 });
 
 describe("pickStrategicModel — catalog walk", () => {
-  it("returns tier-1 (opus) at full budget", () => {
+  it("returns tier-1 (sonnet-4-6, the canonical worker model) at full budget", () => {
     const result = pickStrategicModel({ remaining: FULL_BUDGET });
     expect(result.kind).toBe("strategic-router");
-    expect(result.model).toBe("claude-opus-4-7");
+    expect(result.model).toBe("claude-sonnet-4-6");
   });
 
   it("returns lowest-tier (local) when budget is exhausted (all floors fail)", () => {
     const result = pickStrategicModel({ remaining: EXHAUSTED });
-    // At 5% remaining, none of opus/sonnet qualify; only local (zero floors) does.
+    // At 5% remaining, sonnet does not qualify; only local (zero floors) does.
     expect(["strategic-router", "fallback"]).toContain(result.kind);
     expect(result.model).toBe("local");
   });
@@ -116,10 +116,10 @@ describe("pickStrategicModel — catalog walk", () => {
   it("honors operator pin and bypasses the catalog walk", () => {
     const result = pickStrategicModel({
       remaining: EXHAUSTED,
-      operatorPin: "claude-opus-4-7",
+      operatorPin: "claude-sonnet-4-6",
     });
     expect(result.kind).toBe("operator-pin");
-    expect(result.model).toBe("claude-opus-4-7");
+    expect(result.model).toBe("claude-sonnet-4-6");
   });
 
   it("uses MODEL_CATALOG default when no catalog provided", () => {

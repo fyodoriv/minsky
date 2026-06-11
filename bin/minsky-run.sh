@@ -856,7 +856,7 @@ EOF
   fi
 
   local model
-  model="$(jq -r '.openhands.model // "claude-opus-4-7"' "$CONFIG_FILE" 2>/dev/null || echo "claude-opus-4-7")"
+  model="$(jq -r '.openhands.model // "claude-sonnet-4-6"' "$CONFIG_FILE" 2>/dev/null || echo "claude-sonnet-4-6")"
 
   # ──────────────────────────────────────────────────────────────────
   # Run-anywhere provider decision (runany-dynamic-model-or-local-fallback,
@@ -1545,7 +1545,7 @@ print(load_host_config(Path('$host')).host_repo)
   local gh_host
   gh_host="$(resolve_gh_host_for "$host")"
   local model
-  model="$(jq -r '.openhands.model // "claude-opus-4-7"' "$CONFIG_FILE" 2>/dev/null || echo "claude-opus-4-7")"
+  model="$(jq -r '.openhands.model // "claude-sonnet-4-6"' "$CONFIG_FILE" 2>/dev/null || echo "claude-sonnet-4-6")"
 
   # Same env vars as a regular iteration so the agent's host-side
   # rule lints work (parity port from PR #853).
