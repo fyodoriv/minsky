@@ -457,12 +457,22 @@ export const STACK_MANIFEST = Object.freeze([
     env: { LINT_MD_DIFF_BASE: "origin/main" },
   },
   {
+    // Vendored as a devDependency (see package.json) so the gate calls the
+    // local `tasks-lint` binary instead of `npx -y @tasks-md/lint@^0.7.0`.
+    // The npx form shared `/tmp/npm-cache-minsky` across concurrent sessions:
+    // libnpmexec's with-lock touch-loop detected sibling lock-steals and
+    // aborted with `npm error ECOMPROMISED: Lock compromised`, intermittently
+    // failing the stop-gate on a content-clean TASKS.md (observed 2026-06-10,
+    // three concurrent `npm exec @tasks-md/lint` processes). Vendoring
+    // eliminates the shared-cache lock dependency entirely and drops the
+    // cold-reify tax (~88 s) to <1 s. Source: TASKS.md
+    // `tasks-lint-npx-lock-contention-flakes-stop-gate`; Nygard, *Release It!*
+    // (2018) Ch. 4 (bulkhead the shared mutable resource); vision.md rule #10
+    // (deterministic gates: same input → same verdict).
     name: "tasks-lint",
     stages: ["stop-gate", "fast", "full"],
-    cmd: "npx",
-    args: ["-y", "@tasks-md/lint@^0.7.0", "TASKS.md"],
-    // Use a writable temp cache in case ~/.npm has root-owned files (sandbox EPERM).
-    env: { NPM_CONFIG_CACHE: "/tmp/npm-cache-minsky" },
+    cmd: "pnpm",
+    args: ["exec", "tasks-lint", "TASKS.md"],
   },
   {
     name: "rule-2-dep-coverage",
