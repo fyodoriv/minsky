@@ -66,6 +66,9 @@ importers:
       '@semantic-release/release-notes-generator':
         specifier: 14.1.1
         version: 14.1.1(semantic-release@25.0.5(typescript@6.0.3))
+      '@tasks-md/lint':
+        specifier: ^0.7.0
+        version: 0.7.0
       '@types/node':
         specifier: 25.9.2
         version: 25.9.2
@@ -1154,6 +1157,15 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@tasks-md/lint@0.7.0':
+    resolution: {integrity: sha512-amERzHJd2u1qWlT3i9G8tEhKxqNzizPhQ54TmMs4slaERh/StfSZxuA6dCUXX1OYF1UFbMb6jLhosgrSktL3oQ==}
+    engines: {node: '>=18'}
+    hasBin: true
+
+  '@tasks-md/parser@0.7.0':
+    resolution: {integrity: sha512-XhW8OkoVP706MdJC4Muy97KFsDfZpa7PokcNIG+1mRnpqIm+svIck9ewPoSNTZq8jgLOSAdbBSvwoDuXwOOHhg==}
+    engines: {node: '>=18'}
 
   '@tybys/wasm-util@0.10.2':
     resolution: {integrity: sha512-RoBvJ2X0wuKlWFIjrwffGw1IqZHKQqzIchKaadZZfnNpsAYp2mM0h36JtPCjNDAHGgYez/15uMBpfGwchhiMgg==}
@@ -3762,6 +3774,12 @@ snapshots:
   '@stablelib/base64@1.0.1': {}
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@tasks-md/lint@0.7.0':
+    dependencies:
+      '@tasks-md/parser': 0.7.0
+
+  '@tasks-md/parser@0.7.0': {}
 
   '@tybys/wasm-util@0.10.2':
     dependencies:
