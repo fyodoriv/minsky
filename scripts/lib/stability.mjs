@@ -51,8 +51,32 @@ export function windowToMs(label) {
 /**
  * @typedef {object} IterationRecord
  * @property {string} ts ISO-8601 timestamp
- * @property {string} [verdict] "validated" | "spawn-failed" | "scope-leak" | ...
+ * @property {string} [verdict] "validated" | "spawn-failed" | "scope-leak" | "drained" | ...
+ * @property {string} [notes] free-text breadcrumb written by the runner
  */
+
+/**
+ * A record counts toward the stability SLI only when it represents the
+ * runner actually attempting a task. Drained-queue ticks ("no eligible
+ * task") are bookkeeping events, not iterations: counting them in the
+ * denominator poisons stability with idle-time noise (observed 2026-06-10:
+ * ~6000 drained records vs 10 real iterations over 2 days → 24h stability
+ * read 0% while the true task-attempt ratio was non-zero). Valid-event
+ * qualification per Beyer et al. 2016, *SRE*, Ch. 4 — an SLI must define
+ * which received events count as valid before computing the ratio.
+ *
+ * Verdict `drained` is the canonical marker (bin/minsky-run.sh, 2026-06-11);
+ * the legacy shape (`verdict: "aborted"` + `notes: "no eligible task"`) is
+ * excluded too so historical ledgers compute correctly.
+ *
+ * @param {IterationRecord} record
+ * @returns {boolean}
+ */
+export function isTaskAttempt(record) {
+  if (record.verdict === "drained") return false;
+  if (record.verdict === "aborted" && record.notes === "no eligible task") return false;
+  return true;
+}
 
 /**
  * Parse a single .jsonl file into an array of records. Malformed lines
@@ -124,7 +148,7 @@ export function computeStabilityForWindow({ records, windowLabel, now, sourceWhe
   const cutoff = now - windowMs;
   const inWindow = records.filter((r) => {
     const ts = new Date(r.ts).getTime();
-    return Number.isFinite(ts) && ts >= cutoff;
+    return Number.isFinite(ts) && ts >= cutoff && isTaskAttempt(r);
   });
   if (inWindow.length === 0) {
     return {

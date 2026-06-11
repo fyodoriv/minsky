@@ -691,11 +691,16 @@ print(load_host_config(Path('$host')).host_repo)
   rm -f "$all_prs_json"
 
   if [[ -z "$task_id" ]]; then
-    record_iteration "$host" "$iter_n" "" "" "aborted" "" "no eligible task" "$gh_host"
+    # Verdict `drained` (not `aborted`): a drained queue is a bookkeeping
+    # event, not a failed iteration. `scripts/lib/stability.mjs` excludes
+    # drained records from the stability SLI denominator (valid-event
+    # qualification — Beyer et al. 2016, *SRE*, Ch. 4). Recording it as
+    # `aborted` poisoned 24h stability to 0% with ~1800 idle records/day.
+    record_iteration "$host" "$iter_n" "" "" "drained" "" "no eligible task" "$gh_host"
     echo "no eligible task in $host" >&2
     # Return non-zero so walk_hosts() breaks the inner loop and moves
     # to the next host instead of burning N round-robin slots emitting
-    # repeated "aborted" records (matches host-walker.ts).
+    # repeated "drained" records (matches host-walker.ts).
     return 1
   fi
 
@@ -1881,6 +1886,13 @@ if [[ "$LOOP_FOREVER" == "1" ]]; then
   outer_sleep_seconds=$(( TICK_INTERVAL_MS > 0 ? TICK_INTERVAL_MS / 1000 : 5 ))
   [[ "$outer_sleep_seconds" -lt 1 ]] && outer_sleep_seconds=1
   _consecutive_fail_walks=0
+  # Idle-walk backoff (drained-queue-not-an-iteration): a walk that
+  # completed zero iterations because every host's queue is drained
+  # should not re-poll at the 5s base cadence — that hot loop emitted
+  # ~1800 drained records/day and burned gh API calls while the queue
+  # was empty. Same exponential shape as the spawn-fail backoff below
+  # (5s → 10s → … capped at 300s); any completed iteration resets it.
+  _consecutive_idle_walks=0
   while true; do
     # Load-gate: skip the walk when the host is oversubscribed.
     # MINSKY_LOAD_GATE_SLEEP_S: how long to wait before re-checking load
@@ -1895,26 +1907,49 @@ if [[ "$LOOP_FOREVER" == "1" ]]; then
       continue
     fi
 
+    _completed_before_walk=$COMPLETED_COUNT
     walk_hosts
     walk_exit=$?
     if [[ "$walk_exit" -eq 75 ]]; then
       exit 75
     fi
 
-    # Count consecutive all-spawn-fail walks for backoff.
+    # Count consecutive all-spawn-fail walks for backoff. Drained
+    # verdicts are bookkeeping (like aborted) — they must not reset
+    # the spawn-fail counter.
     _tick_log="${MINSKY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/.minsky/tick-loop.err.log"
-    _this_walk_verdicts="$(grep -oE 'verdict=[a-z-]+' "$_tick_log" 2>/dev/null | tail -$(( ITERATIONS_PER_HOST * 2 )) | grep -v 'verdict=aborted' | sort -u)"
+    _this_walk_verdicts="$(grep -oE 'verdict=[a-z-]+' "$_tick_log" 2>/dev/null | tail -$(( ITERATIONS_PER_HOST * 2 )) | grep -vE 'verdict=(aborted|drained)' | sort -u)"
     if [[ -n "$_this_walk_verdicts" ]] && echo "$_this_walk_verdicts" | grep -qvE '^verdict=spawn-failed$'; then
       _consecutive_fail_walks=0
     elif echo "$_this_walk_verdicts" | grep -q 'verdict=spawn-failed'; then
       _consecutive_fail_walks=$(( _consecutive_fail_walks + 1 ))
     fi
 
-    # Exponential backoff: 5 × 2^N capped at 300s.
+    # Count consecutive idle (zero-completed-iteration) walks: drained
+    # queues should poll progressively slower, not at the 5s base cadence.
+    if [[ "$COMPLETED_COUNT" -eq "$_completed_before_walk" && "$_consecutive_fail_walks" -eq 0 ]]; then
+      _consecutive_idle_walks=$(( _consecutive_idle_walks + 1 ))
+    else
+      _consecutive_idle_walks=0
+    fi
+
+    # Exponential backoff: 5 × 2^N capped at 300s. The shift exponent is
+    # clamped at 8 (5 × 2^8 = 1280 > 300 already) so a long overnight
+    # chain of idle walks can't overflow 64-bit arithmetic into a
+    # negative sleep (which would crash the loop under `set -e`).
     if [[ "$_consecutive_fail_walks" -gt 0 ]]; then
-      _backoff_s=$(( outer_sleep_seconds * (1 << _consecutive_fail_walks) ))
+      _shift_n=$_consecutive_fail_walks
+      [[ "$_shift_n" -gt 8 ]] && _shift_n=8
+      _backoff_s=$(( outer_sleep_seconds * (1 << _shift_n) ))
       [[ "$_backoff_s" -gt 300 ]] && _backoff_s=300
       echo "loop: ${_consecutive_fail_walks} consecutive all-spawn-fail walk(s) — backing off ${_backoff_s}s" >&2
+      sleep "$_backoff_s"
+    elif [[ "$_consecutive_idle_walks" -gt 0 ]]; then
+      _shift_n=$_consecutive_idle_walks
+      [[ "$_shift_n" -gt 8 ]] && _shift_n=8
+      _backoff_s=$(( outer_sleep_seconds * (1 << _shift_n) ))
+      [[ "$_backoff_s" -gt 300 ]] && _backoff_s=300
+      echo "loop: ${_consecutive_idle_walks} consecutive idle (drained-queue) walk(s) — backing off ${_backoff_s}s" >&2
       sleep "$_backoff_s"
     else
       sleep "$outer_sleep_seconds"
