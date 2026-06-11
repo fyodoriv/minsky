@@ -652,12 +652,42 @@ iterate_host() {
   local all_prs_json
   all_prs_json="$(mktemp -t minsky-run-prs-XXXXXX.json)"
   dump_all_prs_json "$host" "$all_prs_json" "$gh_host"
+  # Resolve the host's task source from .minsky/repo.yaml. Defaults to
+  # `tasks-md` when the field is absent — every existing host stays
+  # unchanged. `github-issues` routes the picker through the gh adapter
+  # in `scripts/gh_issue_task_source.py` (rule #2 — port + impl).
+  local task_source host_repo_id
+  task_source="$(python3 -c "
+import sys
+from pathlib import Path
+sys.path.insert(0, '$(dirname "${BASH_SOURCE[0]}")/../scripts')
+from build_brief import load_host_config
+cfg = load_host_config(Path('$host'))
+print(cfg.task_source)
+" 2>/dev/null || echo "tasks-md")"
+  host_repo_id="$(python3 -c "
+import sys
+from pathlib import Path
+sys.path.insert(0, '$(dirname "${BASH_SOURCE[0]}")/../scripts')
+from build_brief import load_host_config
+print(load_host_config(Path('$host')).host_repo)
+" 2>/dev/null || echo "")"
   local task_id
-  task_id="$(python3 "$(dirname "${BASH_SOURCE[0]}")/../scripts/pick_task.py" \
-    "$host/TASKS.md" \
-    "--open-pr-branches=${open_branches}" \
-    "--all-prs-json=${all_prs_json}" \
-    2>/dev/null || true)"
+  if [[ "$task_source" == "github-issues" ]]; then
+    task_id="$(python3 "$(dirname "${BASH_SOURCE[0]}")/../scripts/pick_task.py" \
+      "$host/TASKS.md" \
+      "--task-source=github-issues" \
+      "--gh-issues-repo=${host_repo_id}" \
+      "--open-pr-branches=${open_branches}" \
+      "--all-prs-json=${all_prs_json}" \
+      2>/dev/null || true)"
+  else
+    task_id="$(python3 "$(dirname "${BASH_SOURCE[0]}")/../scripts/pick_task.py" \
+      "$host/TASKS.md" \
+      "--open-pr-branches=${open_branches}" \
+      "--all-prs-json=${all_prs_json}" \
+      2>/dev/null || true)"
+  fi
   rm -f "$all_prs_json"
 
   if [[ -z "$task_id" ]]; then

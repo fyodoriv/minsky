@@ -92,6 +92,17 @@ Backward-compat flag-style entrypoints (`minsky --daemon`, `--once`, `--transfor
 
 The `openhands` row reflects an operator-approved wrap-feasibility decision per `competitors/openhands.md` § "Should we wrap OpenHands instead?" (Shape A: agent-layer wrap as pluggable backend). Implementation tracked at [`add-openhands-as-pluggable-backend`](TASKS.md) (P0). The schema half ships now via `novel/cross-repo-runner/src/agent-config.ts` → `AGENT_MATRIX` (the 4th row carries `pendingExternalDep: "2026-06-01"`); the daemon REFUSES to spawn under `cloud_agent: "openhands"` until that date, exiting `EX_USAGE` (64) with an actionable error that names the GHE issue and the fallback agents. On June 1 the `pendingExternalDep` flag flips to `null` and the same code path becomes live.
 
+### Per-host overlay — `<host>/.minsky/repo.yaml`
+
+The daemon reads `<host>/.minsky/repo.yaml` once per iteration to learn how to drive that host. The `task_source` field selects which backend the picker reads work from:
+
+| Value | Backend | Notes |
+|---|---|---|
+| `tasks-md` (default) | parses `tasks_md_path` (`TASKS.md` by default) | every existing host, no migration needed |
+| `github-issues` | `gh issue list` on `host_repo`, P0/P1 labels | adapter at `scripts/gh_issue_task_source.py`; rule-#9 fields parsed from the issue body |
+
+An unknown value fails loud at picker start — a typo never silently reverts to `tasks-md`. The `Closes #N` keyword on the daemon-authored PR auto-closes the source issue on merge (GitHub default-branch close keywords); the `tasks-md` block on a TASKS.md host is removed by the iteration's normal `chore(tasks): drop shipped <id>` commit. Switching a host's backend is one-line: edit `task_source` and the daemon picks up the change on the next tick.
+
 ## Identity
 
 You're working on **Minsky** — an integration distribution that connects existing tools into a viable cybernetic system that produces software 24/7 and stays alive indefinitely. Minsky is not a framework. We do not build what already exists.

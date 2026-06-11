@@ -112,6 +112,12 @@ def render_persona_overlay(role: str, prior_artifact: str = "") -> str:
     ])
 
 
+# Backends the picker knows how to read work from. `tasks-md` is the
+# default; `github-issues` routes through `scripts/gh_issue_task_source.py`.
+TASK_SOURCES = ("tasks-md", "github-issues")
+DEFAULT_TASK_SOURCE = "tasks-md"
+
+
 class HostConfig(NamedTuple):
     """Subset of `.minsky/repo.yaml` we use when building the brief.
 
@@ -123,13 +129,19 @@ class HostConfig(NamedTuple):
     branch_prefix: str
     pre_commit_command: str
     default_branch: str
+    task_source: str = DEFAULT_TASK_SOURCE
 
 
 def load_host_config(host_dir: Path) -> HostConfig:
     """Load `.minsky/repo.yaml` if present; otherwise return safe defaults.
 
     Defaults: host_repo = basename(host_dir), branch_prefix = "feat/",
-    pre_commit_command = "" (no host hooks), default_branch = "main".
+    pre_commit_command = "" (no host hooks), default_branch = "main",
+    task_source = "tasks-md".
+
+    An unknown `task_source` value raises ValueError — fail loud rather
+    than silently fall back, so an operator typo doesn't quietly skip
+    the github-issues queue.
     """
     repo_yaml = host_dir / ".minsky" / "repo.yaml"
     # Resolve `.` → absolute basename so the brief shows a real name.
@@ -139,10 +151,11 @@ def load_host_config(host_dir: Path) -> HostConfig:
     # default_branch defaults to "main" — matches the GitHub-default
     # for new repos and the TS substrate's `loadRepoConfig` fallback.
     default_branch = "main"
+    task_source = DEFAULT_TASK_SOURCE
     if repo_yaml.is_file():
-        # Minimal hand-roll parser — we only need 4 fields and don't
-        # want to add a yaml dependency. Format is one `key: value` per
-        # line, no nesting.
+        # Minimal hand-roll parser — we only need a handful of fields and
+        # don't want to add a yaml dependency. Format is one `key: value`
+        # per line, no nesting.
         for raw in repo_yaml.read_text(encoding="utf-8").splitlines():
             line = raw.strip()
             if not line or line.startswith("#"):
@@ -159,9 +172,17 @@ def load_host_config(host_dir: Path) -> HostConfig:
                 pre_commit_command = value
             elif key.strip() == "default_branch":
                 default_branch = value
+            elif key.strip() == "task_source":
+                task_source = value
+    if task_source not in TASK_SOURCES:
+        raise ValueError(
+            f"{repo_yaml}: task_source={task_source!r} is not one of "
+            f"{TASK_SOURCES}"
+        )
     return HostConfig(host_repo=host_repo, branch_prefix=branch_prefix,
                       pre_commit_command=pre_commit_command,
-                      default_branch=default_branch)
+                      default_branch=default_branch,
+                      task_source=task_source)
 
 
 def render_brief(task: pick_task.ParsedTask, host_repo: str, branch_name: str) -> str:
