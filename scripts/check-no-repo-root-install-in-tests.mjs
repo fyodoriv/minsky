@@ -160,6 +160,7 @@ export function checkNoRepoRootInstallInTests(opts = {}) {
 
   for (const relPath of files) {
     if (isAllowlisted(relPath)) continue;
+    if (isGeneratedCheckout(relPath)) continue;
     const full = `${repoRoot}/${relPath}`;
     let src;
     try {
@@ -173,6 +174,14 @@ export function checkNoRepoRootInstallInTests(opts = {}) {
   }
 
   return { ok: violations.length === 0, violations, scannedCount: files.length };
+}
+
+/**
+ * @param {string} relPath
+ * @returns {boolean}
+ */
+function isGeneratedCheckout(relPath) {
+  return relPath.startsWith(".worktrees/");
 }
 
 /**
@@ -355,7 +364,7 @@ function isCommentLine(line) {
 
 /**
  * Tracked test files: every `*.test.ts` + `*.test.mjs`, excluding `dist/`,
- * `node_modules/`, and `.minsky/`. POSIX `find` (the modern-CLI cohort's
+ * `node_modules/`, `.minsky/`, and nested `.worktrees/`. POSIX `find` (the modern-CLI cohort's
  * `fd` may be absent in CI), same shape as sibling lints.
  *
  * @param {string} repoRoot
@@ -364,7 +373,7 @@ function isCommentLine(line) {
 function defaultFileList(repoRoot) {
   try {
     const out = execSync(
-      '/usr/bin/find . -type d \\( -name node_modules -o -name dist -o -name .minsky -o -name .git \\) -prune -o -type f \\( -name "*.test.ts" -o -name "*.test.mjs" \\) -print 2>/dev/null',
+      '/usr/bin/find . -type d \\( -name node_modules -o -name dist -o -name .minsky -o -name .git -o -name .worktrees \\) -prune -o -type f \\( -name "*.test.ts" -o -name "*.test.mjs" \\) -print 2>/dev/null',
       { cwd: repoRoot, encoding: "utf8" },
     );
     return out
