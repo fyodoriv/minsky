@@ -26,17 +26,18 @@ Inside any git repo:
 npx -y @fyodoriv/minsky
 ```
 
-This installs Minsky, writes config to `~/.minsky/config.json`, and runs one round. No cloud key needed by default.
+Installs Minsky, writes `~/.minsky/config.json`, and runs one round. No cloud key needed by default.
 
 **Uninstall:** `minsky uninstall --force`. **Contributors:** `git clone`, `pnpm install`, then `bin/minsky`.
 
 ## Run
 
-- **`minsky`** — the daemon (runs in the background): picks tasks, ships draft PRs, and works an 8-hour session, recording metrics each round.
-- **`minsky transform`** — one improvement session on the current folder, as a before/after delta.
-- **`minsky solve <task-id>`** — one round on a single task.
+- **`minsky`** — the background daemon: picks tasks, ships draft PRs, works an 8-hour session, recording metrics each round.
+- **`minsky transform`** — move the folder toward Minsky standards; before/after delta.
+- **`minsky solve <id>`** — one round on one task.
+- **`minsky submit-finding`** — task submission of a finding.
 
-Each finished task arrives as a **draft pull request** to approve. It also reports stability across watched projects and self-heals common failures.
+Each finished task arrives as a **draft pull request** to approve. Minsky reports stability across watched projects and self-heals common failures.
 
 ## Safety
 
