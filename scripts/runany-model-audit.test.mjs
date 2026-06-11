@@ -100,7 +100,7 @@ describe("the audit fails-closed when the decider regresses (negative fixtures)"
     // budget-correlation contract.
     let call = 0;
     const inverted = () => {
-      const ladder = ["local", "local", "claude-sonnet-4-6", "claude-opus-4-7"];
+      const ladder = ["local", "local", "local", "claude-sonnet-4-6"];
       const model = ladder[Math.min(call++, ladder.length - 1)] ?? "local";
       return { model, agent: model === "local" ? "local" : "claude", kind: "dynamic", reason: "x" };
     };
@@ -110,9 +110,8 @@ describe("the audit fails-closed when the decider regresses (negative fixtures)"
 
 describe("tierOf", () => {
   test("maps a known catalog model to its qualityTier", () => {
-    expect(tierOf("claude-opus-4-7")).toBe(1);
-    expect(tierOf("claude-sonnet-4-6")).toBe(2);
-    expect(tierOf("local")).toBe(3);
+    expect(tierOf("claude-sonnet-4-6")).toBe(1);
+    expect(tierOf("local")).toBe(2);
   });
   test("unknown model → +Infinity (sorts as lowest quality)", () => {
     expect(tierOf("not-a-model")).toBe(Number.POSITIVE_INFINITY);
