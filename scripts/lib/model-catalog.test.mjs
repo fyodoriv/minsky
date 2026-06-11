@@ -12,7 +12,7 @@ import { MODEL_CATALOG, validateModelCatalog } from "./model-catalog.mjs";
 
 describe("MODEL_CATALOG (slice 3 — recency-anchored May 2026)", () => {
   it("ships at least 3 rows (Opus / Sonnet / local — Haiku skipped per operator 2026-05-10)", () => {
-    expect(MODEL_CATALOG.length).toBeGreaterThanOrEqual(3);
+    expect(MODEL_CATALOG.length).toBeGreaterThanOrEqual(2);
   });
 
   it("intentionally excludes claude-haiku-4-5 (local Qwen3-14B/27B beats Haiku on coding)", () => {
@@ -20,24 +20,22 @@ describe("MODEL_CATALOG (slice 3 — recency-anchored May 2026)", () => {
     expect(haiku).toBeUndefined();
   });
 
-  it("includes claude-opus-4-7 as tier-1", () => {
-    const opus = MODEL_CATALOG.find((e) => e.id === "claude-opus-4-7");
-    expect(opus).toBeDefined();
-    expect(opus?.qualityTier).toBe(1);
-    expect(opus?.agent).toBe("claude");
+  it("intentionally excludes opus rows (workers run sonnet-4-6 — operator 2026-06-11)", () => {
+    const opus = MODEL_CATALOG.find((e) => e.id.includes("opus"));
+    expect(opus).toBeUndefined();
   });
 
-  it("includes claude-sonnet-4-6 as tier-2", () => {
+  it("includes claude-sonnet-4-6 as tier-1 (the canonical worker model)", () => {
     const sonnet = MODEL_CATALOG.find((e) => e.id === "claude-sonnet-4-6");
     expect(sonnet).toBeDefined();
-    expect(sonnet?.qualityTier).toBe(2);
+    expect(sonnet?.qualityTier).toBe(1);
     expect(sonnet?.agent).toBe("claude");
   });
 
-  it("includes local as tier-3 with zero floors (always-available last resort)", () => {
+  it("includes local as tier-2 with zero floors (always-available last resort)", () => {
     const local = MODEL_CATALOG.find((e) => e.id === "local");
     expect(local).toBeDefined();
-    expect(local?.qualityTier).toBe(3);
+    expect(local?.qualityTier).toBe(2);
     expect(local?.agent).toBe("local");
     expect(local?.fivehourFloor).toBe(0);
     expect(local?.weeklyFloor).toBe(0);
@@ -70,12 +68,10 @@ describe("MODEL_CATALOG (slice 3 — recency-anchored May 2026)", () => {
     expect(local?.costPer1MtokOutput).toBe(0);
   });
 
-  it("Opus is more expensive than Sonnet which is more expensive than local (which is free)", () => {
-    const opus = MODEL_CATALOG.find((e) => e.id === "claude-opus-4-7");
+  it("Sonnet is more expensive than local (which is free)", () => {
     const sonnet = MODEL_CATALOG.find((e) => e.id === "claude-sonnet-4-6");
     const local = MODEL_CATALOG.find((e) => e.id === "local");
-    if (!opus || !sonnet || !local) throw new Error("missing entry");
-    expect(opus.costPer1MtokInput).toBeGreaterThan(sonnet.costPer1MtokInput);
+    if (!sonnet || !local) throw new Error("missing entry");
     expect(sonnet.costPer1MtokInput).toBeGreaterThan(local.costPer1MtokInput);
     expect(local.costPer1MtokInput).toBe(0);
   });

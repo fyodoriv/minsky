@@ -3,9 +3,11 @@
 // decision for the zero-arg run-anywhere entrypoint.
 //
 // History: originally `novel/tick-loop/src/runany-provider-decision.ts`.
-// Ported to .mjs / JSDoc in phase-11b step 2. The bash runner doesn't
-// consume this directly (it hard-codes openhands); this module survives
-// as the lint-only audit reference for `scripts/runany-model-audit.mjs`.
+// Ported to .mjs / JSDoc in phase-11b step 2. NOTE: this IS consumed at
+// runtime — `bin/minsky-run.sh` executes `scripts/runany-resolve-model.mjs`
+// every iteration, which calls `decideRunAnyProvider`; the result
+// overrides the config-sourced model for claude spawns. It also remains
+// the audit reference for `scripts/runany-model-audit.mjs`.
 //
 // Source: parent task `runany-dynamic-model-or-local-fallback` slice 1.
 //

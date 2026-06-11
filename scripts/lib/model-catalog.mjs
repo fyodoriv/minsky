@@ -4,13 +4,22 @@
 // considers when picking a tier per iteration.
 //
 // History: originally `novel/tick-loop/src/model-catalog.ts`. Ported to
-// .mjs / JSDoc in phase-11b step 1 because the TS daemon
-// (`novel/tick-loop/`) is being deleted; the bash skeleton
-// (`bin/minsky-run.sh`) hard-codes the agent invocation, so the
-// model catalog is now LINT-ONLY: it documents the contract (3 rows,
-// monotone-descending floors, opus → sonnet → local order) and
-// the self-diagnose lint + runany-model-audit lint assert the
-// design intent. No production runtime path reads from it.
+// .mjs / JSDoc in phase-11b step 1 when the TS daemon
+// (`novel/tick-loop/`) was deleted. NOTE: this catalog IS a production
+// runtime input — `bin/minsky-run.sh` executes
+// `scripts/runany-resolve-model.mjs` every iteration, which walks this
+// table via `pickStrategicModel`; the dynamic pick OVERRIDES the
+// config-sourced model for claude spawns. (An earlier header here
+// claimed "LINT-ONLY: no production runtime path reads from it" — stale
+// since the bash runner wired the resolver in; that claim hid a
+// stale-opus pin for weeks. Keep this header truthful.)
+//
+// Worker-model policy (operator directive 2026-06-11): all
+// Minsky-spawned workers run `claude-sonnet-4-6`. Opus rows are
+// deliberately absent — orchestration brains are pinned outside this
+// catalog, and a worker must never silently escalate to a 5x-cost
+// model just because budget headroom is full. Re-add an opus row only
+// with an explicit operator decision recorded in the row comment.
 //
 // Source: parent task `claude-usage-aware-strategic-model-router`
 // slice 3; recency-anchored 2026-05-10 per Anthropic Q2 pricing +
@@ -37,17 +46,19 @@
  */
 
 /**
- * The catalog. Recency-checked May 2026.
+ * The catalog. Recency-checked June 2026.
  *
- * - **Opus 4.7 1M (`claude-opus-4-7`)** — Anthropic's flagship.
- *   Input $15 / output $75 per Mtok (Anthropic published 2026 Q2
- *   pricing). Tier 1; gates at 50% 5h-remaining, 30% weekly,
- *   20% monthly.
- * - **Sonnet 4.6 (`claude-sonnet-4-6`)** — Anthropic's mid-tier.
- *   Input $3 / output $15 per Mtok. Tier 2; gates at 30% / 20% / 15%.
+ * - **Sonnet 4.6 (`claude-sonnet-4-6`)** — the canonical worker model
+ *   (operator directive 2026-06-11). Input $3 / output $15 per Mtok.
+ *   Tier 1; gates at 30% / 20% / 15%.
  * - **local (`local`)** — operator's machine (aider+Qwen3-Coder or
  *   opencode+LM-Studio+Qwen3.6-27B). $0 per Mtok (electricity).
- *   Tier 3; gates at 0% (always selectable as last-resort).
+ *   Tier 2; gates at 0% (always selectable as last-resort).
+ *
+ * **Why Opus is intentionally absent (operator 2026-06-11):** workers
+ * run sonnet-4-6, period. The dynamic walk previously picked
+ * `claude-opus-4-7` at full budget headroom, silently overriding the
+ * operator's configured sonnet model on every iteration at 5x cost.
  *
  * **Why Haiku is intentionally absent (operator 2026-05-10):** local
  * Qwen3.6-27B Dense (Terminal-Bench 2.0 = 59.3, Opus-parity per
@@ -66,37 +77,26 @@
  */
 export const MODEL_CATALOG = Object.freeze([
   {
-    id: "claude-opus-4-7",
-    agent: "claude",
-    qualityTier: 1,
-    costPer1MtokInput: 15,
-    costPer1MtokOutput: 75,
-    fivehourFloor: 0.5,
-    weeklyFloor: 0.3,
-    monthlyFloor: 0.2,
-    recordedAt: "2026-05-10",
-  },
-  {
     id: "claude-sonnet-4-6",
     agent: "claude",
-    qualityTier: 2,
+    qualityTier: 1,
     costPer1MtokInput: 3,
     costPer1MtokOutput: 15,
     fivehourFloor: 0.3,
     weeklyFloor: 0.2,
     monthlyFloor: 0.15,
-    recordedAt: "2026-05-10",
+    recordedAt: "2026-06-11",
   },
   {
     id: "local",
     agent: "local",
-    qualityTier: 3,
+    qualityTier: 2,
     costPer1MtokInput: 0,
     costPer1MtokOutput: 0,
     fivehourFloor: 0,
     weeklyFloor: 0,
     monthlyFloor: 0,
-    recordedAt: "2026-05-10",
+    recordedAt: "2026-06-11",
   },
 ]);
 

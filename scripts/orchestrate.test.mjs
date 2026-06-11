@@ -338,7 +338,7 @@ describe("decideAgentForRole (role-pinned agent + model)", () => {
   it("falls back to safe defaults when config is empty (rule #6)", () => {
     expect(decideAgentForRole("orchestrator", {})).toEqual({
       agent: "claude",
-      model: "claude-opus-4-7-max",
+      model: "claude-sonnet-4-6",
       role: "orchestrator",
     });
     expect(decideAgentForRole("worker", {})).toEqual({

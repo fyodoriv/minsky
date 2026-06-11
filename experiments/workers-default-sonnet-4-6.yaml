@@ -1,0 +1,8 @@
+id: workers-default-sonnet-4-6
+hypothesis: |
+  the runany dynamic resolver (bin/minsky-run.sh → scripts/runany-resolve-model.mjs → MODEL_CATALOG) silently overrides the operator's configured worker model (claude-sonnet-4-6 in ~/.minsky/config.json) with catalog tier-1 claude-opus-4-7 on every claude iteration, because the absent token-monitor snapshot degrades to full budget headroom and the opus row always qualifies — burning ~5x cost per worker against operator policy (workers run sonnet-4-6). Removing the opus row (sonnet becomes tier-1), fixing the stale opus jq fallbacks, and correcting the three stale "LINT-ONLY / no runtime path" headers makes every dynamic pick resolve to claude-sonnet-4-6 while budget-exhaustion still degrades to local.
+success: "`node scripts/runany-resolve-model.mjs --json` returns model claude-sonnet-4-6 with kind dynamic at full headroom; 0 `model=claude-opus` lines appear in `.minsky/tick-loop.err.log` after the next daemon restart."
+pivot: "if ≥ 1 task class measurably regresses (worker→PR completion rate drops below 0.5x its pre-change 7d baseline within a week of the flip), re-add an opus row at a restrictive floor as an explicit operator decision instead of deleting the policy."
+measurement: "`node scripts/runany-resolve-model.mjs --json | jq -e '.model == \"claude-sonnet-4-6\"'` exits 0; `grep -c 'model=claude-opus' .minsky/tick-loop.err.log` stays flat after restart."
+anchor: |
+  Nygard, *Release It!* (2018), Ch. 5 — fail-safe defaults: a degraded telemetry input (missing budget snapshot) must degrade toward the cheaper/safer choice, not silently escalate to the most expensive resource.
