@@ -1079,11 +1079,15 @@ function defaultReview(pr) {
     // --strict-mcp-config: a review needs no tools; without it the session
     // boots every user/project MCP server (chrome-devtools, playwright, …),
     // launching a Chrome instance per review on the operator's machine.
-    const out = execFileSync("claude", ["--print", "--strict-mcp-config", "--model", "claude-opus-4-7", prompt], {
-      cwd: REPO,
-      encoding: "utf8",
-      maxBuffer: 8 * 1024 * 1024,
-    });
+    const out = execFileSync(
+      "claude",
+      ["--print", "--strict-mcp-config", "--model", "claude-opus-4-7", prompt],
+      {
+        cwd: REPO,
+        encoding: "utf8",
+        maxBuffer: 8 * 1024 * 1024,
+      },
+    );
     return parseReview(out);
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
