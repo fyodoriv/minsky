@@ -1076,7 +1076,10 @@ function defaultReview(pr) {
     'You are the Opus orchestrator reviewing a Sonnet-worker PR that ALREADY passed the full deterministic gate (typecheck, tests, every lint) merged onto main. Judge ONLY: correctness of intent, hidden risk, scope creep, and whether it does what its title claims. Reply with ONE line: "APPROVE: <=12-word reason" or "REJECT: <=12-word reason".';
   const prompt = `${rubric}\n\nTitle: ${pr.title}\n\nDiff (truncated):\n${diff}`;
   try {
-    const out = execFileSync("claude", ["--print", "--model", "claude-opus-4-7", prompt], {
+    // --strict-mcp-config: a review needs no tools; without it the session
+    // boots every user/project MCP server (chrome-devtools, playwright, …),
+    // launching a Chrome instance per review on the operator's machine.
+    const out = execFileSync("claude", ["--print", "--strict-mcp-config", "--model", "claude-opus-4-7", prompt], {
       cwd: REPO,
       encoding: "utf8",
       maxBuffer: 8 * 1024 * 1024,

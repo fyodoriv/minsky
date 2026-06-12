@@ -116,7 +116,14 @@
   (subpath (string-append (param "HOME") "/.local/share/fnm"))
   (subpath (string-append (param "HOME") "/.local/share/uv"))
   (subpath (string-append (param "HOME") "/.nvm"))
-  (subpath (string-append (param "HOME") "/.asdf")))
+  (subpath (string-append (param "HOME") "/.asdf"))
+  ;; dotfiles endpoint-security shims (jq/grep/python3/curl). process-exec is
+  ;; allowed globally but exec ALSO requires file-read* on the binary; without
+  ;; these subpaths every shim exec fails EPERM ("dotfiles/bin/gh: Operation
+  ;; not permitted" — observed in tick-loop.out.log) and tools fall back to
+  ;; the CyberArk-EPM-flagged /usr/bin/{jq,grep,python3}.
+  (subpath (string-append (param "HOME") "/apps/tooling/dotfiles/bin"))
+  (subpath (string-append (param "HOME") "/apps/dotfiles/bin")))
 
 ;; Per-unit temp dir. PrivateTmp's macOS analogue — allow the standard temp
 ;; locations so subprocess scratch files work; combined with the (deny default)

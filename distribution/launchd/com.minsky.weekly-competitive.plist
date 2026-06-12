@@ -36,8 +36,10 @@ Placeholders substituted by `bin/minsky install-daemon` via envsubst:
     <dict>
         <key>MINSKY_HOME</key>
         <string>${MINSKY_HOME}</string>
+        <!-- EPM-safe PATH: dotfiles shims before /usr/bin/{jq,grep,python3}
+             (CyberArk EPM / Software Signing watchlist). -->
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <string>${HOME}/apps/tooling/dotfiles/bin:${HOME}/apps/dotfiles/bin:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 
     <key>ProgramArguments</key>
