@@ -61,6 +61,12 @@
   (subpath "/opt/homebrew")
   (subpath "/Library")
   (subpath "/System")
+  ;; sandbox-allowlist-derive-from-operator-toolchain: `/usr/bin/xcrun`
+  ;; dlopens libxcrun and shells into xcodebuild from the active Xcode
+  ;; developer directory before resolving developer tools like git. Read-only
+  ;; toolchain surface, analogous to /usr + /opt/homebrew; do not widen to all
+  ;; of /Applications (outside the supervisor trust boundary).
+  (subpath "/Applications/Xcode.app/Contents/Developer")
   (subpath "/private/etc")
   (subpath "/private/var/db/timezone")
   (literal "/dev/null")
