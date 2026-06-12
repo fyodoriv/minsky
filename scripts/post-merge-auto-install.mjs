@@ -30,13 +30,12 @@
 // tests inject the snapshot and assert the actions; production
 // executes each action via `execFileSync`.
 //
-// Source: vision.md § 11 (default by default — "auto-installed on
-// first run, not a separate install step"); the env-var propagation
-// fix shipped in PR #666 made the launchd plist generator non-trivial,
-// and without auto-deploy on pull every operator would need to remember
-// to re-run `minsky install-daemon` after every pull that touches the
-// generator. That's exactly the "remember-to-reinstall" cost rule #16
-// forbids.
+// Source: vision.md §16 + §19: refreshing already-consented machine
+// state is default-by-default, while first-time supervisor bootstrap
+// remains operator-explicit. The env-var propagation fix shipped in
+// PR #666 made the launchd plist generator non-trivial; without
+// auto-deploy on pull, operators with an existing plist would need to
+// remember `minsky install-daemon` after generator changes.
 //
 // Pivot (rule #9): if auto-install fires more than 1 false-positive
 // regen per week (e.g. `bin/minsky` changed but the install-daemon
@@ -139,16 +138,20 @@ export function decideActions(input) {
   }
 
   // 2. Regenerate the launchd plist (macOS only; Linux uses systemd).
-  //    Triggered by any change to `bin/minsky` (the plist generator
-  //    lives in the `install-daemon)` shell case there). We don't try
-  //    to grep for the specific case body — over-narrow triggers miss
-  //    legitimate plist-affecting refactors. The pivot threshold is
-  //    1 false-positive regen / week (rule #9 above).
+  //    Triggered by any change to the CLI/plist generator or the bash
+  //    runner it points launchd at. We don't try to grep for the specific
+  //    case body — over-narrow triggers miss legitimate plist-affecting
+  //    refactors. The pivot threshold is 1 false-positive regen / week
+  //    (rule #9 above).
   //
   //    `plistExists: false` short-circuits — if the operator hasn't
   //    installed the daemon yet, we don't auto-install it on their
   //    behalf (that's surprising; first-install must be explicit).
-  if (input.platform === "darwin" && input.plistExists && changed.has("bin/minsky")) {
+  if (
+    input.platform === "darwin" &&
+    input.plistExists &&
+    anyChange((/** @type {string} */ f) => isDaemonInstallRelevantFile(f))
+  ) {
     actions.push({ kind: "regen-plist", warnDaemonRunning: input.daemonRunning });
   }
 
@@ -197,13 +200,14 @@ export function decideActions(input) {
 /**
  * Pure: surface a `request-daemon-restart` action when the snapshot
  * justifies one — daemon running AND the pull touched runtime code
- * (`bin/minsky`, `pnpm-lock.yaml`, or anything under `novel/**`).
+ * (`bin/minsky`, `bin/minsky-run.sh`, `pnpm-lock.yaml`, daemon-called
+ * scripts, or anything under `novel/**`).
  * Returns `null` otherwise. Extracted from {@link decideActions} so
  * the orchestrator stays under the cognitive-complexity cap.
  *
  * Trigger: daemon must be running (no daemon → no restart needed),
- * AND the pull touched runtime code — `bin/minsky`, anything under
- * `novel/**` (`.ts`/`.mjs`/`.js`), OR `pnpm-lock.yaml` (lockfile
+ * AND the pull touched runtime code — daemon entrypoints/scripts, anything
+ * under `novel/**` (`.ts`/`.mjs`/`.js`), OR `pnpm-lock.yaml` (lockfile
  * changes almost always mean dependency code shifted under the
  * daemon). `bin/minsky` overlaps with the `regen-plist` trigger
  * above — after the plist is rewritten, the daemon must restart to
@@ -236,7 +240,10 @@ function maybeRequestDaemonRestart(input) {
 function detectRestartReason(changedFiles) {
   const changed = new Set(changedFiles);
   if (changed.has("bin/minsky")) return "bin/minsky changed";
+  if (changed.has("bin/minsky-run.sh")) return "bin/minsky-run.sh changed";
   if (changed.has("pnpm-lock.yaml")) return "pnpm-lock.yaml changed";
+  const scriptChange = changedFiles.find((/** @type {string} */ f) => isDaemonRuntimeScript(f));
+  if (scriptChange !== undefined) return `daemon script changed (e.g. ${scriptChange})`;
   const novelChange = changedFiles.find((/** @type {string} */ f) =>
     /^novel\/.+\.(ts|mjs|js)$/.test(f),
   );
@@ -254,9 +261,50 @@ function detectRestartReason(changedFiles) {
  */
 function filterRestartRelevantFiles(changedFiles) {
   return changedFiles.filter(
-    (f) => f === "bin/minsky" || f === "pnpm-lock.yaml" || /^novel\/.+\.(ts|mjs|js)$/.test(f),
+    (f) =>
+      f === "bin/minsky" ||
+      f === "bin/minsky-run.sh" ||
+      f === "pnpm-lock.yaml" ||
+      isDaemonRuntimeScript(f) ||
+      /^novel\/.+\.(ts|mjs|js)$/.test(f),
   );
 }
+
+/**
+ * @param {string} file
+ * @returns {boolean}
+ */
+function isDaemonInstallRelevantFile(file) {
+  return file === "bin/minsky" || file === "bin/minsky-run.sh";
+}
+
+/**
+ * @param {string} file
+ * @returns {boolean}
+ */
+function isDaemonRuntimeScript(file) {
+  return (
+    DAEMON_RUNTIME_SCRIPTS.has(file) ||
+    /^scripts\/lib\/.+\.(mjs|js)$/.test(file) ||
+    /^distribution\/systemd\/run-.+\.sh$/.test(file)
+  );
+}
+
+const DAEMON_RUNTIME_SCRIPTS = new Set([
+  "scripts/build_brief.py",
+  "scripts/build_cto_brief.py",
+  "scripts/dynamic_timeout.py",
+  "scripts/extract_pr_url.py",
+  "scripts/gh_issue_task_source.py",
+  "scripts/heal-dispatch.mjs",
+  "scripts/orchestrate.mjs",
+  "scripts/pick_task.py",
+  "scripts/resolve_gh_host.py",
+  "scripts/runany-resolve-model.mjs",
+  "scripts/spawn_agent.py",
+  "scripts/spawn_with_watchdog.py",
+  "scripts/synth_experiment_yaml.py",
+]);
 
 // ---- I/O wrapper ------------------------------------------------------
 

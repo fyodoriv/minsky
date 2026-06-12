@@ -6,7 +6,7 @@ Every `minsky` subcommand, every flag. See [`bin/minsky`](../bin/minsky) for the
 
 | Command | What it does |
 | --- | --- |
-| `minsky` | Start-or-attach: daemon + auto-install persistence + dashboard. The one command for everyday use. |
+| `minsky` | Start-or-attach: daemon + dashboard. If a launchd plist already exists, refresh it before attaching/starting. |
 | `minsky watch` | Attach to live dashboard (Ctrl-C detaches; daemon keeps running). |
 | `minsky stop` | Thorough shutdown (launchd + runners + agents). Zero ghost processes. |
 
@@ -27,7 +27,7 @@ Every `minsky` subcommand, every flag. See [`bin/minsky`](../bin/minsky) for the
 | `minsky init` | One-command bootstrap on any git repo (creates `TASKS.md` if missing + `.minsky/` sidecar). |
 | `minsky update` | `minsky stop → git pull → pnpm install → minsky` in one step. |
 | `minsky uninstall` | Dry-run by default; `--force` to actually delete. See [docs/uninstall.md](uninstall.md). |
-| `minsky install-daemon` | Install the launchd plist / systemd unit. Auto-done on first `minsky` invocation. |
+| `minsky install-daemon` | Explicitly install the launchd plist. Existing plist installs are refreshed automatically on `minsky` run and post-pull. |
 | `minsky uninstall-daemon` | Remove the plist only (preserves config + logs). |
 
 ## Top-level flags

@@ -184,16 +184,21 @@ That single call:
 
 If `minsky` isn't yet on PATH for the current shell, use the explicit `$INSTALL_DIR/bin/minsky` form (as shown above) — Step 3 already set the absolute path in your shell variable.
 
-## Step 6 — start the daemon
+## Step 6 — install persistence and start the daemon
 
 ```bash
+"$INSTALL_DIR/bin/minsky" install-daemon "$HOST_PATH"
 cd "$HOST_PATH"
 "$INSTALL_DIR/bin/minsky"
 ```
 
-The first invocation:
+The explicit `install-daemon` call:
 
-- installs a launchd persistence agent so Minsky survives reboots (macOS) — on Linux it installs a systemd-user unit instead
+- installs a launchd persistence agent so Minsky survives reboots (macOS)
+- records the operator-approved supervisor bootstrap; no-arg `minsky` will only refresh an existing plist, not create one silently
+
+The first `minsky` invocation:
+
 - creates `.minsky/` in the host repo (gitignored sidecar for iteration history)
 - drops you into the live dashboard
 
