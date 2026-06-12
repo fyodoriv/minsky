@@ -167,7 +167,20 @@ def resolve_claude_argv(claude_bin: str, brief_file: str, model: str) -> list[st
         prompt = Path(brief_file).read_text()
     except OSError:
         prompt = "Work on the top unclaimed task in TASKS.md per AGENTS.md + vision.md."
-    return [claude_bin, "-p", prompt, "--model", model, "--dangerously-skip-permissions"]
+    # --strict-mcp-config: ignore user/project MCP servers (chrome-devtools,
+    # playwright, …). Without it every worker spawn boots a Chrome instance
+    # that dies with the session — on the operator's machine that surfaced as
+    # "Chrome starts for ~1s every ~10s" while iterations were retried, plus
+    # a per-spawn endpoint-security (EPM/EPDLP) scan of each MCP child.
+    return [
+        claude_bin,
+        "-p",
+        prompt,
+        "--model",
+        model,
+        "--dangerously-skip-permissions",
+        "--strict-mcp-config",
+    ]
 
 
 def claude_config_dir_for_worker(repo: str) -> Path:
@@ -433,6 +446,12 @@ def _main(argv: Optional[list[str]] = None) -> int:
 
     # Exec into the resolved backend. Streams stdout/stderr directly to
     # the caller (the bash watchdog + the iteration log).
+    # AGENT_ENABLE_BROWSING=false (setdefault — operator export wins):
+    # OpenHands' browsing tool launches a playwright Chromium per spawn;
+    # daemon tasks are repo-edit work that never needs it, and on the
+    # operator's machine each launch tripped endpoint-security scans and
+    # flashed a browser for the life of the (watchdog-bounded) spawn.
+    os.environ.setdefault("AGENT_ENABLE_BROWSING", "false")
     try:
         completed = subprocess.run(resolved, check=False)
     except FileNotFoundError as exc:

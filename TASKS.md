@@ -558,6 +558,18 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P1
 
+- [ ] `watchdog-invariant-config-not-valid-json-spam` — the watchdog's self-diagnose loop logs `INVARIANT FAIL: config not valid JSON` once per 60s tick even though `~/.minsky/config.json` parses cleanly with `python3 -c "json.load(...)"`; find which config path the invariant actually reads and make the failure message name the offending file
+  - **ID**: watchdog-invariant-config-not-valid-json-spam
+  - **Tags**: p1, stability, observability, watchdog, observed-2026-06-12
+  - **Milestone**: M1
+  - **Touches**: `scripts/watchdog.mjs` (or the self-diagnose invariant module it calls), `.minsky/watchdog.err.log` consumers
+  - **Competitive-goal**: protects `autonomous-merge-rate` — a permanently-red invariant trains the operator to ignore watchdog findings, so real stuck-iteration findings get missed.
+  - **Hypothesis**: the invariant validates a DIFFERENT file than `~/.minsky/config.json` (a host `.minsky/repo.yaml`, a worktree-local config, or a stale path) — or it shells out to a JSON parse whose runner fails for environment reasons (e.g. `env: node: No such file or directory` also present in `.minsky/watchdog.err.log`) and misreports the exit as parse failure. Naming the path + separating spawn-failure from parse-failure kills the false-positive class.
+  - **Success**: 24h of watchdog ticks with zero `INVARIANT FAIL: config not valid JSON` lines while `~/.minsky/config.json` is valid; an intentionally-corrupted config produces ONE failure line that names the absolute file path.
+  - **Pivot**: if the invariant is validating a config that legitimately is not JSON (e.g. YAML repo overlay), delete the invariant and replace it with a schema check in the loader that owns the file.
+  - **Measurement**: `rg -c "INVARIANT FAIL: config not valid JSON" "$MINSKY_HOME/.minsky/watchdog.err.log"` stays constant across 24h (no new lines), and the corrupted-config drill emits a line matching `INVARIANT FAIL: config not valid JSON: /` (absolute path present).
+  - **Anchor**: Beyer et al., *Site Reliability Engineering*, 2016 — Ch. 6 "Monitoring Distributed Systems" (alerts must be actionable; chronic false positives destroy signal).
+
 - [ ] `minsky-stop-host-pgrep-mock-mismatch` — `bin/minsky.test.mjs` "SIGTERMs only the minsky-run matching the --host dir" fails deterministically on origin/main; mock pgrep emits 0 PIDs
   - **ID**: minsky-stop-host-pgrep-mock-mismatch
   - **Tags**: p1, stability, test-flake, observed-2026-06-10

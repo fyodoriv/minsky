@@ -2214,6 +2214,12 @@ EOF
 $(env | grep -E '^(DEVIN_|CLAUDE_|OPENAI_|ANTHROPIC_)' || true)
 EOF
 
+    _dotfiles_bin=""
+    for _dfb in "$HOME/apps/tooling/dotfiles/bin" "$HOME/apps/dotfiles/bin"; do
+      [ -x "$_dfb/python3" ] && _dotfiles_bin="$_dfb" && break
+    done
+    _daemon_path="${_dotfiles_bin:+${_dotfiles_bin}:}/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:$HOME/.fnm/aliases/default/bin"
+
     # Generate the new plist content into a tempfile so we can
     # idempotency-check against the existing file before overwriting +
     # reloading launchd. Without this, every `minsky install-daemon`
@@ -2248,7 +2254,7 @@ $_program_args
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:$HOME/.local/bin:$HOME/.fnm/aliases/default/bin</string>
+    <string>$_daemon_path</string>
     <key>HOME</key>
     <string>$HOME</string>
     <key>MINSKY_NON_INTERACTIVE</key>

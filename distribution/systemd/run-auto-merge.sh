@@ -81,10 +81,16 @@ case "$auto_merge_flag" in
     ;;
 esac
 
-# Resolve fnm node if available so the script works under launchd's bare PATH.
-if [ -d "$HOME/.local/share/fnm" ] && command -v fnm >/dev/null 2>&1; then
-  eval "$(fnm env --use-on-cd)" || true
-fi
+# EPM-safe PATH under launchd's bare env (dotfiles endpoint-security shims
+# leftmost, then fnm/nvm/asdf node, gh, claude, uv python). Single source of
+# truth shared with run-tick-loop.sh / run-watchdog.sh (rule #1). Replaces the
+# previous fnm-only block: with the bare plist PATH, `grep` resolved to
+# /usr/bin/grep (Publisher: Software Signing) and `python3` to
+# /usr/bin/python3 — both CyberArk-EPM-flagged, one alert per 60s cycle.
+_auto_merge_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib-launchd-path.sh
+. "${_auto_merge_dir}/lib-launchd-path.sh"
+unset _auto_merge_dir
 
 LOG_FILE="${MINSKY_AUTO_MERGE_LOG:-$HOME/.minsky/auto-merge.log}"
 mkdir -p "$(dirname "$LOG_FILE")"
