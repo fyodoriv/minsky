@@ -54,5 +54,22 @@ done
 for _opencode_dir in "${HOME}"/.opencode/bin "${HOME}"/.local/bin "${HOME}"/.npm-global/bin /opt/homebrew/bin /usr/local/bin; do
   [ -x "${_opencode_dir}/opencode" ] && PATH="${_opencode_dir}:${PATH}" && break
 done
+# uv-managed python (adhoc-signed, EPM-safe). Sandbox profile allows
+# ~/.local/share/uv. Never prepend /usr/bin/python3 — CyberArk EPM blocks
+# Apple's tool-shim-public (Description: python3, Publisher: Software Signing).
+for _uv_py in "${HOME}"/.local/share/uv/python/cpython-3.13*/bin/python3.13; do
+  if [ -x "$_uv_py" ] && "$_uv_py" -c '' >/dev/null 2>&1; then
+    PATH="$(dirname "$_uv_py"):${PATH}"
+    break
+  fi
+done
+# dotfiles python3 shim (resolves to uv) when present — covers operators who
+# rely on bin/python3 rather than direct uv path.
+for _dotfiles_bin in "${HOME}/apps/tooling/dotfiles/bin" "${HOME}/apps/dotfiles/bin"; do
+  if [ -x "${_dotfiles_bin}/python3" ]; then
+    PATH="${_dotfiles_bin}:${PATH}"
+    break
+  fi
+done
 export PATH
-unset _minsky_node_path_extras _fnm_dir _nvm_dir _asdf_dir _brew_prefix _claude_dir _gh_dir _opencode_dir
+unset _minsky_node_path_extras _fnm_dir _nvm_dir _asdf_dir _brew_prefix _claude_dir _gh_dir _opencode_dir _uv_py _dotfiles_bin
