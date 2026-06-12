@@ -17,7 +17,7 @@ A post-merge git hook handles most of the redeploy automatically.
 | `pnpm-lock.yaml` or `package.json` | `pnpm install` (refreshes `dist/`) |
 | `bin/minsky` or `bin/minsky-run.sh` (and your plist exists) | Refreshes the launchd plist via idempotent `minsky install-daemon` |
 | `distribution/systemd/*.{service,target}` | `systemctl --user daemon-reload` (Linux) |
-| Daemon runtime code while the daemon is running | Writes `~/.minsky/restart-requested`; the loop exits between iterations so the supervisor restarts on fresh code |
+| Daemon runtime code while the legacy Node runner or current bash launchd loop is running | Writes `~/.minsky/restart-requested`; the loop exits between iterations so the supervisor restarts on fresh code |
 | Any of the above | `pre-pr-lint --stage=fast` as advisory sanity check |
 
 Defined in `scripts/post-merge-auto-install.mjs`.
