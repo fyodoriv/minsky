@@ -37,6 +37,11 @@ Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
     <dict>
         <key>MINSKY_HOME</key>
         <string>${MINSKY_HOME}</string>
+        <!-- EPM-safe PATH: dotfiles shims before /usr/bin/{jq,python3}.
+             run-tick-loop.sh also sources lib-launchd-path.sh; this plist
+             PATH is belt-and-suspenders for sandbox-exec children. -->
+        <key>PATH</key>
+        <string>${HOME}/apps/tooling/dotfiles/bin:${HOME}/apps/dotfiles/bin:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
         <!-- Safe-rollout window closed 2026-05-04 — Minsky-on-itself
              validated end-to-end (launchd plist paths fixed #143; macOS
              portability fixes #144; node-PATH-resolution #145; stdout

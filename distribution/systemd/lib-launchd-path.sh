@@ -63,13 +63,20 @@ for _uv_py in "${HOME}"/.local/share/uv/python/cpython-3.13*/bin/python3.13; do
     break
   fi
 done
-# dotfiles python3 shim (resolves to uv) when present — covers operators who
-# rely on bin/python3 rather than direct uv path.
+# Homebrew bin before dotfiles shims so shims stay leftmost (they may exec brew).
+for _brew_bin in /usr/local/bin /opt/homebrew/bin; do
+  [ -d "${_brew_bin}" ] && PATH="${_brew_bin}:${PATH}"
+done
+if [ -d "${HOME}/.local/bin" ]; then
+  PATH="${HOME}/.local/bin:${PATH}"
+fi
+# dotfiles endpoint-security shims (jq, python3, curl, grep) — leftmost so
+# launchd loops never hit /usr/bin/{jq,python3} (CyberArk EPM / tool-shim-public).
 for _dotfiles_bin in "${HOME}/apps/tooling/dotfiles/bin" "${HOME}/apps/dotfiles/bin"; do
-  if [ -x "${_dotfiles_bin}/python3" ]; then
+  if [ -d "${_dotfiles_bin}" ]; then
     PATH="${_dotfiles_bin}:${PATH}"
     break
   fi
 done
 export PATH
-unset _minsky_node_path_extras _fnm_dir _nvm_dir _asdf_dir _brew_prefix _claude_dir _gh_dir _opencode_dir _uv_py _dotfiles_bin
+unset _minsky_node_path_extras _fnm_dir _nvm_dir _asdf_dir _brew_prefix _claude_dir _gh_dir _opencode_dir _uv_py _dotfiles_bin _brew_bin

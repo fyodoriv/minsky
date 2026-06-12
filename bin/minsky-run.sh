@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # bin/minsky-run.sh — Path A Phase 7 host walker
 # ============================================================================
 #

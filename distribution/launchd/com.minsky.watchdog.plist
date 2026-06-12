@@ -49,9 +49,8 @@ Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/env</string>
-        <string>node</string>
-        <string>${MINSKY_HOME}/scripts/watchdog.mjs</string>
+        <string>/bin/bash</string>
+        <string>${MINSKY_HOME}/distribution/systemd/run-watchdog.sh</string>
     </array>
 
     <!-- Restart on non-zero exit only (transient policy per Armstrong 2007). -->

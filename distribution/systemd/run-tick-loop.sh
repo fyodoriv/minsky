@@ -51,67 +51,14 @@ set -euo pipefail
 MINSKY_HOME="${MINSKY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 export MINSKY_HOME
 
-# launchd / systemd-user run with a minimal PATH (often just /usr/bin:/bin)
-# that doesn't include operator-installed node managers (fnm, nvm, asdf,
-# Homebrew). Prepend the common node-installation locations so `exec node`
-# below finds the binary. The first match wins; if `node` is already on
-# PATH (e.g., the operator pre-set PATH in the unit file), the original
-# PATH stays first and this is a no-op for resolution.
-#
-# Search strategy: glob fnm + nvm + asdf install dirs (operator-local), plus
-# Homebrew (system-installed), plus /usr/local/bin (manual installs). We
-# pick the highest-numbered version dir per manager to avoid pinning to a
-# stale version. ${HOME} is always set under launchd / systemd-user.
-node_path_extras=""
-for fnm_dir in "${HOME}"/.local/share/fnm/node-versions/*/installation/bin; do
-  [ -x "${fnm_dir}/node" ] && node_path_extras="${fnm_dir}:${node_path_extras}"
-done
-for nvm_dir in "${HOME}"/.nvm/versions/node/*/bin; do
-  [ -x "${nvm_dir}/node" ] && node_path_extras="${nvm_dir}:${node_path_extras}"
-done
-for asdf_dir in "${HOME}"/.asdf/installs/nodejs/*/bin; do
-  [ -x "${asdf_dir}/node" ] && node_path_extras="${asdf_dir}:${node_path_extras}"
-done
-for brew_prefix in /opt/homebrew/bin /usr/local/bin; do
-  [ -x "${brew_prefix}/node" ] && node_path_extras="${brew_prefix}:${node_path_extras}"
-done
-PATH="${node_path_extras}${PATH:-/usr/bin:/bin}"
-
-# Same problem as `node`, separate axis: the supervisor spawns `claude
-# --print` (the headless Claude Code CLI) per iteration. The Claude
-# Code installer's default location is `~/.local/bin/claude` (also
-# `~/.npm-global/bin/claude` for npm-global installs and
-# `/opt/homebrew/bin/claude` / `/usr/local/bin/claude` for Homebrew).
-# A spawn against a missing `claude` is `ENOENT`, which the daemon
-# surfaces as an unhandled exception → process exit → launchd respawn
-# loop at `ThrottleInterval` cadence (5s). Surfaced live 2026-05-04
-# during the post-#158 dogfood restart.
-for claude_dir in "${HOME}"/.local/bin "${HOME}"/.npm-global/bin /opt/homebrew/bin /usr/local/bin; do
-  [ -x "${claude_dir}/claude" ] && PATH="${claude_dir}:${PATH}" && break
-done
-# Same pattern for `gh` (GitHub CLI) — used by the file-collision check and
-# auto-merge sweep. Homebrew is the canonical install path on macOS.
-for gh_dir in /opt/homebrew/bin /usr/local/bin "${HOME}"/.local/bin; do
-  [ -x "${gh_dir}/gh" ] && PATH="${gh_dir}:${PATH}" && break
-done
-# Python for pick_task.py: uv-managed only (EPM-safe). Never test-execute
-# /usr/bin/python3 — Apple tool-shim-public triggers CyberArk AUP dialog.
-# Sandbox allows ~/.local/share/uv (see com.minsky.tick-loop.sb).
-for _uv_py in "${HOME}"/.local/share/uv/python/cpython-3.13*/bin/python3.13; do
-  if [ -x "$_uv_py" ] && "$_uv_py" -c '' >/dev/null 2>&1; then
-    PATH="$(dirname "$_uv_py"):${PATH}"
-    break
-  fi
-done
-unset _uv_py
-# Same pattern for `opencode` — the local-LLM spawn target used when the
-# daemon falls back to Ollama/local models. Default install is
-# ~/.opencode/bin/opencode (the opencode CLI installer's standard location).
-# Surfaced via ENOENT in the daemon error log when launchd PATH lacks it.
-for opencode_dir in "${HOME}"/.opencode/bin "${HOME}"/.local/bin "${HOME}"/.npm-global/bin /opt/homebrew/bin /usr/local/bin; do
-  [ -x "${opencode_dir}/opencode" ] && PATH="${opencode_dir}:${PATH}" && break
-done
-export PATH
+# launchd / systemd-user run with a minimal PATH (often just /usr/bin:/bin).
+# Source the shared helper (rule #1 — compose, don't duplicate) so node,
+# claude, gh, opencode, uv python, and dotfiles/{jq,python3} shims all
+# resolve before /usr/bin/{jq,python3} (CyberArk EPM / tool-shim-public).
+_tick_loop_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib-launchd-path.sh
+. "${_tick_loop_dir}/lib-launchd-path.sh"
+unset _tick_loop_dir
 
 # Optional env-var → CLI arg mapping. The CLI itself accepts the same
 # flags directly, so explicit args (passed by the operator) override.
