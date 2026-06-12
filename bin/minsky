@@ -3303,8 +3303,7 @@ trap '' HUP
 #   1. Run health checks (doctor) FIRST — if any critical check fails,
 #      print + exit non-zero. The operator's machine isn't ready.
 #   2. If a daemon is already running for $PWD → attach with watch.
-#   3. Otherwise → start one in daemon mode + auto-install persistence
-#      + attach.
+#   3. Otherwise → start one in daemon mode + attach.
 # This makes `minsky` in a folder always do the right thing:
 #   - machine broken? → tell the operator exactly what to fix
 #   - daemon running for this host? → attach (watch)
@@ -3430,6 +3429,10 @@ if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" !=
   # Fallback (explicit --host, or resolver unavailable): single host at cwd.
   [ "${#_launch_args[@]}" -eq 0 ] && _launch_args=(--host "$_target_host")
 
+  if [ "$(uname)" = "Darwin" ] && [ -f "$HOME/Library/LaunchAgents/com.minsky.daemon.plist" ]; then
+    MINSKY_INSTALL_DAEMON_QUIET=1 "$0" install-daemon "$_target_host" 2>/dev/null || true
+  fi
+
   if _daemon_running_for_host "$_target_host"; then
     _pid=$(cat "$MINSKY_DAEMON_PID")
     echo "minsky: daemon already running (PID $_pid) for $(basename "$_target_host")"
@@ -3439,18 +3442,11 @@ if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" !=
     exec "$0" watch "$_target_host"
   fi
 
-  # No daemon running — start one, auto-install launchd persistence, attach.
-  # Persistence is DEFAULT — minsky should survive reboots without extra steps.
+  # No daemon running — start one and attach. Persistent supervisors are
+  # operator-explicit (`minsky install-daemon`) and are only refreshed above
+  # once the plist already exists.
   echo "minsky: no daemon running for $(basename "$_target_host"). Starting (scope: ${_launch_args[0]})..."
   "$0" --daemon "${_launch_args[@]}"
-
-  # Auto-install launchd plist if not already installed (macOS only).
-  # This makes the daemon survive reboots by default. The operator
-  # can remove it with `minsky uninstall-daemon`.
-  if [ "$(uname)" = "Darwin" ] && ! launchctl list 2>/dev/null | grep -q 'com.minsky.daemon'; then
-    echo "minsky: installing launchd persistence (survives reboot)..."
-    "$0" install-daemon "$_target_host" 2>/dev/null || true
-  fi
 
   sleep 2
   exec "$0" watch "$_target_host"

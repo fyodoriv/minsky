@@ -151,6 +151,28 @@ describe("decideActions — plist regeneration trigger", () => {
     expect(result.actions).not.toContainEqual(expect.objectContaining({ kind: "regen-plist" }));
   });
 
+  test("bin/minsky-run.sh changed + plist exists + macOS → emits regen-plist", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["bin/minsky-run.sh"],
+      plistExists: true,
+      platform: "darwin",
+    });
+    expect(result.actions).toContainEqual(
+      expect.objectContaining({ kind: "regen-plist", warnDaemonRunning: false }),
+    );
+  });
+
+  test("runtime script changed + plist missing → no regen-plist", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["bin/minsky-run.sh"],
+      plistExists: false,
+      platform: "darwin",
+    });
+    expect(result.actions).not.toContainEqual(expect.objectContaining({ kind: "regen-plist" }));
+  });
+
   test("bin/minsky changed on Linux → no regen-plist (launchd is macOS-only)", () => {
     const result = decideActions({
       ...baseInput,
@@ -333,6 +355,46 @@ describe("decideActions — request-daemon-restart trigger", () => {
       platform: "darwin",
     });
     expect(result.actions.find((a) => a.kind === "request-daemon-restart")).toBeDefined();
+  });
+
+  test("bin/minsky-run.sh changed + daemon running → emits request-daemon-restart", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["bin/minsky-run.sh"],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    const restart = result.actions.find((a) => a.kind === "request-daemon-restart");
+    expect(restart).toBeDefined();
+    if (restart !== undefined && restart.kind === "request-daemon-restart") {
+      expect(restart.reason).toMatch(/bin\/minsky-run\.sh/);
+      expect(restart.changedFiles).toContain("bin/minsky-run.sh");
+    }
+  });
+
+  test("scripts/spawn_agent.py changed + daemon running → emits request-daemon-restart", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["scripts/spawn_agent.py"],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    const restart = result.actions.find((a) => a.kind === "request-daemon-restart");
+    expect(restart).toBeDefined();
+    if (restart !== undefined && restart.kind === "request-daemon-restart") {
+      expect(restart.reason).toMatch(/scripts\/spawn_agent\.py/);
+      expect(restart.changedFiles).toContain("scripts/spawn_agent.py");
+    }
+  });
+
+  test("unrelated scripts/*.mjs change → no request-daemon-restart", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["scripts/benchmark-run.mjs"],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    expect(result.actions.find((a) => a.kind === "request-daemon-restart")).toBeUndefined();
   });
 
   test("daemon NOT running → no request-daemon-restart even when runtime code changed", () => {

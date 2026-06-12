@@ -413,6 +413,29 @@ describe("daemon-restart: launchd KeepAlive contract", () => {
     // "already up to date" line on every pull (would be too noisy).
     expect(src).toContain("MINSKY_INSTALL_DAEMON_QUIET");
   });
+
+  test("auto-install-on-minsky-run: smart attach refreshes existing plist before attach/start", () => {
+    const src = readFileSync(MINSKY_BIN, "utf8");
+    const smartBlock = src.match(/# ── 3b\. Smart auto-attach[\s\S]*?# ── 4\. Daemon mode/);
+    expect(smartBlock).not.toBeNull();
+    const block = smartBlock?.[0] ?? "";
+    const installIndex = block.indexOf("install-daemon");
+    const attachIndex = block.indexOf("if _daemon_running_for_host");
+    expect(block).toContain('com.minsky.daemon.plist" ]');
+    expect(block).toContain("MINSKY_INSTALL_DAEMON_QUIET");
+    expect(installIndex).toBeGreaterThan(-1);
+    expect(attachIndex).toBeGreaterThan(-1);
+    expect(installIndex).toBeLessThan(attachIndex);
+  });
+
+  test("auto-install-on-minsky-run: missing plist stays explicit-start, not first-run persistence", () => {
+    const src = readFileSync(MINSKY_BIN, "utf8");
+    const smartBlock = src.match(/# ── 3b\. Smart auto-attach[\s\S]*?# ── 4\. Daemon mode/);
+    expect(smartBlock).not.toBeNull();
+    const block = smartBlock?.[0] ?? "";
+    expect(block).not.toContain("! launchctl list");
+    expect(block).not.toContain("installing launchd persistence");
+  });
 });
 
 // ─── end-to-end: simulated crash recovery ───────────────────

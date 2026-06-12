@@ -15,21 +15,22 @@ A post-merge git hook handles most of the redeploy automatically.
 | Change in the pull | Auto-runs |
 | --- | --- |
 | `pnpm-lock.yaml` or `package.json` | `pnpm install` (refreshes `dist/`) |
-| `bin/minsky` (and your plist exists) | Regenerates the launchd plist (no daemon kill) |
+| `bin/minsky` or `bin/minsky-run.sh` (and your plist exists) | Refreshes the launchd plist via idempotent `minsky install-daemon` |
 | `distribution/systemd/*.{service,target}` | `systemctl --user daemon-reload` (Linux) |
+| Daemon runtime code while the daemon is running | Writes `~/.minsky/restart-requested`; the loop exits between iterations so the supervisor restarts on fresh code |
 | Any of the above | `pre-pr-lint --stage=fast` as advisory sanity check |
 
 Defined in `scripts/post-merge-auto-install.mjs`.
 
 ## What it does NOT auto-do
 
-Restart the running daemon. The current iteration may be mid-spawn and killing it would waste compute, so picking up new daemon-loop behaviour still requires:
+Bootstrap a first-time supervisor. Starting a resource-consuming launchd/systemd unit is operator-explicit. For launchd:
 
 ```bash
-minsky update   # graceful stop → pull → rebuild → restart from next iteration
+minsky install-daemon
 ```
 
-Tracked as P0 `minsky-auto-restart-daemon-on-pull` in `TASKS.md` — the goal is to make `minsky update` redundant by having the daemon notice a sentinel between iterations and gracefully restart itself.
+If a plist already exists, `git pull` and no-arg `minsky` refresh it automatically. If the daemon is already running and runtime code changed, the post-pull hook requests a restart through the sentinel so the current iteration can finish first.
 
 ## Opting out
 
@@ -56,13 +57,13 @@ minsky           # restart daemon
 
 ```bash
 git log -1 --oneline             # confirm pull happened
-~/apps/<minsky-repo>/bin/minsky --version    # confirm version bump (after restart)
+~/apps/<minsky-repo>/bin/minsky --version    # confirm version bump
 minsky status                    # confirm daemon is running fresh PID
 ```
 
 ## Edge cases
 
 - **Pull conflicts with local changes in the install dir.** `git pull` fails; resolve conflicts before re-running. The post-merge hook doesn't run until the merge completes.
-- **Daemon was already updating when you pulled.** Race-free by design — the auto-install hook never touches a running daemon; the restart step is yours to time.
+- **Daemon was already updating when you pulled.** Race-free by design — the auto-install hook requests a between-iteration restart instead of killing in-flight work.
 - **`pnpm install` fails (network / registry).** The hook surfaces a warning; the daemon keeps running on the old code. Re-run `pnpm install` manually when network is back.
-- **Plist regeneration changes the binary path.** Only triggered when `bin/minsky` changes. The new plist takes effect after the next daemon restart.
+- **Plist regeneration changes the binary path.** Triggered only when daemon install-relevant files change and a plist already exists. The new plist takes effect after the next daemon restart.
