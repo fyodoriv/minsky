@@ -522,9 +522,10 @@ describe("runAutoInstall — daemon-running detection", () => {
       );
       writeFileSync(join(repo, "bin", "minsky"), "old\n");
       const fakePgrep = `#!/bin/sh
-pattern="\${2:-}"
-printf '%s\\n' '87810 bash /Users/fivanishche/apps/tooling/minsky/bin/minsky-run.sh --loop --host /Users/fivanishche/apps/tooling/minsky' | grep -E "$pattern" >/dev/null && exit 0
-exit 1
+PATTERN="\${2:-}" node <<'NODE'
+const line = "87810 bash /Users/fivanishche/apps/tooling/minsky/bin/minsky-run.sh --loop --host /Users/fivanishche/apps/tooling/minsky";
+process.exit(new RegExp(process.env.PATTERN ?? "").test(line) ? 0 : 1);
+NODE
 `;
       writeFileSync(join(fakeBin, "pgrep"), fakePgrep);
       writeFileSync(join(fakeBin, "pnpm"), "#!/bin/sh\nexit 0\n");
