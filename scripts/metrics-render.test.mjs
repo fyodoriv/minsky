@@ -10,6 +10,7 @@ import { describe, expect, test } from "vitest";
 import {
   DEFAULT_OUTPUT_RELATIVE,
   dateToMidnightUtcMs,
+  extractPriorRawValues,
   mapSnapshotToObservations,
   runMetricsRender,
 } from "./metrics-render.mjs";
@@ -239,6 +240,163 @@ describe("runMetricsRender — pipeline", () => {
     expect(md).toContain("3.4");
     expect(md).not.toContain("unexpected_id");
     expect(md).not.toContain("999");
+  });
+});
+
+describe("extractPriorRawValues", () => {
+  test("empty / non-string input → empty map (genesis-safe)", () => {
+    expect(extractPriorRawValues("")).toEqual({});
+    // @ts-expect-error — non-string defensive branch
+    expect(extractPriorRawValues(undefined)).toEqual({});
+  });
+
+  test("a document with one fresh + one stub section returns BOTH raw values verbatim", () => {
+    const doc = [
+      "# METRICS.md — canonical observability surface",
+      "",
+      "preamble blah blah",
+      "",
+      "## loop-uptime — Loop uptime",
+      "",
+      "_Updated: 2026-05-29T00:00:00Z · Budget: 7d_",
+      "",
+      "**Value:** 11% (27/238 validated iterations over 30d) fraction",
+      "",
+      "**How to view:** `cmd`",
+      "",
+      "## task-throughput — Task throughput",
+      "",
+      "_Budget: 7d_",
+      "",
+      "**Value:** (stub) — no observation captured yet (follow-up)",
+      "",
+      "**How to view:** `cmd`",
+    ].join("\n");
+    const raw = extractPriorRawValues(doc);
+    expect(raw["loop-uptime"]).toBe("11% (27/238 validated iterations over 30d) fraction");
+    expect(raw["task-throughput"]).toBe("(stub) — no observation captured yet (follow-up)");
+  });
+
+  test("section without a `**Value:**` line is silently skipped", () => {
+    const doc = ["# header", "", "## loop-uptime — Loop uptime", "", "no value line here"].join(
+      "\n",
+    );
+    expect(extractPriorRawValues(doc)).toEqual({});
+  });
+
+  test("preamble's literal `## ` does not produce a ghost entry", () => {
+    // Older preambles literally embedded `## ` in prose. The split slice
+    // skips the first chunk; this just pins the contract.
+    const doc = ["# header", "", "This sentence mentions `## something` literally.", ""].join("\n");
+    expect(extractPriorRawValues(doc)).toEqual({});
+  });
+});
+
+describe("runMetricsRender — prior-value carry-forward (real → stub overwrite guard)", () => {
+  // Regression for the live 2026-06-03 incident: a daemon regen with a
+  // non-`SUCCESS_METRICS`-aligned snapshot id namespace produced an
+  // all-stub `docs/METRICS.md` and flipped milestone-alignment from
+  // 14/14 to 5/14, wedging every push on the pre-push fast gate. The
+  // CLI now reads the prior file and threads its `**Value:**` lines as
+  // `priorRawValues` so a no-fresh-observation regen carries the
+  // committed values forward rather than overwriting them.
+
+  test("empty snapshot + prior real values → carry-forward (no real → stub downgrade)", () => {
+    const md = runMetricsRender({
+      metrics: FIXTURE_METRICS,
+      snapshot: undefined,
+      snapshotTimestampMs: SNAPSHOT_TS,
+      nowMs: NOW,
+      priorRawValues: {
+        "loop-uptime": "11% (27/238 validated iterations over 30d) fraction",
+        "task-throughput": "28.9 commits/day (866 in 30d) tasks/day",
+        "extraction-count": "1 count",
+      },
+    });
+    expect(md).toContain("**Value:** 11% (27/238 validated iterations over 30d) fraction");
+    expect(md).toContain("**Value:** 28.9 commits/day (866 in 30d) tasks/day");
+    expect(md).toContain("**Value:** 1 count");
+    expect(md).not.toContain("**Value:** (stub)");
+  });
+
+  test("non-aligned snapshot ids + prior real values → still carry-forward (mirrors the live incident)", () => {
+    // Snapshot exists but its keys (`active-days`, `pr-rate`) don't map
+    // to any SUCCESS_METRICS id — the all-stub regen scenario. With
+    // priorRawValues passed in, every section preserves the prior value.
+    const md = runMetricsRender({
+      metrics: FIXTURE_METRICS,
+      snapshot: { "active-days": { value: 17 }, "pr-rate": { value: 0.15 } },
+      snapshotTimestampMs: SNAPSHOT_TS,
+      nowMs: NOW,
+      priorRawValues: {
+        "loop-uptime": "11% (27/238) fraction",
+        "task-throughput": "28.9 tasks/day",
+        "extraction-count": "1 count",
+      },
+    });
+    const stubMatches = md.match(/\*\*Value:\*\* \(stub\)/g) ?? [];
+    expect(stubMatches).toHaveLength(0);
+    expect(md).toContain("Carry-forward: prior value retained");
+  });
+
+  test("partial overlap: snapshot has one aligned id; the rest carry forward", () => {
+    const md = runMetricsRender({
+      metrics: FIXTURE_METRICS,
+      snapshot: { "task-throughput": { value: 3.4 } },
+      snapshotTimestampMs: SNAPSHOT_TS,
+      nowMs: NOW,
+      priorRawValues: {
+        "loop-uptime": "11% (27/238) fraction",
+        // extraction-count has no prior either → stub falls through
+      },
+    });
+    // Fresh: task-throughput
+    expect(md).toContain("**Value:** 3.4 tasks/day");
+    // Carry-forward: loop-uptime
+    expect(md).toContain("**Value:** 11% (27/238) fraction");
+    // Stub: extraction-count
+    expect(md).toContain("## extraction-count");
+    expect(md).toMatch(/extraction-count[\s\S]*?\(stub\) — no observation captured yet/);
+  });
+
+  test("priorRawValues containing `(stub)` are NOT carried forward (no stub-of-stub)", () => {
+    const md = runMetricsRender({
+      metrics: FIXTURE_METRICS,
+      snapshot: undefined,
+      snapshotTimestampMs: SNAPSHOT_TS,
+      nowMs: NOW,
+      priorRawValues: {
+        "loop-uptime": "(stub) — no observation captured yet (anything)",
+      },
+    });
+    // Falls through to the regular stub render — no `Carry-forward:` header
+    expect(md).not.toContain("Carry-forward:");
+    expect(md).toContain("**Value:** (stub) — no observation captured yet");
+  });
+
+  test("end-to-end: prior METRICS.md document round-trips through extract → render unchanged values", () => {
+    const priorDoc = [
+      "# METRICS.md — canonical observability surface",
+      "",
+      "preamble",
+      "",
+      "## loop-uptime — Loop uptime",
+      "",
+      "_Updated: 2026-05-29T00:00:00Z · Budget: 7d_",
+      "",
+      "**Value:** 11% (27/238 validated iterations over 30d) fraction",
+      "",
+      "**How to view:** `cmd`",
+      "",
+    ].join("\n");
+    const md = runMetricsRender({
+      metrics: FIXTURE_METRICS,
+      snapshot: undefined,
+      snapshotTimestampMs: SNAPSHOT_TS,
+      nowMs: NOW,
+      priorRawValues: extractPriorRawValues(priorDoc),
+    });
+    expect(md).toContain("**Value:** 11% (27/238 validated iterations over 30d) fraction");
   });
 });
 

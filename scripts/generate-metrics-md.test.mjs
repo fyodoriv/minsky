@@ -4,7 +4,11 @@
 
 import { describe, expect, test } from "vitest";
 
-import { buildMetricsMd, classifyFreshness } from "./generate-metrics-md.mjs";
+import {
+  buildMetricsMd,
+  classifyFreshness,
+  isCarryForwardCandidate,
+} from "./generate-metrics-md.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -270,6 +274,149 @@ describe("buildMetricsMd — 'Metrics to add' section", () => {
     expect(monoIdx).toBeGreaterThan(-1);
     expect(upIdx).toBeGreaterThan(-1);
     expect(monoIdx).toBeLessThan(upIdx);
+  });
+});
+
+describe("isCarryForwardCandidate", () => {
+  test("undefined → false (no prior to carry)", () => {
+    expect(isCarryForwardCandidate(undefined)).toBe(false);
+  });
+
+  test("empty string → false (parser sentinel for missing section)", () => {
+    expect(isCarryForwardCandidate("")).toBe(false);
+  });
+
+  test("whitespace-only string → false", () => {
+    expect(isCarryForwardCandidate("   ")).toBe(false);
+  });
+
+  test("`(stub) — ...` shape → false (stubs never carry forward)", () => {
+    expect(isCarryForwardCandidate("(stub) — no observation captured yet (follow-up)")).toBe(false);
+  });
+
+  test("`(stub) — last observation older than ...` → false", () => {
+    expect(isCarryForwardCandidate("(stub) — last observation older than 7d budget")).toBe(false);
+  });
+
+  test("real numeric value with unit → true", () => {
+    expect(isCarryForwardCandidate("11% (27/238 validated iterations over 30d) fraction")).toBe(
+      true,
+    );
+  });
+
+  test("clean scalar `88.0% (88/100 runs green) fraction` → true", () => {
+    expect(isCarryForwardCandidate("88.0% (88/100 runs green) fraction")).toBe(true);
+  });
+});
+
+describe("buildMetricsMd — carry-forward (acceptance criterion: real → stub overwrite guard)", () => {
+  // When a regen run has no fresh observation for a metric (snapshot id
+  // namespace not aligned with SUCCESS_METRICS) but the prior committed
+  // METRICS.md HAD a real value, the render must preserve that value
+  // (carry-forward) instead of overwriting it with `(stub)`. Otherwise
+  // the pre-push milestone-alignment gate flips red and wedges every push.
+
+  test("no fresh obs + prior real value → carry-forward (NOT stub)", () => {
+    const out = buildMetricsMd({
+      metrics: [sampleMetric],
+      nowMs: NOW,
+      priorRawValues: {
+        "loop-uptime": "11% (27/238 validated iterations over 30d) fraction",
+      },
+    });
+    expect(out).toContain("**Value:** 11% (27/238 validated iterations over 30d) fraction");
+    expect(out).not.toContain("**Value:** (stub)");
+    // Carry-forward signal so the operator knows the value may be stale.
+    expect(out).toContain("Carry-forward: prior value retained");
+  });
+
+  test("no fresh obs + prior `(stub)` value → falls through to fresh `(stub)` (no double-carry)", () => {
+    const out = buildMetricsMd({
+      metrics: [sampleMetric],
+      nowMs: NOW,
+      priorRawValues: {
+        "loop-uptime": "(stub) — no observation captured yet (some follow-up)",
+      },
+    });
+    expect(out).toContain("**Value:** (stub) — no observation captured yet");
+    expect(out).not.toContain("Carry-forward:");
+  });
+
+  test("fresh obs OVERRIDES prior carry-forward (fresh wins; no stale ghost)", () => {
+    const out = buildMetricsMd({
+      metrics: [sampleMetric],
+      observations: { "loop-uptime": { value: 0.99, timestampMs: NOW } },
+      nowMs: NOW,
+      priorRawValues: {
+        "loop-uptime": "11% (old) fraction",
+      },
+    });
+    expect(out).toContain("**Value:** 0.99 fraction");
+    expect(out).not.toContain("**Value:** 11% (old) fraction");
+    expect(out).not.toContain("Carry-forward:");
+  });
+
+  test("prior value present for one metric but not another → mixed render", () => {
+    const out = buildMetricsMd({
+      metrics: [sampleMetric, monotonicMetric],
+      nowMs: NOW,
+      priorRawValues: {
+        "loop-uptime": "11% (27/238) fraction",
+      },
+    });
+    expect(out).toContain("**Value:** 11% (27/238) fraction");
+    expect(out).toContain("**Value:** (stub) — no observation captured yet");
+  });
+
+  test("stale observation + prior real value → carry-forward (does NOT show the stale obs nor `(stub)`)", () => {
+    const stale = { value: 0.5, timestampMs: NOW - sampleMetric.freshnessBudgetMs - 1 };
+    const out = buildMetricsMd({
+      metrics: [sampleMetric],
+      observations: { "loop-uptime": stale },
+      nowMs: NOW,
+      priorRawValues: {
+        "loop-uptime": "11% (27/238) fraction",
+      },
+    });
+    expect(out).toContain("**Value:** 11% (27/238) fraction");
+    expect(out).not.toContain("**Value:** 0.5");
+    expect(out).not.toContain("(stub) — last observation older than");
+  });
+
+  test("carry-forward section retains metric metadata (How to view / Goal / Pivot / Anchor)", () => {
+    const out = buildMetricsMd({
+      metrics: [sampleMetric],
+      nowMs: NOW,
+      priorRawValues: { "loop-uptime": "11% (27/238) fraction" },
+    });
+    expect(out).toContain("**How to view:** `systemctl --user is-active minsky-tick-loop`");
+    expect(out).toContain("**Goal:** 99% / 97% / 95% (30 / 90 / 365 d)");
+    expect(out).toContain("**Pivot:** <90% over 30 d → reconsider supervisor design");
+    expect(out).toContain("**Anchor:** Beyer et al., _SRE_ 2016, Ch. 4 (SLI / SLO)");
+  });
+
+  test("carry-forward section preserves monotonic + milestone tags", () => {
+    const m = { ...monotonicMetric, milestone: "M2+" };
+    const out = buildMetricsMd({
+      metrics: [m],
+      nowMs: NOW,
+      priorRawValues: { "extraction-count": "1 count" },
+    });
+    expect(out).toContain("monotonic: ok");
+    expect(out).toContain("Milestone: M2+");
+  });
+
+  test("priorRawValues for an unknown id is silently ignored (no orphan section)", () => {
+    const out = buildMetricsMd({
+      metrics: [sampleMetric],
+      nowMs: NOW,
+      priorRawValues: {
+        "loop-uptime": "11% (27/238) fraction",
+        "ghost-metric": "999 phantoms",
+      },
+    });
+    expect(out).not.toContain("ghost-metric");
+    expect(out).not.toContain("999 phantoms");
   });
 });
 
