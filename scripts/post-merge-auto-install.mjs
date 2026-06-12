@@ -347,8 +347,13 @@ function resolveChangedFiles() {
  * @returns {boolean}
  */
 function detectDaemonRunning() {
+  const daemonPattern = [
+    "cross-repo-runner/bin/minsky-run",
+    "bin/minsky-run\\.sh",
+    "distribution/systemd/run-tick-loop\\.sh",
+  ].join("|");
   try {
-    execFileSync("pgrep", ["-f", "cross-repo-runner/bin/minsky-run"], {
+    execFileSync("pgrep", ["-f", daemonPattern], {
       stdio: "ignore",
     });
     return true;

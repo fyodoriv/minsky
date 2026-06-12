@@ -17,6 +17,19 @@
 // account for a new auth env-var family), gate auto-install behind
 // an opt-in env-var flip.
 
+import { execFileSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, test } from "vitest";
 
 import { decideActions } from "./post-merge-auto-install.mjs";
@@ -489,5 +502,84 @@ describe("decideActions — request-daemon-restart trigger", () => {
       "request-daemon-restart",
       "pre-pr-lint-fast",
     ]);
+  });
+});
+
+describe("runAutoInstall — daemon-running detection", () => {
+  test("bash minsky-run.sh loop counts as running for post-pull restart sentinel", () => {
+    const root = mkdtempSync(join(tmpdir(), "minsky-post-merge-auto-install-"));
+    try {
+      const repo = join(root, "repo");
+      const home = join(root, "home");
+      const fakeBin = join(root, "fake-bin");
+      mkdirSync(join(repo, "scripts"), { recursive: true });
+      mkdirSync(join(repo, "bin"), { recursive: true });
+      mkdirSync(home, { recursive: true });
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(
+        join(repo, "scripts", "post-merge-auto-install.mjs"),
+        readFileSync(new URL("./post-merge-auto-install.mjs", import.meta.url), "utf8"),
+      );
+      writeFileSync(join(repo, "bin", "minsky"), "old\n");
+      const fakePgrep = `#!/bin/sh
+pattern="\${2:-}"
+printf '%s\\n' '87810 bash /Users/fivanishche/apps/tooling/minsky/bin/minsky-run.sh --loop --host /Users/fivanishche/apps/tooling/minsky' | grep -E "$pattern" >/dev/null && exit 0
+exit 1
+`;
+      writeFileSync(join(fakeBin, "pgrep"), fakePgrep);
+      writeFileSync(join(fakeBin, "pnpm"), "#!/bin/sh\nexit 0\n");
+      chmodSync(join(fakeBin, "pgrep"), 0o755);
+      chmodSync(join(fakeBin, "pnpm"), 0o755);
+      execFileSync("git", ["init"], { cwd: repo, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repo });
+      execFileSync("git", ["config", "user.name", "Test Agent"], { cwd: repo });
+      execFileSync("git", ["add", "."], { cwd: repo });
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "commit.gpgsign=false",
+          "-c",
+          "core.hooksPath=/dev/null",
+          "commit",
+          "--no-gpg-sign",
+          "--no-verify",
+          "-m",
+          "initial",
+        ],
+        { cwd: repo, stdio: "ignore" },
+      );
+      writeFileSync(join(repo, "bin", "minsky"), "new\n");
+      execFileSync("git", ["add", "bin/minsky"], { cwd: repo });
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "commit.gpgsign=false",
+          "-c",
+          "core.hooksPath=/dev/null",
+          "commit",
+          "--no-gpg-sign",
+          "--no-verify",
+          "-m",
+          "update bin",
+        ],
+        { cwd: repo, stdio: "ignore" },
+      );
+
+      execFileSync(process.execPath, ["scripts/post-merge-auto-install.mjs"], {
+        cwd: repo,
+        env: { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env["PATH"] ?? ""}` },
+        stdio: "ignore",
+      });
+
+      const sentinel = join(home, ".minsky", "restart-requested");
+      expect(existsSync(sentinel)).toBe(true);
+      const payload = JSON.parse(readFileSync(sentinel, "utf8"));
+      expect(payload.reason).toBe("bin/minsky changed");
+      expect(payload.changedFiles).toEqual(["bin/minsky"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
