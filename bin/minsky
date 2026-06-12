@@ -1676,7 +1676,7 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
   doctor)
     if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
       cat <<'EOF'
-Usage: minsky doctor [--quiet]
+Usage: minsky doctor [--quiet] [--sandbox]
 
 Health probe for this host machine. Prints PASS / WARN / FAIL for
 each of: node 20+, git, gh CLI, pnpm, repo `.minsky/` directory,
@@ -1686,7 +1686,14 @@ but ≥2 bootstrapped hosts exist under its parent), OpenHands SDK
 installation, and any other invariant the supervisor needs.
 
 Flags:
-  --quiet   Only print FAIL lines + exit non-zero on any failure.
+  --quiet     Only print FAIL lines + exit non-zero on any failure.
+  --sandbox   Run only the macOS SBPL toolchain preflight (delegates
+              to scripts/check-supervisor-sandbox.mjs): test-execs
+              python3 / git / gh / claude / node and reads
+              ~/.gitconfig.local / ~/.config/gh / ~/.claude.json under
+              the real `(deny default)` profile, and asserts
+              CLAUDE_CODE_OAUTH_TOKEN is exported. Exits 0 with a
+              SKIPPED line on non-macOS hosts.
 
 Exit codes: 0 if every check passes; 1 if any check fails.
 
@@ -1720,9 +1727,25 @@ EOF
     # Source: M1 milestone exit criterion §13 (self-heal).
     _crit_fail=0
     _quiet=0
+    _sandbox_only=0
     for _a in "$@"; do
       [ "$_a" = "--quiet" ] && _quiet=1
+      [ "$_a" = "--sandbox" ] && _sandbox_only=1
     done
+
+    # `minsky doctor --sandbox` — preflight the SBPL profile against the live
+    # operator toolchain (sandbox-allowlist-derive-from-operator-toolchain).
+    # Delegates to scripts/check-supervisor-sandbox.mjs which test-execs
+    # python3 / git / gh / claude / node + reads ~/.gitconfig.local /
+    # ~/.config/gh / ~/.claude.json under the real `(deny default)` profile
+    # AND asserts CLAUDE_CODE_OAUTH_TOKEN is exported (gap 6 — auth via env,
+    # not Keychain). Exits non-zero on any gap with per-gap remediation;
+    # exits 0 on non-macOS hosts (graceful degrade — rule #7).
+    if [ "$_sandbox_only" = "1" ]; then
+      _bd_repo_dir="$(dirname "$(readlink "$0" 2>/dev/null || echo "$0")")/.."
+      [ -f "$_bd_repo_dir/scripts/check-supervisor-sandbox.mjs" ] || _bd_repo_dir="$(dirname "$0")/.."
+      exec node "$_bd_repo_dir/scripts/check-supervisor-sandbox.mjs" "$@"
+    fi
 
     _doctor_print() {
       # _doctor_print STATUS NAME MESSAGE
