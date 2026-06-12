@@ -1,4 +1,5 @@
 #!/bin/bash
+# <!-- scope: human-approved 2026-06-12 operator EPM-alert triage (AIFN-720) — watchdog runner must source lib-launchd-path.sh so launchd spawns never resolve /usr/bin/{node,python3} (CyberArk EPM kills them and pops security alerts) -->
 # Bash bootstrap for `com.minsky.watchdog` launchd LaunchAgent.
 #
 # Replaces `/usr/bin/env node` in the plist — CyberArk EPM blocks env
