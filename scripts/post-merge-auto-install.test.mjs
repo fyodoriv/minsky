@@ -570,7 +570,12 @@ NODE
 
       execFileSync(process.execPath, ["scripts/post-merge-auto-install.mjs"], {
         cwd: repo,
-        env: { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env["PATH"] ?? ""}` },
+        env: {
+          ...process.env,
+          CI: "",
+          HOME: home,
+          PATH: `${fakeBin}:${process.env["PATH"] ?? ""}`,
+        },
         stdio: "ignore",
       });
 
