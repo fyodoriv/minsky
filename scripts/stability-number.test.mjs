@@ -109,4 +109,43 @@ describe("stability-number smoke", () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/(%|no data)/);
   });
+
+  // Regression: `--json` as the FIRST arg must not be consumed as the
+  // host-dir. The documented Measurement command for the 8h proof is
+  // literally `node scripts/stability-number.mjs --json`, which used to
+  // resolve host-dir="--json" → no-data even with real records present.
+  test("--json before any positional ⇒ uses cwd, not the flag, as host-dir", () => {
+    const records = Array.from({ length: 4 }, () => ({
+      ts: new Date().toISOString(),
+      verdict: "validated",
+      pr_url: "x",
+    }));
+    const dir = makeFixtureHost(records);
+    const r = run(["--json"], dir);
+    expect(r.status).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.source).toBe("experiment-store");
+    expect(parsed.total).toBe(4);
+    expect(parsed.stability_pct).toBe(100);
+  });
+
+  // Regression: drained-queue ticks are bookkeeping, not iterations —
+  // they must be excluded from the SLI (valid-event qualification,
+  // shared with stability-report via lib/stability.isTaskAttempt).
+  test("drained + legacy-aborted records are excluded from the number", () => {
+    const records = [
+      { ts: new Date().toISOString(), verdict: "validated", pr_url: "x" },
+      { ts: new Date().toISOString(), verdict: "spawn-failed", pr_url: null },
+      { ts: new Date().toISOString(), verdict: "drained", notes: "no eligible task" },
+      { ts: new Date().toISOString(), verdict: "drained", notes: "no eligible task" },
+      { ts: new Date().toISOString(), verdict: "aborted", notes: "no eligible task" },
+    ];
+    const dir = makeFixtureHost(records);
+    const r = run([dir, "--json"], dir);
+    expect(r.status).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.total).toBe(2);
+    expect(parsed.successful).toBe(1);
+    expect(parsed.stability_pct).toBe(50);
+  });
 });
