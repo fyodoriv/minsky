@@ -472,6 +472,29 @@ Per AGENTS.md rule #3 ("Acceptance-scenario gate"): every test file references o
 - **Then** the process still exits `0` (the dispatcher must never make the loop worse than no dispatcher)
 - **And** the error is reported on stderr, one line per heal
 
+### Scenario: daily-metrics-regen publishes a PR when docs/METRICS.md is stale on main
+
+- **Given** a minsky host whose committed `docs/METRICS.md` on `origin/main` references yesterday's `.minsky/metric-snapshots/<date>.json`
+- **And** no `chore/metrics-daily-regen-<today>` branch exists on `origin`
+- **When** `scripts/daily-metrics-regen.mjs` runs (fired by `com.minsky.daily-metrics` / `minsky-daily-metrics.timer`)
+- **Then** it runs `collect-metrics` + `metrics-render --output <tmpfile>` without touching the shared working tree
+- **And** it creates a plumbing commit on top of `origin/main` containing ONLY `docs/METRICS.md`
+- **And** it pushes `refs/heads/chore/metrics-daily-regen-<today>` and opens a PR via `gh pr create`
+- **And** the PR body carries `## Why needed`, `## Hypothesis self-grade` (Predicted/Observed/Match/Lesson with the captured `check-metric-freshness` output as Observed), the `<!-- security: not-applicable — … -->` opt-out, and `## Vision trace`
+
+### Scenario: daily-metrics-regen is a no-op when main already carries today's render
+
+- **Given** `origin/main`'s `docs/METRICS.md` already references `.minsky/metric-snapshots/<today>.json`
+- **When** `scripts/daily-metrics-regen.mjs` runs
+- **Then** it exits 0 without collecting, rendering, branching, or calling `gh`
+
+### Scenario: daily-metrics-regen is a no-op when the regen branch already exists or the render is unchanged
+
+- **Given** `chore/metrics-daily-regen-<today>` already exists on `origin` (an earlier fire this UTC date published it)
+- **When** `scripts/daily-metrics-regen.mjs` runs
+- **Then** it exits 0 without pushing a second branch or opening a duplicate PR
+- **And** when the freshly rendered markdown is byte-identical to `origin/main`'s `docs/METRICS.md`, it exits 0 without committing
+
 ## Status
 
 - **Phase**: Phase 1 of 2 shipped 4 automated heals + MTTR ledger + reporter + chaos test. Phase 2 shipped the remaining 7 helpers (11 total, chaos-validated) and `scripts/heal-dispatch.mjs` — the production binding that fires the unambiguous-seam subset at the `pre-walk` boundary of `bin/minsky-run.sh --loop` and writes the live ledger.

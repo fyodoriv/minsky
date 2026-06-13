@@ -1,0 +1,9 @@
+id: stability-number-flag-arg-parsing
+hypothesis: |
+  scripts/stability-number.mjs reads the host-dir as a bare process.argv[2], so the documented 8h-proof Measurement command `node scripts/stability-number.mjs --json` resolves host-dir="--json" → ./--json/.minsky/... → no-data, reporting null stability even when the experiment-store holds real validated iterations. It also has its own inline record-counting that never received the drained-queue exclusion, so it counts idle bookkeeping ticks in the denominator. Skipping flag args when picking the positional host-dir, and filtering records through lib/stability.isTaskAttempt, makes `--json` return the true task-attempt ratio and aligns the number with stability-report.
+success: "`node scripts/stability-number.mjs --json` from a host with validated records returns source=experiment-store with a non-null stability_pct equal to stability-report's 7d ratio; drained/legacy-aborted records are excluded from total; the stability-number test suite grows by 2 regression cases and stays green (7 passed)."
+pivot: "if reusing lib/stability.isTaskAttempt drifts the number away from stability-report (different window or rounding), fold stability-number entirely into a thin CLI over computeHostStability instead of keeping its own parse loop."
+measurement: "npx vitest run scripts/stability-number.test.mjs"
+timeout_seconds: 120
+anchor: |
+  Beyer, Jones, Petoff, Murphy (eds.), *Site Reliability Engineering* (2016), Ch. 4 — the SLI's own measurement instrument must be correct; a broken measurement command is indistinguishable from a broken system.

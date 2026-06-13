@@ -68,6 +68,10 @@ Three commands cover the everyday surface:
 
 The supervisor (`bin/tick-loop.mjs`) wires `metricsRenderSeam` under the same `MINSKY_CHANGELOG_ENABLE` umbrella as the snapshot + changelog legs. Once per UTC date, after a successful daemon iteration, the seam spawns `bin/minsky metrics render --date <today>` and writes `METRICS.md`. The mtime of the resulting file is the gate: if its UTC date matches today, the render is skipped on subsequent iterations (cheap probe — no parsing). A snapshot-capture failure (e.g. `gh` rate-limit) does NOT suppress today's render — yesterday's snapshot still produces a usable `METRICS.md` rather than no `METRICS.md` (Helland 2007 again — degrade visibly, never silently).
 
+### Daily regen must LAND ON MAIN
+
+The daemon-side render above only refreshes the *working tree*. The freshness gate reads the **committed** `docs/METRICS.md`, and the `cross-repo-pr-rate` row's 1-day budget rolls at midnight UTC — so a render that never merges leaves main red every midnight (observed 2026-06-11T00:00Z, hand-unwedged by PR #1208). The scheduled heal is `scripts/daily-metrics-regen.mjs`, fired by `com.minsky.daily-metrics` (launchd, hourly at :10 — the local-time-safe equivalent of 00:10 UTC) / `minsky-daily-metrics.timer` (systemd, 00:10 UTC) via `distribution/systemd/run-daily-metrics.sh`: it runs collect + render against a tempfile (never the shared working tree), builds a plumbing commit on top of `origin/main` containing only `docs/METRICS.md`, pushes `chore/metrics-daily-regen-<date>`, and opens the PR. One PR per UTC date — the already-rendered-today / branch-exists / no-change guards make every other fire a silent no-op. Pre-registration: `experiments/daily-metrics-regen-lands-on-main.yaml`. Opt-out: `MINSKY_DAILY_METRICS=off`.
+
 ## Pivots
 
 The discipline has three pre-registered pivot signals (rule #9 — when do we abandon the *approach*, not just the change):

@@ -216,19 +216,58 @@ function closePrAsSupersededViaGh(prNumber) {
 }
 
 /**
+ * I/O seam: re-fetch the PR's CURRENT mergeStateStatus right before a
+ * destructive close. Returns "UNKNOWN" on any failure — which is NOT a
+ * stuck state, so a flaky recheck fails SAFE (skip the close, retry
+ * next cycle) rather than closing on stale evidence.
+ *
+ * @param {number} prNumber
+ * @returns {string}
+ */
+function recheckMergeStateViaGh(prNumber) {
+  try {
+    const out = execFileSync(
+      "gh",
+      ["pr", "view", String(prNumber), "--json", "mergeStateStatus", "--jq", ".mergeStateStatus"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    return out.trim() || "UNKNOWN";
+  } catch {
+    return "UNKNOWN";
+  }
+}
+
+/**
  * Execute a single rebase decision. Extracted to keep
  * `executeDecisions` under biome's cognitive-complexity ceiling.
  *
+ * Before the destructive close, the PR's CURRENT mergeStateStatus is
+ * re-fetched (`recheckFn`): a contributor (or the PR author's own
+ * rebase) may have fixed the branch between the snapshot and this
+ * execute step. Observed live 2026-06-11: PR #1213 was rebased green
+ * by its author while the janitor held a stale CONFLICTING snapshot,
+ * and the janitor closed it anyway. Close fires only when the fresh
+ * state is still stuck (TOCTOU guard on a destructive action).
+ *
  * @param {RebaseDecision} d
- * @param {{ rebaseFn: (n: number) => "rebased" | "conflict" | "transient", closeFn: (n: number) => void }} io
- * @returns {{ pr: number, outcome: "rebased" | "closed-superseded" | "transient-error", reason: string, stuckState?: "DIRTY" | "CONFLICTING" | undefined }}
+ * @param {{ rebaseFn: (n: number) => "rebased" | "conflict" | "transient", closeFn: (n: number) => void, recheckFn: (n: number) => string }} io
+ * @returns {{ pr: number, outcome: "rebased" | "closed-superseded" | "recovered-externally" | "transient-error", reason: string, stuckState?: "DIRTY" | "CONFLICTING" | undefined }}
  */
-function executeOneRebase(d, { rebaseFn, closeFn }) {
+function executeOneRebase(d, { rebaseFn, closeFn, recheckFn }) {
   const result = rebaseFn(d.pr);
   if (result === "rebased") {
     return { pr: d.pr, outcome: "rebased", reason: d.reason, stuckState: d.stuckState };
   }
   if (result === "conflict") {
+    const freshState = recheckFn(d.pr);
+    if (!STUCK_MERGE_STATES.includes(freshState)) {
+      return {
+        pr: d.pr,
+        outcome: "recovered-externally",
+        reason: `${d.reason} (fresh mergeStateStatus=${freshState} — recovered since snapshot; close skipped)`,
+        stuckState: d.stuckState,
+      };
+    }
     closeFn(d.pr);
     return {
       pr: d.pr,
@@ -252,12 +291,13 @@ function executeOneRebase(d, { rebaseFn, closeFn }) {
  * @param {{
  *   rebaseFn: (n: number) => "rebased" | "conflict" | "transient",
  *   closeFn: (n: number) => void,
+ *   recheckFn: (n: number) => string,
  *   dryRun: boolean,
  * }} io
- * @returns {readonly { pr: number, outcome: "rebased" | "closed-superseded" | "skipped" | "transient-error" | "dry-run", reason: string, stuckState?: "DIRTY" | "CONFLICTING" | undefined }[]}
+ * @returns {readonly { pr: number, outcome: "rebased" | "closed-superseded" | "recovered-externally" | "skipped" | "transient-error" | "dry-run", reason: string, stuckState?: "DIRTY" | "CONFLICTING" | undefined }[]}
  */
-export function executeDecisions(decisions, { rebaseFn, closeFn, dryRun }) {
-  /** @type {{ pr: number, outcome: "rebased" | "closed-superseded" | "skipped" | "transient-error" | "dry-run", reason: string, stuckState?: "DIRTY" | "CONFLICTING" | undefined }[]} */
+export function executeDecisions(decisions, { rebaseFn, closeFn, recheckFn, dryRun }) {
+  /** @type {{ pr: number, outcome: "rebased" | "closed-superseded" | "recovered-externally" | "skipped" | "transient-error" | "dry-run", reason: string, stuckState?: "DIRTY" | "CONFLICTING" | undefined }[]} */
   const outcomes = [];
   for (const d of decisions) {
     if (d.action === "skip") {
@@ -274,7 +314,7 @@ export function executeDecisions(decisions, { rebaseFn, closeFn, dryRun }) {
       continue;
     }
     if (d.action === "rebase") {
-      outcomes.push(executeOneRebase(d, { rebaseFn, closeFn }));
+      outcomes.push(executeOneRebase(d, { rebaseFn, closeFn, recheckFn }));
     }
   }
   return outcomes;
@@ -328,6 +368,7 @@ if (isMain) {
   const outcomes = executeDecisions(decisions, {
     rebaseFn: rebasePrViaGh,
     closeFn: closePrAsSupersededViaGh,
+    recheckFn: recheckMergeStateViaGh,
     dryRun,
   });
   const rollup = rollupOutcomes(outcomes);
