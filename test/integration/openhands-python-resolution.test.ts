@@ -95,9 +95,6 @@ describe("bin/minsky-run.sh — openhands python resolution", () => {
     expect(result.status ?? 1).not.toBe(0);
   });
 
-  // tick-loop-openhands-preflight-gating: the invariant must be SKIPPED
-  // when the resolved agent is not openhands so a claude-only operator
-  // does not need openhands installed (rule #2 — backend is a seam).
   test("invariant SKIPPED when cloud_agent=claude even if python cannot import openhands", () => {
     if (!existsSync("/usr/bin/python3")) {
       return;
