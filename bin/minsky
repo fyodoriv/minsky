@@ -214,11 +214,18 @@ _minsky_assert_built() {
 
   # A runnable Node runner is a NON-EMPTY .mjs (`-s`): the gutted
   # Path-A placeholder is a zero-byte file, which `-f` would wrongly
-  # accept. The bash runner just needs to exist + be executable.
+  # accept.
   if [ -s "$_ab_node_runner" ]; then
     return 0
   fi
-  if [ -x "$_ab_bash_runner" ]; then
+  # The bash runner is accepted on NON-EMPTY (`-s`), NOT executable
+  # (`-x`): the published npm tarball strips the exec bit from every
+  # bin/ file except the `bin`-entry `minsky` itself (npm only chmods
+  # the entry), so `bin/minsky-run.sh` lands mode 644 in the artifact.
+  # The runner is always invoked via `bash "$runner"` downstream, so the
+  # exec bit is irrelevant — gating on it wrongly rejected the npx path.
+  # See blocker (B), TASKS.md `npx-integrated-run-blockers`.
+  if [ -s "$_ab_bash_runner" ]; then
     return 0
   fi
 
@@ -312,19 +319,25 @@ _run_bash_skeleton_probes() {
     _bd_skeleton_crit_fail=1
   fi
 
-  # CRITICAL — bin/minsky-run.sh executable
-  if [ -x "$_bd_repo_dir/bin/minsky-run.sh" ]; then
+  # CRITICAL — bin/minsky-run.sh present + non-empty. `-s` not `-x`:
+  # these scripts are always invoked via `bash "$script"`, so the exec
+  # bit is irrelevant — and the published npm tarball ships bin/ files
+  # mode 644 (npm only chmods the `bin`-entry). Gating on `-x` made
+  # `doctor` crit-fail on every npx install. See blocker (B), TASKS.md
+  # `npx-integrated-run-blockers`.
+  if [ -s "$_bd_repo_dir/bin/minsky-run.sh" ]; then
     _bd_print PASS "minsky-run.sh" "$_bd_repo_dir/bin/minsky-run.sh"
   else
-    _bd_print FAIL "minsky-run.sh" "not executable at $_bd_repo_dir/bin/minsky-run.sh (run: chmod +x $_bd_repo_dir/bin/minsky-run.sh)"
+    _bd_print FAIL "minsky-run.sh" "missing or empty at $_bd_repo_dir/bin/minsky-run.sh (run \`pnpm install\` from $_bd_repo_dir)"
     _bd_skeleton_crit_fail=1
   fi
 
-  # CRITICAL — bin/minsky-default-session.sh executable
-  if [ -x "$_bd_repo_dir/bin/minsky-default-session.sh" ]; then
+  # CRITICAL — bin/minsky-default-session.sh present + non-empty (`-s`,
+  # invoked via bash; see the minsky-run.sh note above).
+  if [ -s "$_bd_repo_dir/bin/minsky-default-session.sh" ]; then
     _bd_print PASS "default-session.sh" "$_bd_repo_dir/bin/minsky-default-session.sh"
   else
-    _bd_print FAIL "default-session.sh" "not executable at $_bd_repo_dir/bin/minsky-default-session.sh"
+    _bd_print FAIL "default-session.sh" "missing or empty at $_bd_repo_dir/bin/minsky-default-session.sh"
     _bd_skeleton_crit_fail=1
   fi
 
@@ -584,8 +597,12 @@ IUSAGE
   local _io_repo_dir
   _io_repo_dir=$(dirname "$(dirname "$_io_real_bin")")
   local _io_runner="$_io_repo_dir/bin/minsky-run.sh"
-  if [ ! -x "$_io_runner" ]; then
-    echo "--once: $_io_runner not executable (run: chmod +x $_io_runner)" >&2
+  # `-s` (non-empty), not `-x`: the runner is invoked via `bash
+  # "$_io_runner"` below, so the exec bit is irrelevant — and the
+  # published npm tarball ships it mode 644 (npm only chmods the
+  # `bin`-entry). Gating on `-x` wrongly rejected the npx path.
+  if [ ! -s "$_io_runner" ]; then
+    echo "--once: $_io_runner missing or empty (run \`pnpm install\` from $_io_repo_dir)" >&2
     return 1
   fi
   # PR #875: upgrade the doctor's "config not found" check from a
@@ -3181,6 +3198,27 @@ fi
 SHIM_HOME="${HOME:-/root}"
 SHIM_ENV_REPO="${MINSKY_REPO:-}"
 
+# Self-resolution candidate: the directory that contains THIS bin/minsky,
+# one level up. When invoked from an unpacked npx package
+# (`npx -y @fyodoriv/minsky`), the package IS the minsky repo — but the
+# resolver historically only checked $MINSKY_REPO and HOME-relative clone
+# paths, so the npx artifact could never find itself. Compute the package
+# root here (exec-bit-independent realpath) and feed it to the resolver as
+# a first-class candidate. See blocker (A), TASKS.md
+# `npx-integrated-run-blockers`.
+SHIM_SELF_ROOT="$(dirname "$(dirname "$(_minsky_realpath "$0")")")"
+export SHIM_SELF_ROOT
+
+# The resolver runs in a command substitution. Under `set -euo pipefail` a
+# non-zero exit from `$( … )` in a simple assignment ABORTS the script —
+# which historically killed `bin/minsky` BEFORE the RESOLVE_EXIT/echo
+# recovery block could print the actionable error (the `2>&1` capture
+# folded stderr into the dead variable). Disable `set -e` across the
+# substitution so the resolver's exit code is observable, then re-enable
+# it. stdout carries ONLY the resolved path; stderr carries the actionable
+# error — kept on separate streams so the error actually reaches the
+# operator. See blocker (A), TASKS.md `npx-integrated-run-blockers`.
+set +e
 MINSKY_REPO_PATH="$(node --input-type=module -e "
   import { existsSync } from 'node:fs';
   import { homedir } from 'node:os';
@@ -3206,6 +3244,15 @@ MINSKY_REPO_PATH="$(node --input-type=module -e "
     process.stderr.write(\`minsky: MINSKY_REPO=\${envRepo} but path does not exist\\n\`);
     process.exit(1);
   }
+  // Self-resolution: the unpacked package directory that ships THIS
+  // bin/minsky. Accept it only when it carries a runnable bash runner
+  // (a non-empty bin/minsky-run.sh) so an arbitrary parent dir can't
+  // false-positive. This is the npx path's primary candidate.
+  const selfRoot = process.env.SHIM_SELF_ROOT;
+  if (selfRoot && selfRoot.length > 0 && existsSync(\`\${selfRoot}/bin/minsky-run.sh\`)) {
+    process.stdout.write(selfRoot);
+    process.exit(0);
+  }
   for (const rel of FALLBACKS) {
     const full = \`\${home}/\${rel}\`;
     if (existsSync(full)) {
@@ -3213,12 +3260,15 @@ MINSKY_REPO_PATH="$(node --input-type=module -e "
       process.exit(0);
     }
   }
-  process.stderr.write('minsky: could not find the minsky repo. Looked at MINSKY_REPO (unset), ~/minsky, ~/code/minsky, ~/src/minsky, ~/apps/minsky. Set MINSKY_REPO=/path/to/minsky or clone to ~/minsky.\\n');
+  process.stderr.write('minsky: could not find the minsky repo. Looked at MINSKY_REPO (unset), the package dir (' + (selfRoot || 'unknown') + '), ~/minsky, ~/code/minsky, ~/src/minsky, ~/apps/minsky. Set MINSKY_REPO=/path/to/minsky or clone to ~/minsky.\\n');
   process.exit(1);
-" 2>&1)"
+")"
 RESOLVE_EXIT=$?
+set -e
 if [ $RESOLVE_EXIT -ne 0 ]; then
-  echo "$MINSKY_REPO_PATH" >&2
+  # The resolver already wrote the actionable error to its own stderr,
+  # which inherits this shell's stderr (no capture) — so it's already on
+  # the terminal. Exit with the same code; no echo needed.
   exit 1
 fi
 export SHIM_HOME SHIM_ENV_REPO
