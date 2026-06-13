@@ -18,6 +18,7 @@
     "bin/",
     "scripts/",
     "distribution/",
+    "novel/adapters/agent-runtime-openhands/bin/",
     "lefthook.yml",
     "AGENTS.md",
     "vision.md",
