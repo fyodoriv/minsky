@@ -209,7 +209,10 @@ fi
 invariant_config_loadable() {
   # Invariant 1: ~/.minsky/config.json exists and parses as JSON.
   [[ -f "$CONFIG_FILE" ]] || { echo "INVARIANT FAIL: config not at $CONFIG_FILE" >&2; return 1; }
-  jq -e . "$CONFIG_FILE" >/dev/null 2>&1 || { echo "INVARIANT FAIL: config not valid JSON" >&2; return 1; }
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "INVARIANT FAIL: config not valid JSON: $CONFIG_FILE (jq not found — install jq to validate)" >&2; return 1
+  fi
+  jq -e . "$CONFIG_FILE" >/dev/null 2>&1 || { echo "INVARIANT FAIL: config not valid JSON: $CONFIG_FILE" >&2; return 1; }
 }
 
 invariant_openhands_in_path() {
