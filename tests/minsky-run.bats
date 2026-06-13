@@ -98,6 +98,17 @@ EOF
   [ "$status" -eq 2 ]
 }
 
+# --- 1b. Config JSON invariant ------------------------------------------------
+
+@test "invalid JSON config names the file in the error message" {
+  # Pin for watchdog-invariant-config-not-valid-json-spam: error must include
+  # the absolute path so operators can identify which file failed.
+  printf '{not valid json' > "$CONFIG_FILE"
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"INVARIANT FAIL: config not valid JSON: $CONFIG_FILE"* ]]
+}
+
 # --- 2. --hosts-dir validation --------------------------------------------
 
 @test "missing --hosts-dir fails the invariant" {
