@@ -61,6 +61,12 @@
   (subpath "/opt/homebrew")
   (subpath "/Library")
   (subpath "/System")
+  ;; sandbox-allowlist-derive-from-operator-toolchain: `/usr/bin/xcrun`
+  ;; dlopens libxcrun and shells into xcodebuild from the active Xcode
+  ;; developer directory before resolving developer tools like git. Read-only
+  ;; toolchain surface, analogous to /usr + /opt/homebrew; do not widen to all
+  ;; of /Applications (outside the supervisor trust boundary).
+  (subpath "/Applications/Xcode.app/Contents/Developer")
   (subpath "/private/etc")
   (subpath "/private/var/db/timezone")
   (literal "/dev/null")
@@ -116,7 +122,14 @@
   (subpath (string-append (param "HOME") "/.local/share/fnm"))
   (subpath (string-append (param "HOME") "/.local/share/uv"))
   (subpath (string-append (param "HOME") "/.nvm"))
-  (subpath (string-append (param "HOME") "/.asdf")))
+  (subpath (string-append (param "HOME") "/.asdf"))
+  ;; dotfiles endpoint-security shims (jq/grep/python3/curl). process-exec is
+  ;; allowed globally but exec ALSO requires file-read* on the binary; without
+  ;; these subpaths every shim exec fails EPERM ("dotfiles/bin/gh: Operation
+  ;; not permitted" — observed in tick-loop.out.log) and tools fall back to
+  ;; the CyberArk-EPM-flagged /usr/bin/{jq,grep,python3}.
+  (subpath (string-append (param "HOME") "/apps/tooling/dotfiles/bin"))
+  (subpath (string-append (param "HOME") "/apps/dotfiles/bin")))
 
 ;; Per-unit temp dir. PrivateTmp's macOS analogue — allow the standard temp
 ;; locations so subprocess scratch files work; combined with the (deny default)

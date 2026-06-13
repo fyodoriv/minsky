@@ -1676,7 +1676,7 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
   doctor)
     if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
       cat <<'EOF'
-Usage: minsky doctor [--quiet]
+Usage: minsky doctor [--quiet] [--sandbox]
 
 Health probe for this host machine. Prints PASS / WARN / FAIL for
 each of: node 20+, git, gh CLI, pnpm, repo `.minsky/` directory,
@@ -1686,7 +1686,14 @@ but ≥2 bootstrapped hosts exist under its parent), OpenHands SDK
 installation, and any other invariant the supervisor needs.
 
 Flags:
-  --quiet   Only print FAIL lines + exit non-zero on any failure.
+  --quiet     Only print FAIL lines + exit non-zero on any failure.
+  --sandbox   Run only the macOS SBPL toolchain preflight (delegates
+              to scripts/check-supervisor-sandbox.mjs): test-execs
+              python3 / git / gh / claude / node and reads
+              ~/.gitconfig.local / ~/.config/gh / ~/.claude.json under
+              the real `(deny default)` profile, and asserts
+              CLAUDE_CODE_OAUTH_TOKEN is exported. Exits 0 with a
+              SKIPPED line on non-macOS hosts.
 
 Exit codes: 0 if every check passes; 1 if any check fails.
 
@@ -1720,9 +1727,25 @@ EOF
     # Source: M1 milestone exit criterion §13 (self-heal).
     _crit_fail=0
     _quiet=0
+    _sandbox_only=0
     for _a in "$@"; do
       [ "$_a" = "--quiet" ] && _quiet=1
+      [ "$_a" = "--sandbox" ] && _sandbox_only=1
     done
+
+    # `minsky doctor --sandbox` — preflight the SBPL profile against the live
+    # operator toolchain (sandbox-allowlist-derive-from-operator-toolchain).
+    # Delegates to scripts/check-supervisor-sandbox.mjs which test-execs
+    # python3 / git / gh / claude / node + reads ~/.gitconfig.local /
+    # ~/.config/gh / ~/.claude.json under the real `(deny default)` profile
+    # AND asserts CLAUDE_CODE_OAUTH_TOKEN is exported (gap 6 — auth via env,
+    # not Keychain). Exits non-zero on any gap with per-gap remediation;
+    # exits 0 on non-macOS hosts (graceful degrade — rule #7).
+    if [ "$_sandbox_only" = "1" ]; then
+      _bd_repo_dir="$(dirname "$(readlink "$0" 2>/dev/null || echo "$0")")/.."
+      [ -f "$_bd_repo_dir/scripts/check-supervisor-sandbox.mjs" ] || _bd_repo_dir="$(dirname "$0")/.."
+      exec node "$_bd_repo_dir/scripts/check-supervisor-sandbox.mjs" "$@"
+    fi
 
     _doctor_print() {
       # _doctor_print STATUS NAME MESSAGE
@@ -2214,6 +2237,12 @@ EOF
 $(env | grep -E '^(DEVIN_|CLAUDE_|OPENAI_|ANTHROPIC_)' || true)
 EOF
 
+    _dotfiles_bin=""
+    for _dfb in "$HOME/apps/tooling/dotfiles/bin" "$HOME/apps/dotfiles/bin"; do
+      [ -x "$_dfb/python3" ] && _dotfiles_bin="$_dfb" && break
+    done
+    _daemon_path="${_dotfiles_bin:+${_dotfiles_bin}:}/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:$HOME/.fnm/aliases/default/bin"
+
     # Generate the new plist content into a tempfile so we can
     # idempotency-check against the existing file before overwriting +
     # reloading launchd. Without this, every `minsky install-daemon`
@@ -2248,7 +2277,7 @@ $_program_args
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:$HOME/.local/bin:$HOME/.fnm/aliases/default/bin</string>
+    <string>$_daemon_path</string>
     <key>HOME</key>
     <string>$HOME</string>
     <key>MINSKY_NON_INTERACTIVE</key>
@@ -3274,8 +3303,7 @@ trap '' HUP
 #   1. Run health checks (doctor) FIRST — if any critical check fails,
 #      print + exit non-zero. The operator's machine isn't ready.
 #   2. If a daemon is already running for $PWD → attach with watch.
-#   3. Otherwise → start one in daemon mode + auto-install persistence
-#      + attach.
+#   3. Otherwise → start one in daemon mode + attach.
 # This makes `minsky` in a folder always do the right thing:
 #   - machine broken? → tell the operator exactly what to fix
 #   - daemon running for this host? → attach (watch)
@@ -3401,6 +3429,10 @@ if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" !=
   # Fallback (explicit --host, or resolver unavailable): single host at cwd.
   [ "${#_launch_args[@]}" -eq 0 ] && _launch_args=(--host "$_target_host")
 
+  if [ "$(uname)" = "Darwin" ] && [ -f "$HOME/Library/LaunchAgents/com.minsky.daemon.plist" ]; then
+    MINSKY_INSTALL_DAEMON_QUIET=1 "$0" install-daemon "$_target_host" 2>/dev/null || true
+  fi
+
   if _daemon_running_for_host "$_target_host"; then
     _pid=$(cat "$MINSKY_DAEMON_PID")
     echo "minsky: daemon already running (PID $_pid) for $(basename "$_target_host")"
@@ -3410,18 +3442,11 @@ if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" !=
     exec "$0" watch "$_target_host"
   fi
 
-  # No daemon running — start one, auto-install launchd persistence, attach.
-  # Persistence is DEFAULT — minsky should survive reboots without extra steps.
+  # No daemon running — start one and attach. Persistent supervisors are
+  # operator-explicit (`minsky install-daemon`) and are only refreshed above
+  # once the plist already exists.
   echo "minsky: no daemon running for $(basename "$_target_host"). Starting (scope: ${_launch_args[0]})..."
   "$0" --daemon "${_launch_args[@]}"
-
-  # Auto-install launchd plist if not already installed (macOS only).
-  # This makes the daemon survive reboots by default. The operator
-  # can remove it with `minsky uninstall-daemon`.
-  if [ "$(uname)" = "Darwin" ] && ! launchctl list 2>/dev/null | grep -q 'com.minsky.daemon'; then
-    echo "minsky: installing launchd persistence (survives reboot)..."
-    "$0" install-daemon "$_target_host" 2>/dev/null || true
-  fi
 
   sleep 2
   exec "$0" watch "$_target_host"

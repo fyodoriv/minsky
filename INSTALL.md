@@ -184,16 +184,21 @@ That single call:
 
 If `minsky` isn't yet on PATH for the current shell, use the explicit `$INSTALL_DIR/bin/minsky` form (as shown above) — Step 3 already set the absolute path in your shell variable.
 
-## Step 6 — start the daemon
+## Step 6 — install persistence and start the daemon
 
 ```bash
+"$INSTALL_DIR/bin/minsky" install-daemon "$HOST_PATH"
 cd "$HOST_PATH"
 "$INSTALL_DIR/bin/minsky"
 ```
 
-The first invocation:
+The explicit `install-daemon` call:
 
-- installs a launchd persistence agent so Minsky survives reboots (macOS) — on Linux it installs a systemd-user unit instead
+- installs a launchd persistence agent so Minsky survives reboots (macOS)
+- records the operator-approved supervisor bootstrap; no-arg `minsky` will only refresh an existing plist, not create one silently
+
+The first `minsky` invocation:
+
 - creates `.minsky/` in the host repo (gitignored sidecar for iteration history)
 - drops you into the live dashboard
 
@@ -244,6 +249,7 @@ No other field changes. The daemon's PR carries `Closes #N` which auto-closes th
 | `pnpm install` fails with engine error | Node < 22 | upgrade Node; do not auto-install — ask first |
 | `command not found: minsky` after PATH update | shell not re-sourced | use the absolute path `$INSTALL_DIR/bin/minsky` for the current shell |
 | Daemon won't start | launchd / systemd permissions | run `$INSTALL_DIR/bin/minsky doctor` and surface the report to the operator |
+| Worker spawn-fails silently (no PR opens) on macOS | SBPL profile blocks the operator toolchain (python3 / git includes / gh config / claude / ~/.local/share/uv / `CLAUDE_CODE_OAUTH_TOKEN`) | run `$INSTALL_DIR/bin/minsky doctor --sandbox` — surfaces every allowlist / PATH / env gap in one command with the exact `.sb` / `launchctl setenv` remediation per gap |
 | `git clone` fails behind a corporate proxy | network policy | ask the operator for their HTTPS proxy URL and `git config --global http.proxy "$URL"` |
 | `~/.minsky/config.json` already exists with a different `default_host` | operator has Minsky on another host | DO NOT overwrite; ask the operator whether to add this host (multi-host mode requires `--hosts-dir`) |
 

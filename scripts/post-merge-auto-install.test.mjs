@@ -17,6 +17,19 @@
 // account for a new auth env-var family), gate auto-install behind
 // an opt-in env-var flip.
 
+import { execFileSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, test } from "vitest";
 
 import { decideActions } from "./post-merge-auto-install.mjs";
@@ -145,6 +158,28 @@ describe("decideActions — plist regeneration trigger", () => {
     const result = decideActions({
       ...baseInput,
       changedFiles: ["bin/minsky"],
+      plistExists: false,
+      platform: "darwin",
+    });
+    expect(result.actions).not.toContainEqual(expect.objectContaining({ kind: "regen-plist" }));
+  });
+
+  test("bin/minsky-run.sh changed + plist exists + macOS → emits regen-plist", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["bin/minsky-run.sh"],
+      plistExists: true,
+      platform: "darwin",
+    });
+    expect(result.actions).toContainEqual(
+      expect.objectContaining({ kind: "regen-plist", warnDaemonRunning: false }),
+    );
+  });
+
+  test("runtime script changed + plist missing → no regen-plist", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["bin/minsky-run.sh"],
       plistExists: false,
       platform: "darwin",
     });
@@ -335,6 +370,46 @@ describe("decideActions — request-daemon-restart trigger", () => {
     expect(result.actions.find((a) => a.kind === "request-daemon-restart")).toBeDefined();
   });
 
+  test("bin/minsky-run.sh changed + daemon running → emits request-daemon-restart", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["bin/minsky-run.sh"],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    const restart = result.actions.find((a) => a.kind === "request-daemon-restart");
+    expect(restart).toBeDefined();
+    if (restart !== undefined && restart.kind === "request-daemon-restart") {
+      expect(restart.reason).toMatch(/bin\/minsky-run\.sh/);
+      expect(restart.changedFiles).toContain("bin/minsky-run.sh");
+    }
+  });
+
+  test("scripts/spawn_agent.py changed + daemon running → emits request-daemon-restart", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["scripts/spawn_agent.py"],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    const restart = result.actions.find((a) => a.kind === "request-daemon-restart");
+    expect(restart).toBeDefined();
+    if (restart !== undefined && restart.kind === "request-daemon-restart") {
+      expect(restart.reason).toMatch(/scripts\/spawn_agent\.py/);
+      expect(restart.changedFiles).toContain("scripts/spawn_agent.py");
+    }
+  });
+
+  test("unrelated scripts/*.mjs change → no request-daemon-restart", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["scripts/benchmark-run.mjs"],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    expect(result.actions.find((a) => a.kind === "request-daemon-restart")).toBeUndefined();
+  });
+
   test("daemon NOT running → no request-daemon-restart even when runtime code changed", () => {
     // No daemon to restart — sentinel would just sit on disk until the
     // next daemon start, at which point the post-restart daemon would
@@ -427,5 +502,90 @@ describe("decideActions — request-daemon-restart trigger", () => {
       "request-daemon-restart",
       "pre-pr-lint-fast",
     ]);
+  });
+});
+
+describe("runAutoInstall — daemon-running detection", () => {
+  test("bash minsky-run.sh loop counts as running for post-pull restart sentinel", () => {
+    const root = mkdtempSync(join(tmpdir(), "minsky-post-merge-auto-install-"));
+    try {
+      const repo = join(root, "repo");
+      const home = join(root, "home");
+      const fakeBin = join(root, "fake-bin");
+      mkdirSync(join(repo, "scripts"), { recursive: true });
+      mkdirSync(join(repo, "bin"), { recursive: true });
+      mkdirSync(home, { recursive: true });
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(
+        join(repo, "scripts", "post-merge-auto-install.mjs"),
+        readFileSync(new URL("./post-merge-auto-install.mjs", import.meta.url), "utf8"),
+      );
+      writeFileSync(join(repo, "bin", "minsky"), "old\n");
+      const fakePgrep = `#!/bin/sh
+PATTERN="\${2:-}" node <<'NODE'
+const line = "87810 bash /Users/fivanishche/apps/tooling/minsky/bin/minsky-run.sh --loop --host /Users/fivanishche/apps/tooling/minsky";
+process.exit(new RegExp(process.env.PATTERN ?? "").test(line) ? 0 : 1);
+NODE
+`;
+      writeFileSync(join(fakeBin, "pgrep"), fakePgrep);
+      writeFileSync(join(fakeBin, "pnpm"), "#!/bin/sh\nexit 0\n");
+      chmodSync(join(fakeBin, "pgrep"), 0o755);
+      chmodSync(join(fakeBin, "pnpm"), 0o755);
+      execFileSync("git", ["init"], { cwd: repo, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repo });
+      execFileSync("git", ["config", "user.name", "Test Agent"], { cwd: repo });
+      execFileSync("git", ["add", "."], { cwd: repo });
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "commit.gpgsign=false",
+          "-c",
+          "core.hooksPath=/dev/null",
+          "commit",
+          "--no-gpg-sign",
+          "--no-verify",
+          "-m",
+          "initial",
+        ],
+        { cwd: repo, stdio: "ignore" },
+      );
+      writeFileSync(join(repo, "bin", "minsky"), "new\n");
+      execFileSync("git", ["add", "bin/minsky"], { cwd: repo });
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "commit.gpgsign=false",
+          "-c",
+          "core.hooksPath=/dev/null",
+          "commit",
+          "--no-gpg-sign",
+          "--no-verify",
+          "-m",
+          "update bin",
+        ],
+        { cwd: repo, stdio: "ignore" },
+      );
+
+      execFileSync(process.execPath, ["scripts/post-merge-auto-install.mjs"], {
+        cwd: repo,
+        env: {
+          ...process.env,
+          CI: "",
+          HOME: home,
+          PATH: `${fakeBin}:${process.env["PATH"] ?? ""}`,
+        },
+        stdio: "ignore",
+      });
+
+      const sentinel = join(home, ".minsky", "restart-requested");
+      expect(existsSync(sentinel)).toBe(true);
+      const payload = JSON.parse(readFileSync(sentinel, "utf8"));
+      expect(payload.reason).toBe("bin/minsky changed");
+      expect(payload.changedFiles).toEqual(["bin/minsky"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
