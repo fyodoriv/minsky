@@ -118,14 +118,11 @@ function makeMockBin(cfg) {
     .join("\\n");
 
   const pgrep = `#!/bin/bash
-pat="\${@: -1}"
 case "$*" in
   *-af*)
     printf '%b\\n' "${afLines}"
     exit 0
     ;;
-esac
-case "$pat" in
 ${hostBranches}
   *) ;;
 esac
