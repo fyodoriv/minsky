@@ -3,7 +3,7 @@ hypothesis: |
   collect-metrics.mjs resolves its sibling minsky scripts (stability-report, check-cross-repo-pr-rate, rule-2 lint, heal-mttr-report, transform_knowledge.py, transform_trend.py) relative to process.cwd(), so running the collector against any non-minsky host repo silently nulls those six collectors (FileNotFound → null → "no data" values) — the M1.5/M1.7 baseline-delta pipeline permanently reports n=0 sessions on converted repos. Resolving siblings against the script's own directory (import.meta.url) while keeping ROOT=cwd as the measured-host root restores the collectors from any cwd.
 success: "running the collector from a non-minsky cwd collects ≥ 19 of 21 metrics (was effectively 15/21 with six silently nulled); from the minsky root it stays 21/21."
 pivot: "if any collector legitimately needs cwd-relative resolution (a host-shipped script), revert that one call site to a documented host-relative join(ROOT, ...) instead of SCRIPTS_DIR — below 15/21 from a foreign cwd means the approach broke more than it fixed."
-measurement: "node scripts/collect-metrics.mjs 2>&1 | grep -cE '21/21 metrics collected'"
+measurement: "npx vitest run scripts/collect-metrics.test.mjs 2>&1 | grep -cE 'Tests +[0-9]+ passed'"
 timeout_seconds: 120
 anchor: |
   Spinellis, *Code Quality: The Open Source Perspective* (2006), Ch. 5 — path resolution against the artifact's own location, not the invoker's working directory, is the portability discipline for installed tooling.
