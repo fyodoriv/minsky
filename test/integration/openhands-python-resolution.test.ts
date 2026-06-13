@@ -94,4 +94,49 @@ describe("bin/minsky-run.sh — openhands python resolution", () => {
     });
     expect(result.status ?? 1).not.toBe(0);
   });
+
+  // tick-loop-openhands-preflight-gating: the invariant must be SKIPPED
+  // when the resolved agent is not openhands so a claude-only operator
+  // does not need openhands installed (rule #2 — backend is a seam).
+  test("invariant SKIPPED when cloud_agent=claude even if python cannot import openhands", () => {
+    if (!existsSync("/usr/bin/python3")) {
+      return;
+    }
+    const claudeConfig = join(mkdtempSync(join(tmpdir(), "minsky-claude-cfg-")), "config.json");
+    writeFileSync(claudeConfig, JSON.stringify({ cloud_agent: "claude" }));
+    const result = spawnSync(MINSKY_RUN, ["--self-check"], {
+      env: {
+        ...process.env,
+        MINSKY_CONFIG: claudeConfig,
+        MINSKY_OPENHANDS_PYTHON: "/usr/bin/python3",
+      },
+      encoding: "utf8",
+    });
+    expect(result.stderr).not.toMatch(/openhands not importable/);
+    expect(result.stderr).not.toMatch(/INVARIANT FAIL.*openhands/);
+    expect(result.status).toBe(0);
+  });
+
+  test("invariant SKIPPED when local_agent=claude and MINSKY_ROLE=worker", () => {
+    if (!existsSync("/usr/bin/python3")) {
+      return;
+    }
+    const claudeWorkerConfig = join(
+      mkdtempSync(join(tmpdir(), "minsky-worker-cfg-")),
+      "config.json",
+    );
+    writeFileSync(claudeWorkerConfig, JSON.stringify({ local_agent: "claude" }));
+    const result = spawnSync(MINSKY_RUN, ["--self-check"], {
+      env: {
+        ...process.env,
+        MINSKY_CONFIG: claudeWorkerConfig,
+        MINSKY_ROLE: "worker",
+        MINSKY_OPENHANDS_PYTHON: "/usr/bin/python3",
+      },
+      encoding: "utf8",
+    });
+    expect(result.stderr).not.toMatch(/openhands not importable/);
+    expect(result.stderr).not.toMatch(/INVARIANT FAIL.*openhands/);
+    expect(result.status).toBe(0);
+  });
 });
