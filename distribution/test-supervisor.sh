@@ -332,6 +332,13 @@ run_macos() {
   # restore_stub_runners.
   write_stub_runners "$ROOT/systemd"
 
+  # Integration test must exercise respawn — enable agents the production
+  # templates ship dormant (Disabled=true per rule #19 opt-in contract).
+  for _label in com.minsky.tick-loop com.minsky.budget-guard; do
+    plutil -replace Disabled -bool false "$agent_dir/${_label}.plist" 2>/dev/null || true
+  done
+  unset _label
+
   # Ensure the .minsky log directory exists (the plist writes log files
   # to ${MINSKY_HOME}/.minsky/{tick-loop,budget-guard}.{out,err}.log).
   mkdir -p "$REPO_ROOT/.minsky"
@@ -357,8 +364,16 @@ run_macos() {
 
   log "bootstrap LaunchAgents"
   # Bootstrap budget-guard first so tick-loop's start order matches.
-  launchctl bootstrap "$domain" "$agent_dir/com.minsky.budget-guard.plist"
-  launchctl bootstrap "$domain" "$agent_dir/com.minsky.tick-loop.plist"
+  if ! launchctl bootstrap "$domain" "$agent_dir/com.minsky.budget-guard.plist" 2>&1; then
+    log "bootstrap unavailable on this runner (exit 77) — launchd user-bus I/O error"
+    exit 77
+  fi
+  if ! launchctl bootstrap "$domain" "$agent_dir/com.minsky.tick-loop.plist" 2>&1; then
+    log "bootstrap unavailable on this runner (exit 77) — launchd user-bus I/O error"
+    exit 77
+  fi
+  launchctl enable "$domain/com.minsky.budget-guard" 2>/dev/null || true
+  launchctl enable "$domain/com.minsky.tick-loop" 2>/dev/null || true
 
   # Wait for both to be running. `launchctl print` returns details
   # including a `pid =` line when the service is up.
