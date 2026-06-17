@@ -47,6 +47,10 @@
 
 set -euo pipefail
 
+# launchd inherits BASH_ENV from the GUI session; tick-loop's sandbox profile
+# denies ~/.config/dotfiles — unset before any bash child (with-endpoint-path parity).
+unset BASH_ENV ENV
+
 # Default to the repo root when not bootstrapped by setup.sh's envsubst.
 MINSKY_HOME="${MINSKY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 export MINSKY_HOME
@@ -59,6 +63,26 @@ _tick_loop_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib-launchd-path.sh
 . "${_tick_loop_dir}/lib-launchd-path.sh"
 unset _tick_loop_dir
+
+# IRON gate (2026-06-17): exit 0 when prerequisites are missing so launchd's
+# KeepAlive: SuccessfulExit=false does NOT respawn every ThrottleInterval and
+# hammer /usr/bin/{jq,python3} (CyberArk EPM popups). Non-zero exit = respawn.
+_endpoint_ready="${HOME}/.local/state/dotfiles/endpoint-ready"
+_tick_enabled_sentinel="${MINSKY_HOME}/.minsky/tick-loop-enabled"
+_autostart_sentinel="${HOME}/.minsky/autostart-enabled"
+if [[ ! -f "${_endpoint_ready}" ]]; then
+  printf 'tick-loop: dormant — endpoint-ready sentinel missing (%s); exit 0 (no respawn)\n' "${_endpoint_ready}" >&2
+  exit 0
+fi
+if [[ "${MINSKY_TICK_LOOP_ENABLED:-0}" != "1" && ! -f "${_autostart_sentinel}" && ! -f "${_tick_enabled_sentinel}" ]]; then
+  printf 'tick-loop: dormant — not enabled (run: minsky enable-autostart); exit 0\n' >&2
+  exit 0
+fi
+if [[ -z "${MINSKY_JQ:-}" ]]; then
+  printf 'tick-loop: dormant — no EPM-safe jq (MINSKY_JQ unset); exit 0\n' >&2
+  exit 0
+fi
+unset _endpoint_ready _tick_enabled_sentinel
 
 # Optional env-var → CLI arg mapping. The CLI itself accepts the same
 # flags directly, so explicit args (passed by the operator) override.

@@ -179,6 +179,58 @@ _minsky_count_bootstrapped_siblings() {
   printf '%s' "$_count"
 }
 
+_minsky_autostart_sentinel() {
+  printf '%s' "${MINSKY_STATE_DIR}/autostart-enabled"
+}
+
+_minsky_autostart_enabled() {
+  [ -f "$(_minsky_autostart_sentinel)" ]
+}
+
+_minsky_launchd_agent_labels() {
+  printf '%s\n' \
+    com.minsky.tick-loop \
+    com.minsky.daemon \
+    com.minsky.watchdog \
+    com.minsky.budget-guard \
+    com.minsky.runany \
+    com.minsky.auto-merge \
+    com.minsky.weekly-competitive \
+    com.minsky.corpus-refresh-check \
+    com.minsky.daily-metrics
+}
+
+_minsky_bootout_all_launchagents() {
+  local _label
+  for _label in $(_minsky_launchd_agent_labels); do
+    launchctl bootout "gui/$(id -u)/$_label" 2>/dev/null || true
+  done
+}
+
+_minsky_set_all_plists_disabled() {
+  local _disabled="$1"
+  local _f
+  for _f in "$HOME/Library/LaunchAgents"/com.minsky.*.plist; do
+    [ -f "$_f" ] || continue
+    plutil -replace Disabled -bool "$_disabled" "$_f" 2>/dev/null || true
+  done
+}
+
+_minsky_render_launchd_templates() {
+  # Render distribution/launchd/*.plist templates into
+  # ~/Library/LaunchAgents/ with ${MINSKY_HOME} + ${HOME} substituted.
+  local _repo_dir="$1"
+  local _unit_dir="$HOME/Library/LaunchAgents"
+  local _template_dir="$_repo_dir/distribution/launchd"
+  local _f _target
+  mkdir -p "$_unit_dir"
+  for _f in "$_template_dir"/*.plist; do
+    [ -f "$_f" ] || continue
+    _target="$_unit_dir/$(basename "$_f")"
+    MINSKY_HOME="$_repo_dir" HOME="$HOME" envsubst '${MINSKY_HOME} ${HOME}' < "$_f" > "$_target"
+  done
+}
+
 # ── Built-runtime guard (fresh-clone bootstrap, rule #6 loud-fail) ───
 #
 # On a fresh clone the foreground/daemon paths below `exec` a run
@@ -2270,6 +2322,10 @@ EOF
     # overwrite + reload as before. `MINSKY_INSTALL_DAEMON_QUIET=1`
     # suppresses the "already up to date" line for hook callers.
     _plist_tmp="$(mktemp)"
+    _daemon_disabled="true"
+    if _minsky_autostart_enabled; then
+      _daemon_disabled="false"
+    fi
     cat > "$_plist_tmp" << PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -2285,6 +2341,8 @@ $_program_args
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>Disabled</key>
+  <${_daemon_disabled}/>
   <key>ProcessType</key>
   <string>Standard</string>
   <key>StandardOutPath</key>
@@ -2324,12 +2382,23 @@ PLIST_EOF
       echo "✅ Wrote com.minsky.daemon plist (dry-run: launchctl reload skipped)"
       echo "   plist: $_plist"
       echo "   host: $_default_host"
+      if ! _minsky_autostart_enabled; then
+        echo "   dormant: run \`minsky enable-autostart\` to load at login"
+      fi
       exit 0
     fi
 
     launchctl bootout "gui/$(id -u)/com.minsky.daemon" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$_plist"
-    echo "✅ Installed com.minsky.daemon"
+    if _minsky_autostart_enabled; then
+      plutil -replace Disabled -bool false "$_plist" 2>/dev/null || true
+      launchctl bootstrap "gui/$(id -u)" "$_plist"
+      echo "✅ Installed com.minsky.daemon (autostart enabled)"
+    else
+      plutil -replace Disabled -bool true "$_plist" 2>/dev/null || true
+      echo "✅ Wrote com.minsky.daemon plist (dormant — not bootstrapped)"
+      echo "   Enable: minsky enable-autostart"
+      exit 0
+    fi
     echo "   plist: $_plist"
     echo "   host: $_default_host"
     # Count propagated agent-auth env vars (DEVIN_*, CLAUDE_*, OPENAI_*,
@@ -2358,6 +2427,78 @@ PLIST_EOF
     echo "✅ Removed com.minsky.daemon"
     echo "   minsky will no longer auto-start on login/reboot"
     exit 0
+    ;;
+  enable-autostart)
+    # Opt-in: bootstrap ALL com.minsky.* LaunchAgents at login.
+    # Requires endpoint-bootstrap sentinel (EPM-safe jq shims) before
+    # tick-loop can run. Default is dormant (Disabled=true in every plist).
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    _endpoint_ready="$HOME/.local/state/dotfiles/endpoint-ready"
+    _autostart_sentinel="$(_minsky_autostart_sentinel)"
+    _tick_sentinel="${MINSKY_HOME:-$_repo_dir}/.minsky/tick-loop-enabled"
+
+    if [ ! -f "$_endpoint_ready" ]; then
+      echo "✗ endpoint-ready sentinel missing: $_endpoint_ready" >&2
+      echo "  Wait for com.dotfiles.endpoint-bootstrap at login, or run:" >&2
+      echo "    chezmoi apply && launchctl kickstart -k gui/\$(id -u)/com.dotfiles.endpoint-bootstrap" >&2
+      exit 1
+    fi
+
+    # shellcheck source=lib-launchd-path.sh
+    . "$_repo_dir/distribution/systemd/lib-launchd-path.sh"
+    if [ -z "${MINSKY_JQ:-}" ]; then
+      echo "✗ no EPM-safe jq found (dotfiles/bin/jq missing or broken symlink)" >&2
+      echo "  Fix: chezmoi apply && dotfiles doctor --module security --fix" >&2
+      exit 1
+    fi
+
+    mkdir -p "$(dirname "$_autostart_sentinel")" "$(dirname "$_tick_sentinel")"
+    printf '%s\n' "$(date -u +%FT%TZ)" > "$_autostart_sentinel"
+    printf '%s\n' "$(date -u +%FT%TZ)" > "$_tick_sentinel"
+
+    _minsky_render_launchd_templates "$_repo_dir"
+    MINSKY_INSTALL_DAEMON_QUIET=1 "$0" install-daemon 2>/dev/null || "$0" install-daemon
+
+    _minsky_set_all_plists_disabled false
+    for _f in "$HOME/Library/LaunchAgents"/com.minsky.*.plist; do
+      [ -f "$_f" ] || continue
+      _label="$(basename "$_f" .plist)"
+      launchctl bootout "gui/$(id -u)/$_label" 2>/dev/null || true
+      if launchctl bootstrap "gui/$(id -u)" "$_f"; then
+        echo "   bootstrapped: $_label"
+      else
+        echo "   ⚠ failed to bootstrap: $_label (check Console.app)" >&2
+      fi
+    done
+
+    echo "✅ minsky autostart enabled (all com.minsky.* agents)"
+    echo "   sentinel: $_autostart_sentinel"
+    echo "   jq:       $MINSKY_JQ"
+    echo "   Disable:  minsky disable-autostart"
+    exit 0
+    ;;
+  disable-autostart)
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    _autostart_sentinel="$(_minsky_autostart_sentinel)"
+    _tick_sentinel="${MINSKY_HOME:-$_repo_dir}/.minsky/tick-loop-enabled"
+
+    _minsky_bootout_all_launchagents
+    _minsky_set_all_plists_disabled true
+    rm -f "$_autostart_sentinel" "$_tick_sentinel"
+
+    echo "✅ minsky autostart disabled (no com.minsky.* agents at login)"
+    echo "   Re-enable: minsky enable-autostart"
+    exit 0
+    ;;
+  enable-tick-loop)
+    echo "minsky: enable-tick-loop is deprecated — use: minsky enable-autostart" >&2
+    exec "$0" enable-autostart
+    ;;
+  disable-tick-loop)
+    echo "minsky: disable-tick-loop is deprecated — use: minsky disable-autostart" >&2
+    exec "$0" disable-autostart
     ;;
   update)
     # Graceful pause → pull latest → rebuild → restart from same spot.
@@ -3479,7 +3620,7 @@ if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" !=
   # Fallback (explicit --host, or resolver unavailable): single host at cwd.
   [ "${#_launch_args[@]}" -eq 0 ] && _launch_args=(--host "$_target_host")
 
-  if [ "$(uname)" = "Darwin" ] && [ -f "$HOME/Library/LaunchAgents/com.minsky.daemon.plist" ]; then
+  if [ "$(uname)" = "Darwin" ] && [ -f "$HOME/Library/LaunchAgents/com.minsky.daemon.plist" ] && _minsky_autostart_enabled; then
     MINSKY_INSTALL_DAEMON_QUIET=1 "$0" install-daemon "$_target_host" 2>/dev/null || true
   fi
 

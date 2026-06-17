@@ -79,6 +79,11 @@ Placeholders substituted by `bin/minsky install-daemon` via envsubst:
     <key>RunAtLoad</key>
     <true/>
 
+    <!-- Dormant by default (2026-06-17). Operator enables via
+         `minsky enable-autostart`. -->
+    <key>Disabled</key>
+    <true/>
+
     <!--
     Cycle cap: 120s. The freshness check + the auto-file walk are both
     pure local-file operations, so anything longer is a bug.

@@ -35,6 +35,13 @@ Placeholders substituted by setup.sh via envsubst:
     <true/>
     <key>RunAtLoad</key>
     <true/>
+
+    <!-- Dormant by default (2026-06-17). Operator enables via
+         `minsky enable-autostart`. Disabled=true prevents RunAtLoad
+         at login until explicitly opted in. -->
+    <key>Disabled</key>
+    <true/>
+
     <key>ThrottleInterval</key>
     <integer>10</integer>
 
