@@ -49,7 +49,14 @@ pnpm minsky:setup       # canonical
 ./setup.sh --setup  # equivalent shell-script form
 ```
 
-Detects the OS, renders the unit-file templates with `${MINSKY_HOME}` substituted, drops them in the user-scope unit dir (`~/.config/systemd/user/` on Linux, `~/Library/LaunchAgents/` on macOS), idempotently loads the supervisor target, and prints the operator's tail-logs / pause / status commands. Re-running is idempotent — re-renders the templates (catches drift) and re-loads the supervisor; no-op on an already-active unit. This is the canonical "start Minsky on this repo" invocation per `vision.md` § "What Minsky is" + rule #12 (Scope discipline) + `user-stories/001-loop-runs-overnight.md`.
+Detects the OS, renders the unit-file templates with `${MINSKY_HOME}` substituted, and drops them in the user-scope unit dir (`~/.config/systemd/user/` on Linux, `~/Library/LaunchAgents/` on macOS). **By default the supervisor stays dormant** — nothing loads at login until you explicitly run `minsky enable-autostart` (or `./setup.sh --setup --with-supervisor`, which calls the same command).
+
+```bash
+minsky enable-autostart    # opt in: bootstrap all com.minsky.* agents at login
+minsky disable-autostart   # opt out: bootout all + Disabled=true + remove sentinels
+```
+
+Re-running `./setup.sh --setup` is idempotent — re-renders templates with `Disabled=true` but does not bootstrap. Use `minsky enable-autostart` when you want agents running.
 
 A read-only health probe lives at `pnpm minsky:doctor` (equivalent to `./setup.sh --doctor`) — verifies prereqs without touching state.
 
@@ -69,13 +76,8 @@ systemctl --user enable --now minsky-supervisor.target
 ### Install (macOS, launchd LaunchAgents)
 
 ```bash
-mkdir -p ~/Library/LaunchAgents
-for f in distribution/launchd/*.plist; do
-  envsubst '${MINSKY_HOME}' < "$f" > ~/Library/LaunchAgents/$(basename "$f")
-done
-for f in ~/Library/LaunchAgents/com.minsky.*.plist; do
-  launchctl bootstrap gui/"$(id -u)" "$f"
-done
+./setup.sh --setup                    # render plists (dormant)
+minsky enable-autostart               # opt in: bootstrap all com.minsky.* agents
 ```
 
 ## Install the observability backend (OpenObserve)

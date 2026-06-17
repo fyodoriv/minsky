@@ -74,6 +74,11 @@ Install (handled by `pnpm minsky:setup` / setup.sh):
     <key>RunAtLoad</key>
     <true/>
 
+    <!-- Dormant by default (2026-06-17). Operator enables via
+         `minsky enable-autostart`. -->
+    <key>Disabled</key>
+    <true/>
+
     <!-- Flat minimum gap between respawns; the escalating backoff is the
          conductor's in-process self-throttle, not this number. -->
     <key>ThrottleInterval</key>

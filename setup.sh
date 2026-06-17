@@ -561,47 +561,34 @@ if [ "$MODE" = "setup" ]; then
     dim "  To start one explicit iteration:"
     dim "    ./bin/minsky-run.sh --host \"\$PWD\" --max-iterations 1"
     dim "  To enable auto-start at login (and start now):"
-    dim "    ./setup.sh --setup --with-supervisor"
+    dim "    minsky enable-autostart"
+    dim "    # or: ./setup.sh --setup --with-supervisor"
     dim "  To disable later:"
     case "$os" in
       Darwin)
-        dim "    minsky disable-tick-loop"
-        dim "    launchctl bootout gui/\$(id -u)/com.minsky.tick-loop"
+        dim "    minsky disable-autostart"
         ;;
       Linux)  dim "    systemctl --user disable --now minsky-supervisor.target" ;;
     esac
     echo
     ok "GREEN — templates rendered; supervisor stays dormant per operator-explicit-start contract"
+    # Ensure every rendered plist stays dormant until enable-autostart.
+    if [ "$os" = "Darwin" ]; then
+      for f in "${rendered_plists[@]}"; do
+        [ -f "$f" ] || continue
+        plutil -replace Disabled -bool true "$f" 2>/dev/null || true
+      done
+    fi
     exit 0
   fi
 
   case "$os" in
     Darwin)
-      for f in "${rendered_plists[@]}"; do
-        [ -f "$f" ] || continue
-        _basename="$(basename "$f")"
-        if [ "$_basename" = "com.minsky.tick-loop.plist" ]; then
-          if [ ! -f "${HOME}/.local/state/dotfiles/endpoint-ready" ]; then
-            warn "tick-loop NOT bootstrapped — endpoint-ready sentinel missing"
-            plutil -replace Disabled -bool true "$f" 2>/dev/null || true
-            continue
-          fi
-          if [ ! -f "$ROOT/.minsky/tick-loop-enabled" ] && [ "${MINSKY_TICK_LOOP_ENABLED:-0}" != "1" ]; then
-            warn "tick-loop NOT bootstrapped — dormant by default (run: minsky enable-tick-loop)"
-            plutil -replace Disabled -bool true "$f" 2>/dev/null || true
-            continue
-          fi
-        fi
-        # `bootstrap` errors if already loaded — bootout first (idempotent).
-        launchctl bootout gui/"$(id -u)" "$f" 2>/dev/null || true
-        if launchctl bootstrap gui/"$(id -u)" "$f"; then
-          ok "$(basename "$f") bootstrapped"
-        else
-          err "$(basename "$f") failed to bootstrap — check Console.app for the launchd log"
-          SETUP_FAILED=1
-          exit 1
-        fi
-      done
+      if ! "$ROOT/bin/minsky" enable-autostart; then
+        err "enable-autostart failed — supervisor NOT loaded"
+        SETUP_FAILED=1
+        exit 1
+      fi
       ;;
     Linux)
       systemctl --user daemon-reload

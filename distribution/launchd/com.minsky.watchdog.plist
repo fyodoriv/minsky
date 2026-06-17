@@ -63,6 +63,11 @@ Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
     <key>RunAtLoad</key>
     <true/>
 
+    <!-- Dormant by default (2026-06-17). Operator enables via
+         `minsky enable-autostart`. -->
+    <key>Disabled</key>
+    <true/>
+
     <!-- Backoff between respawn attempts; caps respawn loop on systematic failures. -->
     <key>ThrottleInterval</key>
     <integer>5</integer>

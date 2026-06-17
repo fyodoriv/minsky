@@ -69,12 +69,13 @@ unset _tick_loop_dir
 # hammer /usr/bin/{jq,python3} (CyberArk EPM popups). Non-zero exit = respawn.
 _endpoint_ready="${HOME}/.local/state/dotfiles/endpoint-ready"
 _tick_enabled_sentinel="${MINSKY_HOME}/.minsky/tick-loop-enabled"
+_autostart_sentinel="${HOME}/.minsky/autostart-enabled"
 if [[ ! -f "${_endpoint_ready}" ]]; then
   printf 'tick-loop: dormant — endpoint-ready sentinel missing (%s); exit 0 (no respawn)\n' "${_endpoint_ready}" >&2
   exit 0
 fi
-if [[ "${MINSKY_TICK_LOOP_ENABLED:-0}" != "1" && ! -f "${_tick_enabled_sentinel}" ]]; then
-  printf 'tick-loop: dormant — not enabled (run: minsky enable-tick-loop); exit 0\n' >&2
+if [[ "${MINSKY_TICK_LOOP_ENABLED:-0}" != "1" && ! -f "${_autostart_sentinel}" && ! -f "${_tick_enabled_sentinel}" ]]; then
+  printf 'tick-loop: dormant — not enabled (run: minsky enable-autostart); exit 0\n' >&2
   exit 0
 fi
 if [[ -z "${MINSKY_JQ:-}" ]]; then

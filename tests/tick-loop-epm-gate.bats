@@ -25,7 +25,7 @@ teardown() {
   touch "$HOME/.local/state/dotfiles/endpoint-ready"
   run bash "$RUN_TICK_LOOP"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"not enabled"* ]] || [[ "$output" == *"enable-tick-loop"* ]]
+  [[ "$output" == *"not enabled"* ]] || [[ "$output" == *"enable-autostart"* ]]
 }
 
 @test "run-tick-loop: proceeds past gate when enabled sentinel present" {
