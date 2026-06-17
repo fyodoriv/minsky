@@ -61,6 +61,14 @@ describe("supervisor-stays-alive: --loop flag keeps the supervisor running", () 
     expect(src).toMatch(/exec bash[^\n]+minsky-run\.sh[^\n]*\s--loop\b/);
   });
 
+  test("run-tick-loop.sh gates on endpoint-ready + opt-in enable (EPM anti-hammer)", () => {
+    const src = readFileSync(RUN_TICK_LOOP_SH, "utf8");
+    expect(src).toMatch(/endpoint-ready sentinel missing/);
+    expect(src).toMatch(/minsky enable-tick-loop/);
+    expect(src).toMatch(/MINSKY_JQ unset/);
+    expect(src).toMatch(/exit 0/);
+  });
+
   test("default mode (no --loop) runs ONE walk and exits — historical default preserved", () => {
     // Without --loop, the script must take the else branch (one walk,
     // exit). Use --dry-run to skip the openhands invariant + picker so

@@ -2359,6 +2359,66 @@ PLIST_EOF
     echo "   minsky will no longer auto-start on login/reboot"
     exit 0
     ;;
+  enable-tick-loop)
+    # Opt-in supervisor: requires endpoint-bootstrap sentinel + EPM-safe jq.
+    # Default is dormant (Disabled=true in plist; no tick-loop-enabled sentinel).
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    _plist="$HOME/Library/LaunchAgents/com.minsky.tick-loop.plist"
+    _endpoint_ready="$HOME/.local/state/dotfiles/endpoint-ready"
+    _sentinel="${MINSKY_HOME:-$_repo_dir}/.minsky/tick-loop-enabled"
+    _template="$_repo_dir/distribution/launchd/com.minsky.tick-loop.plist"
+
+    if [ ! -f "$_endpoint_ready" ]; then
+      echo "✗ endpoint-ready sentinel missing: $_endpoint_ready" >&2
+      echo "  Wait for com.dotfiles.endpoint-bootstrap at login, or run:" >&2
+      echo "    chezmoi apply && launchctl kickstart -k gui/\$(id -u)/com.dotfiles.endpoint-bootstrap" >&2
+      exit 1
+    fi
+
+    mkdir -p "$(dirname "$_plist")" "$(dirname "$_sentinel")"
+    if [ ! -f "$_plist" ]; then
+      if [ ! -f "$_template" ]; then
+        echo "✗ tick-loop template missing: $_template" >&2
+        exit 1
+      fi
+      MINSKY_HOME="$_repo_dir" HOME="$HOME" envsubst '${MINSKY_HOME} ${HOME}' < "$_template" > "$_plist"
+    fi
+
+    # Verify jq resolves before enabling (prevents EPM hammer on broken shim).
+    # shellcheck source=lib-launchd-path.sh
+    . "$_repo_dir/distribution/systemd/lib-launchd-path.sh"
+    if [ -z "${MINSKY_JQ:-}" ]; then
+      echo "✗ no EPM-safe jq found (dotfiles/bin/jq missing or broken symlink)" >&2
+      echo "  Fix: chezmoi apply && dotfiles doctor --module security --fix" >&2
+      exit 1
+    fi
+
+    printf '%s\n' "$(date -u +%FT%TZ)" > "$_sentinel"
+    plutil -replace Disabled -bool false "$_plist"
+
+    launchctl bootout "gui/$(id -u)/com.minsky.tick-loop" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$_plist"
+    echo "✅ tick-loop enabled"
+    echo "   plist:   $_plist"
+    echo "   jq:      $MINSKY_JQ"
+    echo "   Disable: minsky disable-tick-loop"
+    exit 0
+    ;;
+  disable-tick-loop)
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    _plist="$HOME/Library/LaunchAgents/com.minsky.tick-loop.plist"
+    _sentinel="${MINSKY_HOME:-$_repo_dir}/.minsky/tick-loop-enabled"
+    launchctl bootout "gui/$(id -u)/com.minsky.tick-loop" 2>/dev/null || true
+    if [ -f "$_plist" ]; then
+      plutil -replace Disabled -bool true "$_plist"
+    fi
+    rm -f "$_sentinel"
+    echo "✅ tick-loop disabled (will not respawn at login)"
+    echo "   Re-enable: minsky enable-tick-loop"
+    exit 0
+    ;;
   update)
     # Graceful pause → pull latest → rebuild → restart from same spot.
     # The experiment-store preserves iteration history so the daemon

@@ -564,7 +564,10 @@ if [ "$MODE" = "setup" ]; then
     dim "    ./setup.sh --setup --with-supervisor"
     dim "  To disable later:"
     case "$os" in
-      Darwin) dim "    launchctl bootout gui/\$(id -u)/com.minsky.tick-loop" ;;
+      Darwin)
+        dim "    minsky disable-tick-loop"
+        dim "    launchctl bootout gui/\$(id -u)/com.minsky.tick-loop"
+        ;;
       Linux)  dim "    systemctl --user disable --now minsky-supervisor.target" ;;
     esac
     echo
@@ -576,6 +579,19 @@ if [ "$MODE" = "setup" ]; then
     Darwin)
       for f in "${rendered_plists[@]}"; do
         [ -f "$f" ] || continue
+        _basename="$(basename "$f")"
+        if [ "$_basename" = "com.minsky.tick-loop.plist" ]; then
+          if [ ! -f "${HOME}/.local/state/dotfiles/endpoint-ready" ]; then
+            warn "tick-loop NOT bootstrapped — endpoint-ready sentinel missing"
+            plutil -replace Disabled -bool true "$f" 2>/dev/null || true
+            continue
+          fi
+          if [ ! -f "$ROOT/.minsky/tick-loop-enabled" ] && [ "${MINSKY_TICK_LOOP_ENABLED:-0}" != "1" ]; then
+            warn "tick-loop NOT bootstrapped — dormant by default (run: minsky enable-tick-loop)"
+            plutil -replace Disabled -bool true "$f" 2>/dev/null || true
+            continue
+          fi
+        fi
         # `bootstrap` errors if already loaded — bootout first (idempotent).
         launchctl bootout gui/"$(id -u)" "$f" 2>/dev/null || true
         if launchctl bootstrap gui/"$(id -u)" "$f"; then

@@ -112,6 +112,9 @@ Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
              Reversible — unset + reload to revert. -->
         <key>MINSKY_TASK_ROTATION_ENABLE</key>
         <string>1</string>
+        <!-- Opt-in gate mirrored by run-tick-loop.sh; unset/0 = dormant. -->
+        <key>MINSKY_TICK_LOOP_ENABLED</key>
+        <string>0</string>
     </dict>
 
     <!-- Supervisor sandbox (vision.md § 13.3 minimum-bar item 3 —
@@ -158,6 +161,13 @@ Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
     </dict>
 
     <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Dormant by default (2026-06-17 EPM gate). Operator enables via
+         `minsky enable-tick-loop` after endpoint-bootstrap writes
+         ~/.local/state/dotfiles/endpoint-ready. Disabled=true prevents
+         RunAtLoad from spawning jq/python before shims are ready. -->
+    <key>Disabled</key>
     <true/>
 
     <!-- Backoff between respawn attempts; caps API hammering on systematic failures. -->
