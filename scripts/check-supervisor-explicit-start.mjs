@@ -86,7 +86,8 @@ export const ALLOWED_PATHS = Object.freeze([
   },
   {
     pattern: /^test\/integration\/enable-autostart\.test\.ts$/,
-    rationale: "Assertion regexes pinning enable-autostart source shape, not actual command invocations.",
+    rationale:
+      "Assertion regexes pinning enable-autostart source shape, not actual command invocations.",
   },
   {
     pattern: /^scripts\/check-supervisor-explicit-start\.mjs$/,
