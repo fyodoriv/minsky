@@ -27,14 +27,14 @@ distribution/
 │   └── README.md                            # install + verify runbook
 ├── install-openobserve.sh                   # one-shot installer (downloads pinned binary)
 ├── lint-units.sh                            # smoke-tests templates pre-deploy
-└── state.example.json                       # reference schema for setup.sh
+└── state.example.json                       # reference schema for `minsky setup`
 ```
 
 Future units (`minsky-dashboard-web`, `minsky-notifier-relay`) land in the corresponding adapter / package PRs — see `dashboard-web-v0` and the notifier-relay scout task in `TASKS.md`.
 
 ## Parameterisation
 
-Templates use shell-style `${VAR}` placeholders that `setup.sh` (P0 `setup-sh-rewrite`, shipped) will substitute via `envsubst` at install time. Currently the only placeholder is:
+Templates use shell-style `${VAR}` placeholders that `minsky setup` (via `pnpm minsky:setup`) substitutes via `envsubst` at install time. Currently the only placeholder is:
 
 | Variable | Meaning | Example |
 | --- | --- | --- |
@@ -46,21 +46,20 @@ Any new placeholder added to a template must be (a) added to the table above and
 
 ```bash
 pnpm minsky:setup       # canonical
-./setup.sh --setup  # equivalent shell-script form
 ```
 
-Detects the OS, renders the unit-file templates with `${MINSKY_HOME}` substituted, and drops them in the user-scope unit dir (`~/.config/systemd/user/` on Linux, `~/Library/LaunchAgents/` on macOS). **By default the supervisor stays dormant** — nothing loads at login until you explicitly run `minsky enable-autostart` (or `./setup.sh --setup --with-supervisor`, which calls the same command).
+Detects the OS, renders the unit-file templates with `${MINSKY_HOME}` substituted, and drops them in the user-scope unit dir (`~/.config/systemd/user/` on Linux, `~/Library/LaunchAgents/` on macOS). **By default the supervisor stays dormant** — nothing loads at login until you explicitly run `minsky enable-autostart` (or `pnpm minsky:setup -- --with-supervisor`, which calls the same command).
 
 ```bash
 minsky enable-autostart    # opt in: bootstrap all com.minsky.* agents at login
 minsky disable-autostart   # opt out: bootout all + Disabled=true + remove sentinels
 ```
 
-Re-running `./setup.sh --setup` is idempotent — re-renders templates with `Disabled=true` but does not bootstrap. Use `minsky enable-autostart` when you want agents running.
+Re-running `pnpm minsky:setup` is idempotent — re-renders templates with `Disabled=true` but does not bootstrap. Use `minsky enable-autostart` when you want agents running.
 
-A read-only health probe lives at `pnpm minsky:doctor` (equivalent to `./setup.sh --doctor`) — verifies prereqs without touching state.
+A read-only health probe lives at `pnpm minsky:doctor` — verifies prereqs without touching state.
 
-The under-the-hood snippets below remain as the reference for operators who need to debug the install (e.g., custom unit dir, sandboxed shell without `setup.sh`'s lock).
+The under-the-hood snippets below remain as the reference for operators who need to debug the install (e.g., custom unit dir, sandboxed shell without the setup lock).
 
 ### Install (Linux, systemd user units — no root needed)
 
@@ -76,7 +75,7 @@ systemctl --user enable --now minsky-supervisor.target
 ### Install (macOS, launchd LaunchAgents)
 
 ```bash
-./setup.sh --setup                    # render plists (dormant)
+pnpm minsky:setup                     # render plists (dormant)
 minsky enable-autostart               # opt in: bootstrap all com.minsky.* agents
 ```
 

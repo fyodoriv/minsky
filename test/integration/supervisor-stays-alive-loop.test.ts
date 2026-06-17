@@ -64,7 +64,7 @@ describe("supervisor-stays-alive: --loop flag keeps the supervisor running", () 
   test("run-tick-loop.sh gates on endpoint-ready + opt-in enable (EPM anti-hammer)", () => {
     const src = readFileSync(RUN_TICK_LOOP_SH, "utf8");
     expect(src).toMatch(/endpoint-ready sentinel missing/);
-    expect(src).toMatch(/minsky enable-tick-loop/);
+    expect(src).toMatch(/minsky enable-autostart/);
     expect(src).toMatch(/MINSKY_JQ unset/);
     expect(src).toMatch(/exit 0/);
   });
