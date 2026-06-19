@@ -187,6 +187,14 @@ _minsky_autostart_enabled() {
   [ -f "$(_minsky_autostart_sentinel)" ]
 }
 
+# Hard-off sentinel: written by `disable-autostart`, it durably blocks
+# `enable-autostart` so a routine update or an accidental re-enable can
+# never silently bring the supervisor back. Re-enabling is an explicit
+# operator action (`--force`, or remove the sentinel).
+_minsky_autostart_hard_off_sentinel() {
+  printf '%s' "${MINSKY_STATE_DIR}/autostart-disabled"
+}
+
 _minsky_launchd_agent_labels() {
   printf '%s\n' \
     com.minsky.tick-loop \
@@ -2437,6 +2445,21 @@ PLIST_EOF
     _endpoint_ready="$HOME/.local/state/dotfiles/endpoint-ready"
     _autostart_sentinel="$(_minsky_autostart_sentinel)"
     _tick_sentinel="${MINSKY_HOME:-$_repo_dir}/.minsky/tick-loop-enabled"
+    _hard_off="$(_minsky_autostart_hard_off_sentinel)"
+
+    # Hard-off guard: refuse unless the operator explicitly clears the
+    # block (`--force` or removing the sentinel). Keeps autostart off
+    # "for good" across pulls, `dotfiles update`, and stray re-enables.
+    _force=0
+    for _a in "$@"; do [ "$_a" = "--force" ] && _force=1; done
+    if [ -f "$_hard_off" ] && [ "$_force" -ne 1 ]; then
+      echo "✗ minsky autostart is hard-disabled: $_hard_off" >&2
+      echo "  Autostart was explicitly turned off. To re-enable, run:" >&2
+      echo "    minsky enable-autostart --force" >&2
+      echo "  (or: rm $_hard_off && minsky enable-autostart)" >&2
+      exit 1
+    fi
+    rm -f "$_hard_off"
 
     if [ ! -f "$_endpoint_ready" ]; then
       echo "✗ endpoint-ready sentinel missing: $_endpoint_ready" >&2
@@ -2484,12 +2507,17 @@ PLIST_EOF
     _autostart_sentinel="$(_minsky_autostart_sentinel)"
     _tick_sentinel="${MINSKY_HOME:-$_repo_dir}/.minsky/tick-loop-enabled"
 
+    _hard_off="$(_minsky_autostart_hard_off_sentinel)"
+
     _minsky_bootout_all_launchagents
     _minsky_set_all_plists_disabled true
     rm -f "$_autostart_sentinel" "$_tick_sentinel"
+    mkdir -p "$(dirname "$_hard_off")"
+    printf '%s\n' "$(date -u +%FT%TZ)" > "$_hard_off"
 
     echo "✅ minsky autostart disabled (no com.minsky.* agents at login)"
-    echo "   Re-enable: minsky enable-autostart"
+    echo "   hard-off: $_hard_off (blocks re-enable until cleared)"
+    echo "   Re-enable: minsky enable-autostart --force"
     exit 0
     ;;
   enable-tick-loop)

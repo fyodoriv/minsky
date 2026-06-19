@@ -45,3 +45,20 @@ EOF
   [ "$output" = "1" ] || [ "$output" = "true" ]
   [ ! -f "$MINSKY_STATE_DIR/autostart-enabled" ]
 }
+
+@test "disable-autostart: writes the autostart-disabled hard-off sentinel" {
+  [ ! -f "$MINSKY_STATE_DIR/autostart-disabled" ]
+  run "$MINSKY_BIN" disable-autostart
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"hard-off"* ]]
+  [ -f "$MINSKY_STATE_DIR/autostart-disabled" ]
+}
+
+@test "enable-autostart: refuses while hard-off sentinel present" {
+  touch "$MINSKY_STATE_DIR/autostart-disabled"
+  run "$MINSKY_BIN" enable-autostart
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"hard-disabled"* ]]
+  # The block stays put — refusing must not clear it.
+  [ -f "$MINSKY_STATE_DIR/autostart-disabled" ]
+}
