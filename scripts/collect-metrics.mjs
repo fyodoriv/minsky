@@ -13,6 +13,7 @@ import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { accumulate24h, loadRunSummaries, longestRun } from "./runs-aggregate.mjs";
 
 const ROOT = process.cwd();
 // Sibling minsky scripts resolve against THIS file's directory, not the
@@ -473,6 +474,95 @@ function collectSpawnFailureRate24h() {
 }
 
 /**
+ * Distinct non-null values of `field` across the runs whose id is in `ids`.
+ * @param {Array<Record<string, any>>} runs
+ * @param {string[]} ids
+ * @param {string} field
+ * @returns {string}
+ */
+function distinctField(runs, ids, field) {
+  const set = new Set();
+  for (const r of runs) {
+    if (r && ids.includes(r["runId"]) && r[field] != null) set.add(r[field]);
+  }
+  return set.size ? [...set].join(", ") : "—";
+}
+
+/**
+ * `runtime-accumulated-24h` collector — run health over the last 24h of
+ * ACCUMULATED minsky runtime (runs newest→oldest, summing uptime to 24h),
+ * not wall-clock 24h. Reads minsky-local .minsky/runs/<id>/run-summary.json.
+ * Honest `(stub)` when no run is recorded yet (rule #4 — never a fake zero).
+ *
+ * @returns {{value: string|number, higherIsBetter: boolean, source?: string}}
+ */
+function collectRuntimeAccumulated24h() {
+  const minskyRoot = resolve(SCRIPTS_DIR, "..");
+  const runs = loadRunSummaries(minskyRoot);
+  const agg = accumulate24h(runs);
+  if (!agg || agg.runCount === 0) {
+    return {
+      value: "(stub) — no minsky run recorded yet (run minsky, then 'minsky metrics collect')",
+      higherIsBetter: true,
+    };
+  }
+  const hours = (agg.accumulatedUptimeSec / 3600).toFixed(1);
+  const hosts = distinctField(runs, agg.runIds, "host");
+  const versions = distinctField(runs, agg.runIds, "minskyVersion");
+  const partial = agg.complete ? "" : " (<24h of runtime recorded so far)";
+  return {
+    value:
+      hours +
+      "h runtime / " +
+      agg.runCount +
+      " run(s) / " +
+      agg.restarts +
+      " restart(s) / " +
+      agg.tasksMerged +
+      " PR(s)" +
+      partial +
+      " [hosts: " +
+      hosts +
+      "; minsky: " +
+      versions +
+      "]",
+    higherIsBetter: true,
+    source: ".minsky/runs/*/run-summary.json",
+  };
+}
+
+/**
+ * `longest-run` collector — the single longest uninterrupted minsky run
+ * (max `longestUninterruptedSec`). Honest `(stub)` when no run recorded.
+ *
+ * @returns {{value: string|number, higherIsBetter: boolean, source?: string}}
+ */
+function collectLongestRun() {
+  const best = longestRun(loadRunSummaries(resolve(SCRIPTS_DIR, "..")));
+  if (!best) {
+    return {
+      value: "(stub) — no minsky run recorded yet (run minsky, then 'minsky metrics collect')",
+      higherIsBetter: true,
+    };
+  }
+  const mins = (best.longestUninterruptedSec / 60).toFixed(1);
+  return {
+    value:
+      best.longestUninterruptedSec +
+      "s (" +
+      mins +
+      "m) / run " +
+      (best.runId ?? "-") +
+      " / host " +
+      (best.host ?? "-") +
+      " / minsky " +
+      (best.minskyVersion ?? "-"),
+    higherIsBetter: true,
+    source: ".minsky/runs/*/run-summary.json",
+  };
+}
+
+/**
  * Path-A LOC scoreboard collector — see `path-a-loc-novel-tree` metric
  * in `SUCCESS_METRICS` for goal/pivot/anchor. JSDoc separated from the
  * declaration because the spawn-failure helpers above moved between them.
@@ -521,6 +611,8 @@ async function main() {
     "mttr-self-heal": collectMttrSelfHeal,
     "wrist-dwell": collectWristDwell,
     "fleet-stability-aggregated": collectFleetStabilityAggregated,
+    "runtime-accumulated-24h": collectRuntimeAccumulated24h,
+    "longest-run": collectLongestRun,
     "session-converts-repo": collectSessionConvertsRepo,
     "baseline-delta-per-cycle": collectBaselineDeltaPerCycle,
     "tokens-per-story": () => ({

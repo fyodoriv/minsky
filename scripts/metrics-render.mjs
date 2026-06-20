@@ -276,6 +276,23 @@ async function main() {
   });
 
   await fsWriteFile(outputPath, markdown);
+
+  // Run-relative freshness marker (committed). The gate prefers the live
+  // `.minsky/runs/` last-run end, but a fresh CI checkout has no `.minsky/`
+  // (gitignored), so it falls back to this tracked timestamp — the run the
+  // committed METRICS.md reflects. Minsky is not always-on (operator
+  // directive 2026-06-19); an idle calendar gap never marks metrics stale.
+  const markerMs = dateToMidnightUtcMs(date);
+  const marker = {
+    lastObservationMs: markerMs,
+    iso: new Date(markerMs).toISOString(),
+    note: "Run-relative freshness marker. Staleness is measured against the last minsky run (.minsky/runs/), falling back to this committed timestamp on CI. Re-run `minsky metrics collect && minsky metrics render` after a run.",
+  };
+  await fsWriteFile(
+    resolvePath(rootDir, "docs/metrics-last-run.json"),
+    `${JSON.stringify(marker, null, 2)}\n`,
+  );
+
   process.stdout.write(`${outputPath}\n`);
   return 0;
 }
