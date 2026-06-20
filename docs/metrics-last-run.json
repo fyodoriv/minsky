@@ -1,0 +1,5 @@
+{
+  "lastObservationMs": 1781913600000,
+  "iso": "2026-06-20T00:00:00.000Z",
+  "note": "Run-relative freshness marker. Staleness is measured against the last minsky run (.minsky/runs/), falling back to this committed timestamp on CI. Re-run `minsky metrics collect && minsky metrics render` after a run."
+}

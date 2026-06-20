@@ -23,6 +23,8 @@
     "agent-launcher-parity",
     "spawn-failure-rate-24h",
     "uninstall-residue-count",
+    "runtime-accumulated-24h",
+    "longest-run",
     "cto-audit-merge-rate",
     "stability-10h-unattended",
     "human-blocked-task-rate",

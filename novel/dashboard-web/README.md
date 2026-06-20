@@ -192,3 +192,21 @@ The relevant cross-links emitted by this package:
 - Supervisor-restart hint in `activity.ts` → `pnpm minsky:stop` (was: `pnpm dogfood:stop`)
 
 Old `pnpm dogfood:*` names are removed in `package.json`; `./setup.sh --dogfood` is a deprecated alias kept until 2026-06-26 (prints a one-line warning, runs as `--setup`). See `.claude/skills/minsky-supervisor/SKILL.md` for the full operator-side command surface.
+
+## Run-relative run metrics (2026-06-19)
+
+Minsky is not always-on — it runs only during operator-started sessions
+(operator directive 2026-06-19). Two run-based tiles measure WHEN it runs,
+not wall-clock:
+
+- `runtime-accumulated-24h` — run health over the most recent 24h of
+  ACCUMULATED runtime (runs newest-oldest, summing uptime to 24h, the last
+  run counted partially), with `host` + `minskyVersion` breakdown.
+- `longest-run` — the single longest uninterrupted run.
+
+Both read minsky-local `.minsky/runs/<id>/run-summary.json` via the pure
+reducers in `scripts/runs-aggregate.mjs` and render an honest `(stub)` until
+a run is recorded. Relatedly, `scripts/check-metric-freshness.mjs` is now
+run-relative: its clock is the last real run end (falling back to the
+committed `docs/metrics-last-run.json` marker on CI), so an idle machine
+never reports false staleness while a new uncollected run still does.
