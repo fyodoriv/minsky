@@ -558,7 +558,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P1
 
-
 - [ ] `watchdog-invariant-config-not-valid-json-spam` — the watchdog's self-diagnose loop logs `INVARIANT FAIL: config not valid JSON` once per 60s tick even though `~/.minsky/config.json` parses cleanly with `python3 -c "json.load(...)"`; find which config path the invariant actually reads and make the failure message name the offending file
   - **ID**: watchdog-invariant-config-not-valid-json-spam
   - **Tags**: p1, stability, observability, watchdog, observed-2026-06-12
