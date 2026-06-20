@@ -180,9 +180,9 @@ _Updated: 2026-06-20T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshot
 
 _Updated: 2026-06-20T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshots/2026-06-20.json` · Milestone: M1.5_
 
-**Value:** n=0 sessions in local ledger (ledger not yet created) fraction
+**Value:** `node scripts/compute-session-metrics.mjs --window=7d --json | jq '.session_converts_repo'`
 
-**How to view:** `python3 scripts/transform_trend.py --repo $PWD --json | jq '[.files_delta_per_session + .tests_delta_per_session + .loc_delta_per_session | .[] | select(. != 0)] | length / .session_count'`
+**How to view:** `node scripts/compute-session-metrics.mjs --window=7d --json | jq '.session_converts_repo'`
 
 **Goal:** ≥80% of sessions changed at least one file / test / loc (M1.5 acceptance: 8h session converts the repo, not just observes it)
 
@@ -194,9 +194,9 @@ _Updated: 2026-06-20T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshot
 
 _Updated: 2026-06-20T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshots/2026-06-20.json` · Milestone: M1.7_
 
-**Value:** n=0 sessions in local ledger (ledger not yet created) files+tests+loc/cycle
+**Value:** `node scripts/compute-session-metrics.mjs --window=7d --json | jq '.baseline_delta_per_cycle'`
 
-**How to view:** `python3 scripts/transform_trend.py --repo $PWD --json | jq '{files: (.files_delta_cumulative | last) / .session_count, tests: (.tests_delta_cumulative | last) / .session_count, loc: (.loc_delta_cumulative | last) / .session_count}'`
+**How to view:** `node scripts/compute-session-metrics.mjs --window=7d --json | jq '.baseline_delta_per_cycle'`
 
 **Goal:** Per-cycle averages positive on ≥2 of the 3 axes (M1.7 acceptance: before/after improvement per cycle)
 

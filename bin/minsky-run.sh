@@ -1735,6 +1735,43 @@ record_iteration() {
     '{ts: $ts, experiment_id: $experiment_id, host_repo: $host_repo, branch: $branch, verdict: $verdict, pr_url: $pr_url, notes: $notes, failure_log_path: $failure_log_path}')"
   printf '%s\n' "$out" >> "$path"
 
+  # --- Session ledger (session-converts-repo-ledger-bootstrap) ---------
+  # Append a compact per-iteration record to .minsky/session-ledger.jsonl
+  # so that scripts/compute-session-metrics.mjs can derive M1.5
+  # (session_converts_repo) and M1.7 (baseline_delta_per_cycle) from
+  # real observations instead of emitting (stub). Only written for
+  # non-no-task iterations (verdict != "no-task") because "no eligible
+  # task" carries no delta signal. git diff HEAD~1 HEAD measures the
+  # agent's committed change; if HEAD~1 doesn't exist (first commit) or
+  # git fails, both fields fall back to 0 (fail-safe — rule #7).
+  if [[ "${verdict:-}" != "no-task" && -n "${task_id:-}" ]]; then
+    local ledger_dir="$host/.minsky"
+    mkdir -p "$ledger_dir" 2>/dev/null || true
+    local ledger_path="$ledger_dir/session-ledger.jsonl"
+    local files_changed=0
+    local loc_delta=0
+    if [[ -d "$host/.git" ]] && \
+       git -C "$host" rev-parse HEAD~1 >/dev/null 2>&1; then
+      local _fc
+      _fc="$(git -C "$host" diff --stat HEAD~1 HEAD 2>/dev/null \
+             | /usr/bin/awk 'END{print ($1+0)}' || echo 0)"
+      files_changed="${_fc:-0}"
+      local _ld
+      _ld="$(git -C "$host" diff --numstat HEAD~1 HEAD 2>/dev/null \
+             | /usr/bin/awk '{add+=$1; del+=$2} END{print add-del+0}' || echo 0)"
+      loc_delta="${_ld:-0}"
+    fi
+    jq -nc \
+      --arg session_id "${MINSKY_RUN_ID:-${task_id}}" \
+      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+      --arg task_id "$task_id" \
+      --arg verdict "$verdict" \
+      --argjson files_changed "$files_changed" \
+      --argjson loc_delta "$loc_delta" \
+      '{session_id: $session_id, ts: $ts, task_id: $task_id, verdict: $verdict, files_changed: $files_changed, loc_delta: $loc_delta}' \
+      >> "$ledger_path" 2>/dev/null || true
+  fi
+
   # Surface the iteration outcome on daemon.log for glanceability (task
   # daemon-log-lacks-iteration-detail). One line per JSONL record.
   log_iteration_summary "$iter_n" "$task_id" "$verdict" "$pr_url" "$notes"
