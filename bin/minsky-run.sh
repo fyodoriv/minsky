@@ -1491,8 +1491,12 @@ print(load_host_config(Path('$host')).default_branch)
       --gh-host "${gh_host:-}" >/dev/null 2>&1 || true
   fi
 
+  local failure_log_path=""
+  if [[ -f "$stdout_log" ]]; then
+    failure_log_path="$(grep -o 'MINSKY_FAILURE_LOG_PATH=[^[:space:]]*' "$stdout_log" 2>/dev/null | tail -1 | cut -d= -f2-)" || true
+  fi
   rm -f "$brief_file" "$stdout_log"
-  record_iteration "$host" "$iter_n" "$task_id" "$branch" "$verdict" "$pr_url" "$notes" "$gh_host"
+  record_iteration "$host" "$iter_n" "$task_id" "$branch" "$verdict" "$pr_url" "$notes" "$gh_host" "$failure_log_path"
 }
 
 # --- 5b. CTO audit (queue-empty trigger) -----------------------------------
@@ -1679,6 +1683,7 @@ record_iteration() {
   local pr_url="$6"
   local notes="$7"
   local gh_host="${8:-}"
+  local failure_log_path="${9:-}"
   local store_dir="$host/.minsky/experiment-store/cross-repo"
   mkdir -p "$store_dir"
   local out
@@ -1711,6 +1716,13 @@ record_iteration() {
     pr_url_json="$(jq -n --arg u "$pr_url" '$u')"
   fi
 
+  local failure_log_path_json
+  if [[ -z "$failure_log_path" ]]; then
+    failure_log_path_json="null"
+  else
+    failure_log_path_json="$(jq -n --arg p "$failure_log_path" '$p')"
+  fi
+
   out="$(jq -nc \
     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
     --arg experiment_id "$task_id" \
@@ -1719,7 +1731,8 @@ record_iteration() {
     --arg verdict "$verdict" \
     --argjson pr_url "$pr_url_json" \
     --arg notes "$notes" \
-    '{ts: $ts, experiment_id: $experiment_id, host_repo: $host_repo, branch: $branch, verdict: $verdict, pr_url: $pr_url, notes: $notes}')"
+    --argjson failure_log_path "$failure_log_path_json" \
+    '{ts: $ts, experiment_id: $experiment_id, host_repo: $host_repo, branch: $branch, verdict: $verdict, pr_url: $pr_url, notes: $notes, failure_log_path: $failure_log_path}')"
   printf '%s\n' "$out" >> "$path"
 
   # Surface the iteration outcome on daemon.log for glanceability (task

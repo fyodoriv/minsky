@@ -1055,3 +1055,146 @@ class TestClaudeBackendIsolationEndToEnd:
             str(repo_a / ".minsky-claude-config")
             != str(repo_b / ".minsky-claude-config")
         )
+
+
+# --- Failure capture (spawn-failure-silent-stderr-capture) ----------------
+# Verifies that when a spawn exits non-zero, spawn_agent.py writes stderr.txt
+# and stdout.txt under .minsky/failures/<task-id>-<utc-ts>/ and emits a
+# MINSKY_FAILURE_LOG_PATH= marker to its own stderr.
+
+
+class TestSpawnFailureCapture:
+    """End-to-end: deliberate-fail spawn writes capture files."""
+
+    def _make_fail_env(self, tmp_path: Path, stderr_text: str = "command not found: claude") -> tuple[dict[str, str], Path, Path]:
+        """Return (env, repo_dir, host_root_dir) for a failing spawn."""
+        fake_home = tmp_path / "home"
+        fake_bin = fake_home / ".local" / "bin"
+        fake_bin.mkdir(parents=True)
+        fake_minsky_cfg = fake_home / ".minsky"
+        fake_minsky_cfg.mkdir(parents=True)
+        (fake_minsky_cfg / "config.json").write_text(
+            '{"cloud_agent":"claude","local_agent":"claude"}'
+        )
+        # Fake claude that prints to stderr and exits non-zero.
+        fake_claude = fake_bin / "claude"
+        escaped = stderr_text.replace("'", "'\\''")
+        fake_claude.write_text(
+            "#!/usr/bin/env bash\n"
+            f"echo '{escaped}' >&2\n"
+            "exit 1\n"
+        )
+        fake_claude.chmod(0o755)
+
+        host_root = tmp_path / "host" / ".minsky"
+        host_root.mkdir(parents=True)
+        repo = tmp_path / "worktree"
+        repo.mkdir()
+
+        env = os.environ.copy()
+        env["HOME"] = str(fake_home)
+        env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+        env["MINSKY_HOST_ROOT"] = str(host_root)
+        env["MINSKY_TASK_ID"] = "test-spawn-failure"
+        env.pop("MINSKY_ROLE", None)
+        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = "dummy-token"
+        return env, repo, host_root
+
+    def test_failure_writes_stderr_txt(self, tmp_path: Path) -> None:
+        env, repo, host_root = self._make_fail_env(tmp_path, "command not found: claude")
+        brief = tmp_path / "brief.md"
+        brief.write_text("do work")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "spawn_agent.py"),
+                "--brief-file", str(brief),
+                "--repo", str(repo),
+                "--model", "claude-opus-4-7",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert result.returncode != 0
+        failures_dir = host_root / "failures"
+        dirs = list(failures_dir.iterdir()) if failures_dir.exists() else []
+        assert len(dirs) == 1, f"expected 1 failure dir, got {dirs}"
+        assert (dirs[0] / "stderr.txt").exists(), "stderr.txt not written"
+        assert (dirs[0] / "stdout.txt").exists(), "stdout.txt not written"
+        assert "command not found" in (dirs[0] / "stderr.txt").read_text()
+
+    def test_failure_emits_minsky_failure_log_path_marker(self, tmp_path: Path) -> None:
+        env, repo, host_root = self._make_fail_env(tmp_path, "ENOENT: no such file")
+        brief = tmp_path / "brief.md"
+        brief.write_text("do work")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "spawn_agent.py"),
+                "--brief-file", str(brief),
+                "--repo", str(repo),
+                "--model", "claude-opus-4-7",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "MINSKY_FAILURE_LOG_PATH=" in result.stderr, (
+            f"marker not found in stderr; got: {result.stderr!r}"
+        )
+
+    def test_success_does_not_create_failure_dir(self, tmp_path: Path) -> None:
+        fake_home = tmp_path / "home"
+        fake_bin = fake_home / ".local" / "bin"
+        fake_bin.mkdir(parents=True)
+        fake_minsky_cfg = fake_home / ".minsky"
+        fake_minsky_cfg.mkdir(parents=True)
+        (fake_minsky_cfg / "config.json").write_text(
+            '{"cloud_agent":"claude","local_agent":"claude"}'
+        )
+        fake_claude = fake_bin / "claude"
+        fake_claude.write_text("#!/usr/bin/env bash\nexit 0\n")
+        fake_claude.chmod(0o755)
+
+        host_root = tmp_path / "host" / ".minsky"
+        host_root.mkdir(parents=True)
+        repo = tmp_path / "worktree"
+        repo.mkdir()
+
+        env = os.environ.copy()
+        env["HOME"] = str(fake_home)
+        env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+        env["MINSKY_HOST_ROOT"] = str(host_root)
+        env["MINSKY_TASK_ID"] = "test-success"
+        env.pop("MINSKY_ROLE", None)
+        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = "dummy-token"
+
+        brief = tmp_path / "brief.md"
+        brief.write_text("do work")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "spawn_agent.py"),
+                "--brief-file", str(brief),
+                "--repo", str(repo),
+                "--model", "claude-opus-4-7",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert result.returncode == 0
+        failures_dir = host_root / "failures"
+        assert not failures_dir.exists() or list(failures_dir.iterdir()) == [], (
+            "failure dir was created on a successful spawn"
+        )
