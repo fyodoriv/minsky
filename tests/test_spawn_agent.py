@@ -877,7 +877,11 @@ class TestClaudeBackendIsolationEndToEnd:
     """
 
     def _make_fake_claude_env(
-        self, tmp_path: Path, env_dump: Path, exit_code: int = 0
+        self,
+        tmp_path: Path,
+        env_dump: Path,
+        exit_code: int = 0,
+        with_oauth_token: bool = True,
     ) -> dict[str, str]:
         fake_home = tmp_path / "home"
         fake_bin = fake_home / ".local" / "bin"
@@ -904,6 +908,14 @@ class TestClaudeBackendIsolationEndToEnd:
         # cloud_agent (not local_agent) — both are set to "claude" in the
         # config above; pinning the env makes the test self-contained.
         env.pop("MINSKY_ROLE", None)
+        # Per-worker CLAUDE_CONFIG_DIR isolation only authenticates when an
+        # OAuth token is exported (the isolated dir bootstraps from it). The
+        # isolation tests must therefore set the token to exercise the
+        # isolation path; the no-token fallback is covered separately. Always
+        # start from a known state (pop ambient, then set if requested).
+        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        if with_oauth_token:
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = "dummy-oauth-token-for-test-only"
         return env
 
     def test_claude_path_sets_per_worker_config_dir(self, tmp_path: Path) -> None:
@@ -940,6 +952,55 @@ class TestClaudeBackendIsolationEndToEnd:
         # the dispatcher's mkdir -p ran beforehand).
         assert expected_dir.is_dir(), (
             f"expected CLAUDE_CONFIG_DIR to be created at {expected_dir}"
+        )
+
+    def test_claude_path_without_oauth_token_uses_default_config_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """No CLAUDE_CODE_OAUTH_TOKEN → do NOT isolate into an empty dir.
+
+        Regression for the self-host spawn-failed bug: an isolated empty
+        CLAUDE_CONFIG_DIR has no credentials and the worker exits
+        `Not logged in · Please run /login` in ~1s. The keychain/subscription
+        creds the operator authenticated with are only read from the DEFAULT
+        config dir, never a fresh per-worktree one. So with no token to
+        bootstrap an isolated dir, the dispatcher must leave CLAUDE_CONFIG_DIR
+        as the operator default (auth that actually works). Isolation is a
+        concurrency optimization; an authenticatable worker is correctness.
+        """
+        env_dump = tmp_path / "claude-env.txt"
+        env = self._make_fake_claude_env(tmp_path, env_dump, with_oauth_token=False)
+        repo = tmp_path / "worktree-no-token"
+        repo.mkdir()
+        brief = tmp_path / "brief.md"
+        brief.write_text("do work")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "spawn_agent.py"),
+                "--brief-file",
+                str(brief),
+                "--repo",
+                str(repo),
+                "--model",
+                "claude-opus-4-7",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        recorded = env_dump.read_text()
+        isolated_dir = repo / ".minsky-claude-config"
+        # The child must NOT have received the isolated worktree dir...
+        assert f"CLAUDE_CONFIG_DIR={isolated_dir}" not in recorded, (
+            f"isolated CLAUDE_CONFIG_DIR leaked without a token; got: {recorded}"
+        )
+        # ...and the empty isolated dir must NOT have been created on disk.
+        assert not isolated_dir.exists(), (
+            f"isolated dir was created without a token to authenticate it: {isolated_dir}"
         )
 
     def test_two_concurrent_workers_get_disjoint_config_dirs(

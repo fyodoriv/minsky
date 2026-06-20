@@ -1919,8 +1919,15 @@ if [[ "$LOOP_FOREVER" == "1" ]]; then
       2>>"${_minsky_home}/.minsky/tick-loop.err.log" || true
 
     _completed_before_walk=$COMPLETED_COUNT
-    walk_hosts
-    walk_exit=$?
+    # `set -e` is active (line 27). A BARE `walk_hosts` call exits the whole
+    # supervisor the instant walk_hosts returns non-zero — e.g. when the
+    # CTO-audit-on-drain spawn-fails, walk_hosts inherits that non-zero and the
+    # `while true` loop dies on its FIRST drained walk instead of backing off.
+    # Capturing into `walk_exit=$?` on the next line is dead code under `set -e`
+    # (the script already exited). Guard the call with `|| walk_exit=$?` so a
+    # failed walk is data the loop acts on (backoff), not a fatal signal.
+    walk_exit=0
+    walk_hosts || walk_exit=$?
     if [[ "$walk_exit" -eq 75 ]]; then
       exit 75
     fi
