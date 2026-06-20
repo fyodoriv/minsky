@@ -85,6 +85,7 @@ Cross-references
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import shutil
@@ -105,6 +106,27 @@ DEFAULT_SHIM_PATH = (
     / "bin"
     / "minsky-openhands-spawn.py"
 )
+
+
+def _capture_spawn_failure(stderr_text: str, stdout_text: str) -> Optional[str]:
+    """Write stderr.txt + stdout.txt to .minsky/failures/<task-id>-<utc-ts>/.
+
+    Returns the dir path on success, or None on any I/O failure.
+    Graceful-degrade (rule #6): capture failure must never abort the caller.
+    Reads MINSKY_TASK_ID and MINSKY_HOST_ROOT from the environment — both are
+    exported by bin/minsky-run.sh before every spawn.
+    """
+    task_id = os.environ.get("MINSKY_TASK_ID") or "unknown"
+    host_root = os.environ.get("MINSKY_HOST_ROOT") or ".minsky"
+    utc_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    fail_dir = Path(host_root) / "failures" / f"{task_id}-{utc_ts}"
+    try:
+        fail_dir.mkdir(parents=True, exist_ok=True)
+        (fail_dir / "stderr.txt").write_text(stderr_text or "", encoding="utf-8")
+        (fail_dir / "stdout.txt").write_text(stdout_text or "", encoding="utf-8")
+        return str(fail_dir)
+    except OSError:
+        return None
 
 
 def resolve_configured_agent() -> str:
@@ -421,11 +443,29 @@ def _main(argv: Optional[list[str]] = None) -> int:
                 return 127
             env["CLAUDE_CONFIG_DIR"] = str(worker_config_dir)
         try:
-            completed = subprocess.run(claude_argv, check=False, cwd=args.repo, env=env)
+            proc = subprocess.Popen(
+                claude_argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=args.repo,
+                env=env,
+            )
+            stdout_bytes, stderr_bytes = proc.communicate()
+            sys.stdout.buffer.write(stdout_bytes)
+            sys.stdout.buffer.flush()
+            sys.stderr.buffer.write(stderr_bytes)
+            sys.stderr.buffer.flush()
         except FileNotFoundError as exc:
             print(f"spawn_agent: claude CLI not executable: {exc}", file=sys.stderr)
             return 127
-        return completed.returncode
+        if proc.returncode != 0:
+            fail_path = _capture_spawn_failure(
+                stderr_bytes.decode("utf-8", errors="replace")[:4096],
+                stdout_bytes.decode("utf-8", errors="replace")[:4096],
+            )
+            if fail_path:
+                print(f"MINSKY_FAILURE_LOG_PATH={fail_path}", file=sys.stderr)
+        return proc.returncode
 
     resolved = resolve_agent_argv(
         brief_file=args.brief_file,
@@ -452,8 +492,8 @@ def _main(argv: Optional[list[str]] = None) -> int:
         )
         return 127
 
-    # Exec into the resolved backend. Streams stdout/stderr directly to
-    # the caller (the bash watchdog + the iteration log).
+    # Spawn the resolved backend with stdout/stderr piped so failures can
+    # be captured to .minsky/failures/<task-id>-<utc-ts>/ for diagnosis.
     # AGENT_ENABLE_BROWSING=false (setdefault — operator export wins):
     # OpenHands' browsing tool launches a playwright Chromium per spawn;
     # daemon tasks are repo-edit work that never needs it, and on the
@@ -461,14 +501,26 @@ def _main(argv: Optional[list[str]] = None) -> int:
     # flashed a browser for the life of the (watchdog-bounded) spawn.
     os.environ.setdefault("AGENT_ENABLE_BROWSING", "false")
     try:
-        completed = subprocess.run(resolved, check=False)
+        proc = subprocess.Popen(resolved, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout_bytes, stderr_bytes = proc.communicate()
+        sys.stdout.buffer.write(stdout_bytes)
+        sys.stdout.buffer.flush()
+        sys.stderr.buffer.write(stderr_bytes)
+        sys.stderr.buffer.flush()
     except FileNotFoundError as exc:
         # `openhands` was on PATH at probe time but execve failed. Rare —
         # only when PATH changes between the probe and the exec. Treat
         # the same as "no backend".
         print(f"spawn_agent: backend not executable: {exc}", file=sys.stderr)
         return 127
-    return completed.returncode
+    if proc.returncode != 0:
+        fail_path = _capture_spawn_failure(
+            stderr_bytes.decode("utf-8", errors="replace")[:4096],
+            stdout_bytes.decode("utf-8", errors="replace")[:4096],
+        )
+        if fail_path:
+            print(f"MINSKY_FAILURE_LOG_PATH={fail_path}", file=sys.stderr)
+    return proc.returncode
 
 
 if __name__ == "__main__":

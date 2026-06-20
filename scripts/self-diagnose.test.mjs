@@ -37,6 +37,7 @@ import {
   parseEtime,
   parseIterationLogLine,
   runInvariants,
+  spawnFailureClassActionableInvariant,
   stripBranchPrefix,
   stripBranchSuffixes,
   tokenMonitorNotAllPeggedInvariant,
@@ -1865,5 +1866,81 @@ describe("orchestratorDetachedWorkerFinishInvariant (no-zombie-on-orchestrator-k
     if (r.ok) throw new Error("unreachable");
     expect(r.evidence).toContain("pid 5003");
     expect(r.suggestedFix).toContain("self-terminate");
+  });
+});
+
+describe("spawnFailureClassActionableInvariant", () => {
+  it("passes when classifier returns zero failures", async () => {
+    const inv = spawnFailureClassActionableInvariant({
+      runClassifier: async () => ({ total_failures: 0, top_class: null, classes: {} }),
+    });
+    const r = await inv();
+    expect(r.ok).toBe(true);
+  });
+
+  it("passes when classifier throws (classifier unavailable)", async () => {
+    const inv = spawnFailureClassActionableInvariant({
+      runClassifier: async () => {
+        throw new Error("python3 not found");
+      },
+    });
+    const r = await inv();
+    expect(r.ok).toBe(true);
+  });
+
+  it("fires when top_class is non-null with failures present", async () => {
+    const inv = spawnFailureClassActionableInvariant({
+      runClassifier: async () => ({
+        total_failures: 5,
+        top_class: "ModuleNotFoundError",
+        classes: { ModuleNotFoundError: 4, unknown: 1 },
+      }),
+    });
+    const r = await inv();
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.id).toBe("spawn-failure-class-actionable");
+    expect(r.evidence).toContain("ModuleNotFoundError");
+    expect(r.evidence).toContain("5");
+  });
+
+  it("includes fix guidance mentioning the top class", async () => {
+    const inv = spawnFailureClassActionableInvariant({
+      runClassifier: async () => ({
+        total_failures: 3,
+        top_class: "command not found",
+        classes: { "command not found": 3 },
+      }),
+    });
+    const r = await inv();
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.suggestedFix).toContain("command not found");
+  });
+
+  it("respects minFailures threshold — passes below threshold", async () => {
+    const inv = spawnFailureClassActionableInvariant({
+      runClassifier: async () => ({
+        total_failures: 1,
+        top_class: "ENOENT",
+        classes: { ENOENT: 1 },
+      }),
+      minFailures: 3,
+    });
+    const r = await inv();
+    expect(r.ok).toBe(true);
+  });
+
+  it("fires at or above minFailures threshold", async () => {
+    const inv = spawnFailureClassActionableInvariant({
+      runClassifier: async () => ({
+        total_failures: 3,
+        top_class: "ENOENT",
+        classes: { ENOENT: 3 },
+      }),
+      minFailures: 3,
+    });
+    const r = await inv();
+    expect(r.ok).toBe(false);
   });
 });
