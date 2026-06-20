@@ -120,7 +120,7 @@ function main() {
 
   const entries = readEntries(ledgerPath, cutoff);
   const n = entries.length;
-  const converts = entries.filter((e) => (e?.["files_changed"] ?? 0) > 0).length;
+  const converts = entries.filter((e) => Number(e?.["files_changed"] ?? 0) > 0).length;
   const session_converts_repo = n === 0 ? null : converts / n;
   const locDeltas = entries.map((e) => Number(e?.["loc_delta"] ?? 0));
   const baseline_delta_per_cycle = n === 0 ? null : median(locDeltas);
