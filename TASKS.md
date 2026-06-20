@@ -541,7 +541,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Touches**: novel/cross-repo-runner/src/daemon.ts,novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs
   - **Acceptance**: (1) `pnpm vitest run novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` passes; (2) `pnpm typecheck` clean; (3) Operator runs `cat <minsky-repo>/.git/config | grep bare` → sees `bare = true` (today's state); runs `git config core.bare false`; runs `git status` → works; the next iteration's self-diagnose drops the finding (no longer fires); (4) When run against a fresh bare-misset fixture, the daemon's self-diagnose emits a suggestedFix containing `git config core.bare false`.
 
-
 - [ ] `sweep-stale-delivered-task-blocks` — 14+ TASKS.md task blocks carry `Blocked: needs-operator — DELIVERED; block retained — test files freeform-cite this id` and are permanently bypassed by the task picker; the actual blocker is a mechanical test-file citation update (not operator input), so a sweep script can fix and delete all 14 in one PR
   - **ID**: sweep-stale-delivered-task-blocks
   - **Tags**: p0, milestone-m1, task-queue-hygiene, automation, ci, rule-10

@@ -1880,7 +1880,9 @@ describe("spawnFailureClassActionableInvariant", () => {
 
   it("passes when classifier throws (classifier unavailable)", async () => {
     const inv = spawnFailureClassActionableInvariant({
-      runClassifier: async () => { throw new Error("python3 not found"); },
+      runClassifier: async () => {
+        throw new Error("python3 not found");
+      },
     });
     const r = await inv();
     expect(r.ok).toBe(true);

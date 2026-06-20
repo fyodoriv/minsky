@@ -2028,7 +2028,8 @@ export function spawnFailureClassActionableInvariant(opts) {
       return { id, ok: true };
     }
     const topCount = result.classes[result.top_class] ?? 0;
-    const pct = result.total_failures > 0 ? Math.round((100 * topCount) / result.total_failures) : 0;
+    const pct =
+      result.total_failures > 0 ? Math.round((100 * topCount) / result.total_failures) : 0;
     return {
       id,
       ok: false,
