@@ -2360,3 +2360,19 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"--once"* ]]
 }
+
+@test "LOOP_FOREVER walk is set-e-safe (guarded non-zero walk_hosts) — regression for supervisor-dies-on-spawn-failed-walk" {
+  # Bug: under `set -e` (line 27) a BARE `walk_hosts` in the `while true`
+  # supervisor exits the whole daemon the instant a walk returns non-zero —
+  # e.g. CTO-audit-on-drain spawn-failed — killing the loop on its first
+  # drained walk instead of backing off. The loop must capture the exit
+  # without tripping set -e.
+  run grep -nE 'walk_hosts[[:space:]]*\|\|[[:space:]]*walk_exit=' "$MINSKY_RUN"
+  [ "$status" -eq 0 ]
+  # The LOOP_FOREVER block must NOT invoke walk_hosts in the bare form that
+  # set -e turns fatal. (The non-loop single-walk path at the very end is
+  # allowed to be bare — it has no surrounding retry loop to protect.)
+  loop_block="$(sed -n '/^  while true; do/,/^  done/p' "$MINSKY_RUN")"
+  run bash -c "printf '%s' \"\$1\" | grep -qE '^[[:space:]]*walk_hosts[[:space:]]*\$'" _ "$loop_block"
+  [ "$status" -ne 0 ]
+}
