@@ -304,6 +304,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "measure-agent-install",
       "measurement-inspects-output",
       "metric-freshness",
+      "metrics-freshness",
       "milestone-alignment",
       "no-singleton-experiment",
       "gate-scratch-resolvable",
@@ -585,6 +586,18 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-milestone-alignment.mjs", "--strict", "--min-aligned=10"],
+  },
+  {
+    // metrics-freshness-ci-gate: reads docs/METRICS.md for a
+    // `## Primary metrics` table section and fails when any row's
+    // `last_observed` date is >7 days old AND `.minsky/orchestrate.jsonl`
+    // exists (active daemon machine). Exits 0 (skip) on fresh clones and
+    // CI where no daemon history exists. Vision rule #4 (if you can't see
+    // it, it doesn't exist); Forsgren/Humble/Kim Accelerate 2018 Ch.2.
+    name: "metrics-freshness",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-metrics-freshness.mjs"],
   },
   // ---- full stage ----------------------------------------------------------
   {

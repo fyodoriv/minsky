@@ -121,6 +121,7 @@ describe("STACK_MANIFEST", () => {
         "docs-frame-coherence",
         "filename-casing",
         "markdownlint",
+        "metrics-freshness",
         "milestone-alignment",
         "no-hardcoded-timeouts",
         "no-hardcoded-user-paths",
