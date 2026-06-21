@@ -23,11 +23,37 @@
 // throw (rule #7 — graceful degrade).
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
+
+/**
+ * Honest run provenance — WHERE the run executed and WHICH minsky version
+ * produced it, so run-relative metrics can filter/segment by host + version
+ * (operator directive 2026-06-19 "filters on where minsky was executed +
+ * which version"). Best-effort: unknowable inputs degrade to null, never a
+ * fabricated value (rule #4).
+ * @returns {{ host: string|null, minskyVersion: string|null }}
+ */
+function runEnvironment() {
+  let host = null;
+  try {
+    host = hostname() || null;
+  } catch {
+    /* hostname unavailable → null */
+  }
+  let minskyVersion = null;
+  try {
+    const pkg = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8"));
+    minskyVersion = typeof pkg.version === "string" ? `v${pkg.version}` : null;
+  } catch {
+    /* package.json unreadable → null */
+  }
+  return { host, minskyVersion };
+}
 
 /**
  * @typedef {{ ts: string, workerAlive?: boolean, healed?: boolean, merged?: number[], skipped?: number, sweepError?: string, runId?: string }} TickLine
@@ -275,10 +301,11 @@ function persistRun(summary, ledger) {
   }
 }
 
-/** @param {EnrichedSummary} summary */
+/** @param {EnrichedSummary & { host?: string|null, minskyVersion?: string|null }} summary */
 function renderPretty(summary) {
   return `${[
     `run-summary (${summary.runId ?? "no active run"})`,
+    `  host / version:     ${summary.host ?? "—"} / ${summary.minskyVersion ?? "—"}`,
     `  uptime:             ${summary.totalUptimeSec ?? "—"}s`,
     `  longest no-restart: ${summary.longestUninterruptedSec ?? "—"}s`,
     `  restarts:           ${summary.restartCount}`,
@@ -301,7 +328,10 @@ function main() {
   const tokenCostUsd = costEnv && Number.isFinite(Number(costEnv)) ? Number(costEnv) : null;
 
   const ledger = readLedger();
-  const summary = enrichSummary(summarizeRun({ ledger, runId }), { tokenCostUsd });
+  const summary = {
+    ...enrichSummary(summarizeRun({ ledger, runId }), { tokenCostUsd }),
+    ...runEnvironment(),
+  };
   persistRun(summary, ledger);
 
   process.stdout.write(

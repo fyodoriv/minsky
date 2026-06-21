@@ -14,7 +14,15 @@
 // skeleton.
 
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -31,65 +39,69 @@ function run(cmd: string, env?: Record<string, string>): string {
   }).trim();
 }
 
+function gitFixtureEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  const keys = execSync("git rev-parse --local-env-vars", {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  })
+    .split("\n")
+    .filter((key) => key.length > 0);
+  for (const key of keys) {
+    delete env[key];
+  }
+  return env;
+}
+
+function generateInstallDaemonPlist(): { content: string; cleanup: () => void } {
+  const home = mkdtempSync(join(tmpdir(), "minsky-daemon-home-"));
+  const parent = join(home, "apps");
+  const host = join(parent, "minsky");
+  const stateDir = join(home, ".minsky");
+  mkdirSync(join(host, ".git"), { recursive: true });
+  mkdirSync(join(host, ".minsky"), { recursive: true });
+  writeFileSync(join(host, ".minsky", "repo.yaml"), "repo: minsky\n");
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, "config.json"), `{"default_host":"${host}"}`);
+  run(`${MINSKY_BIN} install-daemon --print`, {
+    HOME: home,
+    MINSKY_STATE_DIR: stateDir,
+  });
+  const plistPath = join(home, "Library", "LaunchAgents", "com.minsky.daemon.plist");
+  return {
+    content: readFileSync(plistPath, "utf8"),
+    cleanup: () => rmSync(home, { recursive: true, force: true }),
+  };
+}
+
 // ─── install-daemon: plist generation ────────────────────────
 
 describe("daemon-restart: install-daemon plist generation", () => {
   test("install-daemon creates a valid plist file", () => {
-    const plistPath = join(
-      process.env.HOME ?? "",
-      "Library",
-      "LaunchAgents",
-      "com.minsky.daemon.plist",
-    );
-    // The plist should already exist (installed in the previous step)
-    // or we generate it fresh
-    if (!existsSync(plistPath)) {
-      // Can't run install-daemon in CI (needs launchctl) — just verify
-      // the command parses without error
-      try {
-        run(`bash -c 'source ${MINSKY_BIN} install-daemon 2>&1 || true'`);
-      } catch {
-        // Expected in CI — launchctl not available
-      }
-    }
-
-    if (existsSync(plistPath)) {
-      const content = readFileSync(plistPath, "utf8");
+    const { cleanup, content } = generateInstallDaemonPlist();
+    try {
       expect(content).toContain("com.minsky.daemon");
       expect(content).toContain("KeepAlive");
       expect(content).toContain("RunAtLoad");
-      expect(content).toContain("minsky-run.mjs");
-      expect(content).toContain("--host");
-      expect(content).toContain("--loop");
-      // Must NOT contain ephemeral fnm multishell path
+      expect(content).toContain("/bin/bash");
+      expect(content).toContain("minsky-run.sh");
+      expect(content).toContain("--hosts-dir");
+      expect(content).not.toContain("<string>--host</string>");
       expect(content).not.toContain("fnm_multishells");
-      // Must use a stable node path
-      expect(content).toMatch(/node/);
+    } finally {
+      cleanup();
     }
   });
 
-  test("plist uses stable node path, not ephemeral fnm multishell", () => {
-    const plistPath = join(
-      process.env.HOME ?? "",
-      "Library",
-      "LaunchAgents",
-      "com.minsky.daemon.plist",
-    );
-    if (!existsSync(plistPath)) return; // skip in CI
-    const content = readFileSync(plistPath, "utf8");
-    // The node path should be one of the stable locations
-    const nodeMatch = content.match(/<string>(\/[^<]*node)<\/string>/);
-    expect(nodeMatch).not.toBeNull();
-    const nodePath = nodeMatch?.[1] ?? "";
-    // Should NOT be an ephemeral fnm_multishells path
-    expect(nodePath).not.toContain("fnm_multishells");
-    // Should be an actual executable
-    expect(
-      nodePath.includes(".fnm") ||
-        nodePath.includes("/opt/homebrew") ||
-        nodePath.includes("/usr/local") ||
-        nodePath.includes("fnm/node-versions"),
-    ).toBe(true);
+  test("default bash-runner plist does not depend on node", () => {
+    const { cleanup, content } = generateInstallDaemonPlist();
+    try {
+      expect(content).toContain("/bin/bash");
+      expect(content).not.toContain("minsky-run.mjs");
+      expect(content).not.toMatch(/<string>\/[^<]*node<\/string>/);
+    } finally {
+      cleanup();
+    }
   });
 });
 
@@ -227,11 +239,15 @@ describe("daemon-restart: dirty-state refuse (e2e)", () => {
     // path) and assert (a) exit code 1, (b) the untracked file is STILL on
     // disk, (c) git stash list is empty, (d) branch is unchanged, (e) the
     // error message points the operator at the three manual recovery paths.
-    const fixtureDir = join(tmpdir(), `minsky-fixture-${Date.now()}`);
+    const fixtureDir = mkdtempSync(join(tmpdir(), "minsky-fixture-"));
     const bareDir = `${fixtureDir}.bare.git`;
     try {
       const G = "git -c core.hooksPath=/dev/null";
-      execSync(`mkdir -p '${fixtureDir}' && ${G} init -b main '${fixtureDir}'`, { stdio: "pipe" });
+      const fixtureEnv = gitFixtureEnv();
+      execSync(`mkdir -p '${fixtureDir}' && ${G} init -b main '${fixtureDir}'`, {
+        stdio: "pipe",
+        env: fixtureEnv,
+      });
       execSync(
         `cd '${fixtureDir}' && \
          ${G} config user.email t@example.com && \
@@ -245,15 +261,19 @@ describe("daemon-restart: dirty-state refuse (e2e)", () => {
          ${G} symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main && \
          ${G} checkout -b feat/crashed-iteration && \
          echo 'unsaved work from another agent' > unsaved.txt`,
-        { stdio: "pipe", shell: "/bin/bash" },
+        { stdio: "pipe", shell: "/bin/bash", env: fixtureEnv },
       );
 
       // Pre-condition: untracked file exists, on feature branch, no stash
       expect(existsSync(join(fixtureDir, "unsaved.txt"))).toBe(true);
-      expect(execSync(`git -C '${fixtureDir}' branch --show-current`).toString().trim()).toBe(
-        "feat/crashed-iteration",
-      );
-      expect(execSync(`git -C '${fixtureDir}' stash list`, { encoding: "utf8" }).trim()).toBe("");
+      expect(
+        execSync(`git -C '${fixtureDir}' branch --show-current`, { env: fixtureEnv })
+          .toString()
+          .trim(),
+      ).toBe("feat/crashed-iteration");
+      expect(
+        execSync(`git -C '${fixtureDir}' stash list`, { encoding: "utf8", env: fixtureEnv }).trim(),
+      ).toBe("");
 
       // Invoke the subcommand (no --sentinel = crash path)
       let exitCode = 0;
@@ -261,6 +281,7 @@ describe("daemon-restart: dirty-state refuse (e2e)", () => {
       try {
         execSync(`bash '${MINSKY_BIN}' reset-host-if-crashed --host '${fixtureDir}'`, {
           stdio: ["ignore", "pipe", "pipe"],
+          env: fixtureEnv,
         });
       } catch (err) {
         const e = err as { status?: number; stderr?: Buffer };
@@ -276,17 +297,18 @@ describe("daemon-restart: dirty-state refuse (e2e)", () => {
       expect(existsSync(join(fixtureDir, "unsaved.txt"))).toBe(true);
       expect(readFileSync(join(fixtureDir, "unsaved.txt"), "utf8")).toContain("unsaved work");
       // Stash list still empty
-      expect(execSync(`git -C '${fixtureDir}' stash list`, { encoding: "utf8" }).trim()).toBe("");
+      expect(
+        execSync(`git -C '${fixtureDir}' stash list`, { encoding: "utf8", env: fixtureEnv }).trim(),
+      ).toBe("");
       // Branch unchanged
-      expect(execSync(`git -C '${fixtureDir}' branch --show-current`).toString().trim()).toBe(
-        "feat/crashed-iteration",
-      );
+      expect(
+        execSync(`git -C '${fixtureDir}' branch --show-current`, { env: fixtureEnv })
+          .toString()
+          .trim(),
+      ).toBe("feat/crashed-iteration");
     } finally {
-      try {
-        execSync(`rm -rf '${fixtureDir}' '${bareDir}'`, { stdio: "pipe" });
-      } catch {
-        /* noop */
-      }
+      rmSync(fixtureDir, { recursive: true, force: true });
+      rmSync(bareDir, { recursive: true, force: true });
     }
   });
 });
@@ -390,6 +412,29 @@ describe("daemon-restart: launchd KeepAlive contract", () => {
     // Quiet-mode env var lets the auto-install hook suppress the
     // "already up to date" line on every pull (would be too noisy).
     expect(src).toContain("MINSKY_INSTALL_DAEMON_QUIET");
+  });
+
+  test("auto-install-on-minsky-run: smart attach refreshes existing plist before attach/start", () => {
+    const src = readFileSync(MINSKY_BIN, "utf8");
+    const smartBlock = src.match(/# ── 3b\. Smart auto-attach[\s\S]*?# ── 4\. Daemon mode/);
+    expect(smartBlock).not.toBeNull();
+    const block = smartBlock?.[0] ?? "";
+    const installIndex = block.indexOf("install-daemon");
+    const attachIndex = block.indexOf("if _daemon_running_for_host");
+    expect(block).toContain('com.minsky.daemon.plist" ]');
+    expect(block).toContain("MINSKY_INSTALL_DAEMON_QUIET");
+    expect(installIndex).toBeGreaterThan(-1);
+    expect(attachIndex).toBeGreaterThan(-1);
+    expect(installIndex).toBeLessThan(attachIndex);
+  });
+
+  test("auto-install-on-minsky-run: missing plist stays explicit-start, not first-run persistence", () => {
+    const src = readFileSync(MINSKY_BIN, "utf8");
+    const smartBlock = src.match(/# ── 3b\. Smart auto-attach[\s\S]*?# ── 4\. Daemon mode/);
+    expect(smartBlock).not.toBeNull();
+    const block = smartBlock?.[0] ?? "";
+    expect(block).not.toContain("! launchctl list");
+    expect(block).not.toContain("installing launchd persistence");
   });
 });
 

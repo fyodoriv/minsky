@@ -5,16 +5,17 @@
 // half of the task's `**Measurement**`:
 //
 //   node scripts/chaos-sandbox-disallowed-read.mjs --json
-//     → {disallowed_read_denied:true, allowed_read_permitted:true, skipped:false}
+//     → {disallowed_read_denied:true, allowed_read_permitted:true, toolchain_probe_permitted:true, skipped:false}
 //
 // Steady-state hypothesis (Basiri et al., "Principles of Chaos Engineering",
 // IEEE Software 2016): under the shipped `(deny default)` SBPL profile
 // `distribution/launchd/com.minsky.tick-loop.sb`, a child process that tries
 // to read a path OUTSIDE the supervisor's allow-list (`~/.ssh/known_hosts`)
 // is denied (nonzero exit / EPERM), while a child reading an allow-listed
-// repo path (`README.md`) succeeds (exit 0). The fault injected is the
-// disallowed read itself; the assertion is that the sandbox holds the trust
-// boundary documented in docs/security/supervisor-sandbox.md.
+// repo path (`README.md`) succeeds (exit 0), and an operator-toolchain child
+// (`xcrun --find git`) succeeds (exit 0). The fault injected is the disallowed
+// read itself; the assertion is that the sandbox holds the trust boundary
+// documented in docs/security/supervisor-sandbox.md without breaking git/gh.
 //
 // Pattern conformance (vision.md § "Pattern conformance index"):
 //   - Chaos engineering — steady-state hypothesis + fault injection +
@@ -63,6 +64,7 @@ export const ALLOWED_REL_PATH = "README.md";
  * @typedef {object} SandboxAssessment
  * @property {boolean} disallowed_read_denied
  * @property {boolean} allowed_read_permitted
+ * @property {boolean} toolchain_probe_permitted
  * @property {boolean} skipped
  * @property {string} [skip_reason]
  * @property {boolean} ok   the overall steady-state verdict
@@ -72,18 +74,20 @@ export const ALLOWED_REL_PATH = "README.md";
  * Pure decision over the two probe results (Basiri assertion). Separated
  * from the I/O so the paired test pins every branch without spawning.
  *
- * Steady state holds when the disallowed read was DENIED (nonzero exit) and
- * the allowed read was PERMITTED (exit 0). A `skipped` probe yields `ok:true`
- * (graceful degrade — rule #7) but flags the skip so the operator sees it.
+ * Steady state holds when the disallowed read was DENIED (nonzero exit), the
+ * allowed read was PERMITTED (exit 0), and the operator toolchain probe was
+ * PERMITTED (exit 0). A `skipped` probe yields `ok:true` (graceful degrade —
+ * rule #7) but flags the skip so the operator sees it.
  *
- * @param {{ disallowed: ProbeResult, allowed: ProbeResult, skip?: string }} input
+ * @param {{ disallowed: ProbeResult, allowed: ProbeResult, toolchain: ProbeResult, skip?: string }} input
  * @returns {SandboxAssessment}
  */
-export function assessSandboxProbes({ disallowed, allowed, skip }) {
+export function assessSandboxProbes({ disallowed, allowed, toolchain, skip }) {
   if (skip !== undefined) {
     return {
       disallowed_read_denied: false,
       allowed_read_permitted: false,
+      toolchain_probe_permitted: false,
       skipped: true,
       skip_reason: skip,
       ok: true,
@@ -94,11 +98,13 @@ export function assessSandboxProbes({ disallowed, allowed, skip }) {
   // valid denial — the probe couldn't establish the steady state.
   const disallowed_read_denied = disallowed.exitCode !== null && disallowed.exitCode !== 0;
   const allowed_read_permitted = allowed.exitCode === 0;
+  const toolchain_probe_permitted = toolchain.exitCode === 0;
   return {
     disallowed_read_denied,
     allowed_read_permitted,
+    toolchain_probe_permitted,
     skipped: false,
-    ok: disallowed_read_denied && allowed_read_permitted,
+    ok: disallowed_read_denied && allowed_read_permitted && toolchain_probe_permitted,
   };
 }
 
@@ -140,26 +146,17 @@ export function resolveHome(p) {
 }
 
 /**
- * Run one `sandbox-exec -f <profile> /bin/cat <target>` probe. I/O boundary
- * — never called by the test (which injects ProbeResults directly).
+ * Run one `sandbox-exec -f <profile> <argv...>` probe. I/O boundary — never
+ * called by the test (which injects ProbeResults directly).
  *
- * @param {string} target  absolute path to read
+ * @param {string[]} argv
  * @returns {ProbeResult}
  */
-function runProbe(target) {
+function runProbe(argv) {
   const home = process.env["HOME"] ?? "";
   const r = spawnSync(
     "/usr/bin/sandbox-exec",
-    [
-      "-D",
-      `MINSKY_HOME=${REPO_ROOT}`,
-      "-D",
-      `HOME=${home}`,
-      "-f",
-      PROFILE_PATH,
-      "/bin/cat",
-      target,
-    ],
+    ["-D", `MINSKY_HOME=${REPO_ROOT}`, "-D", `HOME=${home}`, "-f", PROFILE_PATH, ...argv],
     { stdio: ["ignore", "ignore", "ignore"] },
   );
   // spawnSync sets `.error` (and status null) when the binary itself can't
@@ -176,12 +173,14 @@ export function runChaos() {
     return assessSandboxProbes({
       disallowed: { exitCode: null },
       allowed: { exitCode: null },
+      toolchain: { exitCode: null },
       skip,
     });
   }
-  const disallowed = runProbe(resolveHome(DISALLOWED_PATH));
-  const allowed = runProbe(resolve(REPO_ROOT, ALLOWED_REL_PATH));
-  return assessSandboxProbes({ disallowed, allowed });
+  const disallowed = runProbe(["/bin/cat", resolveHome(DISALLOWED_PATH)]);
+  const allowed = runProbe(["/bin/cat", resolve(REPO_ROOT, ALLOWED_REL_PATH)]);
+  const toolchain = runProbe(["/usr/bin/xcrun", "--find", "git"]);
+  return assessSandboxProbes({ disallowed, allowed, toolchain });
 }
 
 const invokedDirectly =
@@ -196,11 +195,11 @@ if (invokedDirectly) {
     process.stdout.write(`chaos-sandbox-disallowed-read: SKIPPED — ${result.skip_reason}\n`);
   } else if (result.ok) {
     process.stdout.write(
-      `chaos-sandbox-disallowed-read: OK — ${DISALLOWED_PATH} denied (EPERM), ${ALLOWED_REL_PATH} permitted under (deny default) profile.\n`,
+      `chaos-sandbox-disallowed-read: OK — ${DISALLOWED_PATH} denied (EPERM), ${ALLOWED_REL_PATH} permitted, xcrun toolchain probe permitted under (deny default) profile.\n`,
     );
   } else {
     process.stderr.write(
-      `chaos-sandbox-disallowed-read: FAIL — disallowed_read_denied=${result.disallowed_read_denied} allowed_read_permitted=${result.allowed_read_permitted}. The sandbox did not hold the supervisor trust boundary (docs/security/supervisor-sandbox.md).\n`,
+      `chaos-sandbox-disallowed-read: FAIL — disallowed_read_denied=${result.disallowed_read_denied} allowed_read_permitted=${result.allowed_read_permitted} toolchain_probe_permitted=${result.toolchain_probe_permitted}. The sandbox did not hold the supervisor trust boundary without breaking the operator toolchain (docs/security/supervisor-sandbox.md).\n`,
     );
   }
   // Self-check: the profile must exist and open with (deny default) even when

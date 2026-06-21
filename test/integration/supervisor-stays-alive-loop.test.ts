@@ -20,8 +20,9 @@
 // no deadlock. A live integration test of --loop itself would deadlock
 // the test runner; the source-level check is the practical gate.
 
-import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
@@ -60,16 +61,56 @@ describe("supervisor-stays-alive: --loop flag keeps the supervisor running", () 
     expect(src).toMatch(/exec bash[^\n]+minsky-run\.sh[^\n]*\s--loop\b/);
   });
 
+  test("run-tick-loop.sh gates on endpoint-ready + opt-in enable (EPM anti-hammer)", () => {
+    const src = readFileSync(RUN_TICK_LOOP_SH, "utf8");
+    expect(src).toMatch(/endpoint-ready sentinel missing/);
+    expect(src).toMatch(/minsky enable-autostart/);
+    expect(src).toMatch(/MINSKY_JQ unset/);
+    expect(src).toMatch(/exit 0/);
+  });
+
   test("default mode (no --loop) runs ONE walk and exits — historical default preserved", () => {
     // Without --loop, the script must take the else branch (one walk,
     // exit). Use --dry-run to skip the openhands invariant + picker so
     // the test runs on any CI runner. 15s timeout would catch a
     // regression that accidentally made --loop the default.
-    const stdout = execSync(`bash ${RUN_SH} --dry-run --host ${REPO_ROOT} 2>&1 | head -3`, {
+    const host = mkdtempSync(join(tmpdir(), "minsky-no-loop-host-"));
+    const fakeBin = mkdtempSync(join(tmpdir(), "minsky-no-loop-bin-"));
+    const configPath = join(mkdtempSync(join(tmpdir(), "minsky-no-loop-config-")), "config.json");
+    execSync("git init -q", { cwd: host });
+    mkdirSync(join(host, ".minsky"), { recursive: true });
+    writeFileSync(join(host, ".minsky", "repo.yaml"), "task_source: tasks-md\n");
+    writeFileSync(join(host, "TASKS.md"), "# Tasks\n\n## P0\n\n## P1\n\n## P2\n\n## P3\n");
+    writeFileSync(
+      configPath,
+      JSON.stringify({ cloud_agent: "claude", local_agent: "aider", local_llm_enabled: false }),
+    );
+    writeFileSync(
+      join(fakeBin, "gh"),
+      [
+        "#!/usr/bin/env bash",
+        'if [[ "$1 $2" == "repo view" ]]; then echo "fixture/host"; exit 0; fi',
+        'if [[ "$1 $2" == "pr list" && " $* " == *" --jq "* ]]; then exit 0; fi',
+        'if [[ "$1 $2" == "pr list" ]]; then echo "[]"; exit 0; fi',
+        "exit 0",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    const result = spawnSync("bash", [RUN_SH, "--dry-run", "--host", host], {
       encoding: "utf8",
       timeout: 15_000,
       cwd: REPO_ROOT,
+      env: {
+        ...process.env,
+        MINSKY_CONFIG: configPath,
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+      },
     });
-    expect(stdout.length).toBeGreaterThan(0);
+
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(`${result.stdout}${result.stderr}`.length).toBeGreaterThan(0);
   });
 });

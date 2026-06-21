@@ -5,8 +5,13 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { isTaskAttempt } from "./lib/stability.mjs";
 
-const hostDir = process.argv[2] || process.cwd();
+// First non-flag positional arg is the host dir; flags (e.g. `--json`)
+// must NOT be consumed as the host dir. The bare `argv[2]` read meant
+// `stability-number.mjs --json` resolved host-dir="--json" → no-data
+// (the documented Measurement command for the 8h proof was broken).
+const hostDir = process.argv.slice(2).find((a) => !a.startsWith("-")) ?? process.cwd();
 const jsonMode = process.argv.includes("--json");
 const storeDir = resolve(hostDir, ".minsky", "experiment-store", "cross-repo");
 
@@ -32,7 +37,12 @@ for (const file of readdirSync(storeDir).filter((f) => f.endsWith(".jsonl"))) {
     try {
       const d = JSON.parse(line);
       const ts = new Date(d.ts).getTime();
-      if (ts >= sevenDaysAgo) {
+      // Exclude drained-queue bookkeeping ticks (and the legacy
+      // aborted+"no eligible task" shape) from the SLI — same valid-event
+      // qualification the stability-report lib applies. Without this the
+      // single stability number is poisoned by idle polls, exactly the
+      // bug `drained-queue-not-an-iteration` fixed in stability-report.
+      if (ts >= sevenDaysAgo && isTaskAttempt(d)) {
         records.push(d);
       }
     } catch {

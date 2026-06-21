@@ -304,6 +304,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "measure-agent-install",
       "measurement-inspects-output",
       "metric-freshness",
+      "metrics-freshness",
       "milestone-alignment",
       "no-singleton-experiment",
       "gate-scratch-resolvable",
@@ -360,6 +361,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
       "vision-rule-13-task-id-citations",
+      "no-delivered-retained-blocks",
     ]),
   ),
   supervisorSkippable: Object.freeze(
@@ -457,12 +459,22 @@ export const STACK_MANIFEST = Object.freeze([
     env: { LINT_MD_DIFF_BASE: "origin/main" },
   },
   {
+    // Vendored as a devDependency (see package.json) so the gate calls the
+    // local `tasks-lint` binary instead of `npx -y @tasks-md/lint@^0.7.0`.
+    // The npx form shared `/tmp/npm-cache-minsky` across concurrent sessions:
+    // libnpmexec's with-lock touch-loop detected sibling lock-steals and
+    // aborted with `npm error ECOMPROMISED: Lock compromised`, intermittently
+    // failing the stop-gate on a content-clean TASKS.md (observed 2026-06-10,
+    // three concurrent `npm exec @tasks-md/lint` processes). Vendoring
+    // eliminates the shared-cache lock dependency entirely and drops the
+    // cold-reify tax (~88 s) to <1 s. Source: TASKS.md
+    // `tasks-lint-npx-lock-contention-flakes-stop-gate`; Nygard, *Release It!*
+    // (2018) Ch. 4 (bulkhead the shared mutable resource); vision.md rule #10
+    // (deterministic gates: same input → same verdict).
     name: "tasks-lint",
     stages: ["stop-gate", "fast", "full"],
-    cmd: "npx",
-    args: ["-y", "@tasks-md/lint@^0.7.0", "TASKS.md"],
-    // Use a writable temp cache in case ~/.npm has root-owned files (sandbox EPERM).
-    env: { NPM_CONFIG_CACHE: "/tmp/npm-cache-minsky" },
+    cmd: "pnpm",
+    args: ["exec", "tasks-lint", "TASKS.md"],
   },
   {
     name: "rule-2-dep-coverage",
@@ -575,6 +587,34 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-milestone-alignment.mjs", "--strict", "--min-aligned=10"],
+  },
+  {
+    // metrics-freshness-ci-gate: reads docs/METRICS.md for a
+    // `## Primary metrics` table section and fails when any row's
+    // `last_observed` date is >7 days old AND `.minsky/orchestrate.jsonl`
+    // exists (active daemon machine). Exits 0 (skip) on fresh clones and
+    // CI where no daemon history exists. Vision rule #4 (if you can't see
+    // it, it doesn't exist); Forsgren/Humble/Kim Accelerate 2018 Ch.2.
+    name: "metrics-freshness",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-metrics-freshness.mjs"],
+  },
+  {
+    // Prevents re-accumulation of the stale delivered-retained-block pattern
+    // (36 accumulated 2026-05-01→2026-06-20, swept by
+    // `sweep-stale-delivered-task-blocks`). Rejects any `**Blocked**:` field
+    // in TASKS.md containing `DELIVERED.*block retained` — a task whose only
+    // blocker is a freeform test-file citation update is not genuinely blocked
+    // and should be swept or deleted. Pure grep — <100ms wall-clock.
+    // Source: task `stale-delivered-block-ci-gate` (P0, M1); vision.md rule
+    // #10 (deterministic enforcement); Hunt & Thomas, *The Pragmatic
+    // Programmer* 1999 Ch. 8 ("Don't Live with Broken Windows").
+    name: "no-delivered-retained-blocks",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-delivered-retained-blocks.mjs"],
+    env: { NO_DELIVERED_BLOCKS_DIFF_BASE: "origin/main" },
   },
   // ---- full stage ----------------------------------------------------------
   {

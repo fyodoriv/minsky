@@ -11,9 +11,17 @@
 
 import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { accumulate24h, loadRunSummaries, longestRun } from "./runs-aggregate.mjs";
 
 const ROOT = process.cwd();
+// Sibling minsky scripts resolve against THIS file's directory, not the
+// cwd: `ROOT` is the host repo being measured (any bootstrapped repo),
+// while the collector pipeline ships with minsky. Resolving siblings
+// via cwd silently broke every python/node sub-collector when run from
+// a non-minsky host (FileNotFound -> null -> honest-but-empty values).
+const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 const TODAY = new Date().toISOString().slice(0, 10);
 const SNAPSHOT_DIR = resolve(ROOT, ".minsky/metric-snapshots");
 
@@ -47,7 +55,7 @@ function collectLoopUptime() {
   try {
     const stdout = execFileSync(
       "node",
-      ["scripts/stability-report.mjs", "--window=30d", "--json"],
+      [join(SCRIPTS_DIR, "stability-report.mjs"), "--window=30d", "--json"],
       { cwd: ROOT, encoding: "utf8", timeout: 5_000 },
     );
     const parsed = JSON.parse(stdout);
@@ -88,7 +96,7 @@ function collectCrossRepoPrRate() {
   try {
     const stdout = execFileSync(
       "node",
-      ["scripts/check-cross-repo-pr-rate.mjs", "--window=30d", "--json"],
+      [join(SCRIPTS_DIR, "check-cross-repo-pr-rate.mjs"), "--window=30d", "--json"],
       { cwd: ROOT, encoding: "utf8", timeout: 5_000 },
     );
     const parsed = JSON.parse(stdout);
@@ -136,7 +144,9 @@ function collectSpecAlignment() {
 
 /** dep-interface-coverage: run the rule-2 check */
 function collectDepInterfaceCoverage() {
-  const result = run("node scripts/check-rule-2-dep-coverage.mjs 2>&1");
+  const result = run(
+    `node ${JSON.stringify(join(SCRIPTS_DIR, "check-rule-2-dep-coverage.mjs"))} 2>&1`,
+  );
   if (result === null) return null;
   const pass =
     result.includes("pass") ||
@@ -193,7 +203,9 @@ function collectMttrSelfHeal() {
   // shape as the populated path closes Phase 1 success criterion #4
   // of `agents-can-self-heal-minsky-m1-13` (TASKS.md) which calls for
   // "a real number (not the OTEL-blocked stub)".
-  const raw = run("node scripts/heal-mttr-report.mjs --window=30d --json");
+  const raw = run(
+    `node ${JSON.stringify(join(SCRIPTS_DIR, "heal-mttr-report.mjs"))} --window=30d --json`,
+  );
   if (raw === null) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -367,14 +379,14 @@ function collectFleetStabilityAggregated() {
   const hostsDir = process.env["MINSKY_HOSTS_DIR"];
   if (!hostsDir) return formatFleetStability(undefined, null);
   const data = /** @type {Parameters<typeof formatFleetStability>[1]} */ (
-    runPyJson("scripts/transform_knowledge.py", ["--hosts-dir", hostsDir, "--json"])
+    runPyJson(join(SCRIPTS_DIR, "transform_knowledge.py"), ["--hosts-dir", hostsDir, "--json"])
   );
   return formatFleetStability(hostsDir, data);
 }
 
 function collectSessionConvertsRepo() {
   const data = /** @type {Parameters<typeof formatSessionConvertsRepo>[0]} */ (
-    runPyJson("scripts/transform_trend.py", ["--repo", ROOT, "--json"])
+    runPyJson(join(SCRIPTS_DIR, "transform_trend.py"), ["--repo", ROOT, "--json"])
   );
   return formatSessionConvertsRepo(data);
 }
@@ -462,6 +474,95 @@ function collectSpawnFailureRate24h() {
 }
 
 /**
+ * Distinct non-null values of `field` across the runs whose id is in `ids`.
+ * @param {Array<Record<string, any>>} runs
+ * @param {string[]} ids
+ * @param {string} field
+ * @returns {string}
+ */
+function distinctField(runs, ids, field) {
+  const set = new Set();
+  for (const r of runs) {
+    if (r && ids.includes(r["runId"]) && r[field] != null) set.add(r[field]);
+  }
+  return set.size ? [...set].join(", ") : "—";
+}
+
+/**
+ * `runtime-accumulated-24h` collector — run health over the last 24h of
+ * ACCUMULATED minsky runtime (runs newest→oldest, summing uptime to 24h),
+ * not wall-clock 24h. Reads minsky-local .minsky/runs/<id>/run-summary.json.
+ * Honest `(stub)` when no run is recorded yet (rule #4 — never a fake zero).
+ *
+ * @returns {{value: string|number, higherIsBetter: boolean, source?: string}}
+ */
+function collectRuntimeAccumulated24h() {
+  const minskyRoot = resolve(SCRIPTS_DIR, "..");
+  const runs = loadRunSummaries(minskyRoot);
+  const agg = accumulate24h(runs);
+  if (!agg || agg.runCount === 0) {
+    return {
+      value: "(stub) — no minsky run recorded yet (run minsky, then 'minsky metrics collect')",
+      higherIsBetter: true,
+    };
+  }
+  const hours = (agg.accumulatedUptimeSec / 3600).toFixed(1);
+  const hosts = distinctField(runs, agg.runIds, "host");
+  const versions = distinctField(runs, agg.runIds, "minskyVersion");
+  const partial = agg.complete ? "" : " (<24h of runtime recorded so far)";
+  return {
+    value:
+      hours +
+      "h runtime / " +
+      agg.runCount +
+      " run(s) / " +
+      agg.restarts +
+      " restart(s) / " +
+      agg.tasksMerged +
+      " PR(s)" +
+      partial +
+      " [hosts: " +
+      hosts +
+      "; minsky: " +
+      versions +
+      "]",
+    higherIsBetter: true,
+    source: ".minsky/runs/*/run-summary.json",
+  };
+}
+
+/**
+ * `longest-run` collector — the single longest uninterrupted minsky run
+ * (max `longestUninterruptedSec`). Honest `(stub)` when no run recorded.
+ *
+ * @returns {{value: string|number, higherIsBetter: boolean, source?: string}}
+ */
+function collectLongestRun() {
+  const best = longestRun(loadRunSummaries(resolve(SCRIPTS_DIR, "..")));
+  if (!best) {
+    return {
+      value: "(stub) — no minsky run recorded yet (run minsky, then 'minsky metrics collect')",
+      higherIsBetter: true,
+    };
+  }
+  const mins = (best.longestUninterruptedSec / 60).toFixed(1);
+  return {
+    value:
+      best.longestUninterruptedSec +
+      "s (" +
+      mins +
+      "m) / run " +
+      (best.runId ?? "-") +
+      " / host " +
+      (best.host ?? "-") +
+      " / minsky " +
+      (best.minskyVersion ?? "-"),
+    higherIsBetter: true,
+    source: ".minsky/runs/*/run-summary.json",
+  };
+}
+
+/**
  * Path-A LOC scoreboard collector — see `path-a-loc-novel-tree` metric
  * in `SUCCESS_METRICS` for goal/pivot/anchor. JSDoc separated from the
  * declaration because the spawn-failure helpers above moved between them.
@@ -486,7 +587,7 @@ function collectPathALoc(subtree) {
 
 function collectBaselineDeltaPerCycle() {
   const data = /** @type {Parameters<typeof formatBaselineDeltaPerCycle>[0]} */ (
-    runPyJson("scripts/transform_trend.py", ["--repo", ROOT, "--json"])
+    runPyJson(join(SCRIPTS_DIR, "transform_trend.py"), ["--repo", ROOT, "--json"])
   );
   return formatBaselineDeltaPerCycle(data);
 }
@@ -510,6 +611,8 @@ async function main() {
     "mttr-self-heal": collectMttrSelfHeal,
     "wrist-dwell": collectWristDwell,
     "fleet-stability-aggregated": collectFleetStabilityAggregated,
+    "runtime-accumulated-24h": collectRuntimeAccumulated24h,
+    "longest-run": collectLongestRun,
     "session-converts-repo": collectSessionConvertsRepo,
     "baseline-delta-per-cycle": collectBaselineDeltaPerCycle,
     "tokens-per-story": () => ({

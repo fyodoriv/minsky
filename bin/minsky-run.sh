@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # bin/minsky-run.sh — Path A Phase 7 host walker
 # ============================================================================
 #
@@ -652,20 +652,55 @@ iterate_host() {
   local all_prs_json
   all_prs_json="$(mktemp -t minsky-run-prs-XXXXXX.json)"
   dump_all_prs_json "$host" "$all_prs_json" "$gh_host"
+  # Resolve the host's task source from .minsky/repo.yaml. Defaults to
+  # `tasks-md` when the field is absent — every existing host stays
+  # unchanged. `github-issues` routes the picker through the gh adapter
+  # in `scripts/gh_issue_task_source.py` (rule #2 — port + impl).
+  local task_source host_repo_id
+  task_source="$(python3 -c "
+import sys
+from pathlib import Path
+sys.path.insert(0, '$(dirname "${BASH_SOURCE[0]}")/../scripts')
+from build_brief import load_host_config
+cfg = load_host_config(Path('$host'))
+print(cfg.task_source)
+" 2>/dev/null || echo "tasks-md")"
+  host_repo_id="$(python3 -c "
+import sys
+from pathlib import Path
+sys.path.insert(0, '$(dirname "${BASH_SOURCE[0]}")/../scripts')
+from build_brief import load_host_config
+print(load_host_config(Path('$host')).host_repo)
+" 2>/dev/null || echo "")"
   local task_id
-  task_id="$(python3 "$(dirname "${BASH_SOURCE[0]}")/../scripts/pick_task.py" \
-    "$host/TASKS.md" \
-    "--open-pr-branches=${open_branches}" \
-    "--all-prs-json=${all_prs_json}" \
-    2>/dev/null || true)"
+  if [[ "$task_source" == "github-issues" ]]; then
+    task_id="$(python3 "$(dirname "${BASH_SOURCE[0]}")/../scripts/pick_task.py" \
+      "$host/TASKS.md" \
+      "--task-source=github-issues" \
+      "--gh-issues-repo=${host_repo_id}" \
+      "--open-pr-branches=${open_branches}" \
+      "--all-prs-json=${all_prs_json}" \
+      2>/dev/null || true)"
+  else
+    task_id="$(python3 "$(dirname "${BASH_SOURCE[0]}")/../scripts/pick_task.py" \
+      "$host/TASKS.md" \
+      "--open-pr-branches=${open_branches}" \
+      "--all-prs-json=${all_prs_json}" \
+      2>/dev/null || true)"
+  fi
   rm -f "$all_prs_json"
 
   if [[ -z "$task_id" ]]; then
-    record_iteration "$host" "$iter_n" "" "" "aborted" "" "no eligible task" "$gh_host"
+    # Verdict `drained` (not `aborted`): a drained queue is a bookkeeping
+    # event, not a failed iteration. `scripts/lib/stability.mjs` excludes
+    # drained records from the stability SLI denominator (valid-event
+    # qualification — Beyer et al. 2016, *SRE*, Ch. 4). Recording it as
+    # `aborted` poisoned 24h stability to 0% with ~1800 idle records/day.
+    record_iteration "$host" "$iter_n" "" "" "drained" "" "no eligible task" "$gh_host"
     echo "no eligible task in $host" >&2
     # Return non-zero so walk_hosts() breaks the inner loop and moves
     # to the next host instead of burning N round-robin slots emitting
-    # repeated "aborted" records (matches host-walker.ts).
+    # repeated "drained" records (matches host-walker.ts).
     return 1
   fi
 
@@ -821,7 +856,7 @@ EOF
   fi
 
   local model
-  model="$(jq -r '.openhands.model // "claude-opus-4-7"' "$CONFIG_FILE" 2>/dev/null || echo "claude-opus-4-7")"
+  model="$(jq -r '.openhands.model // "claude-sonnet-4-6"' "$CONFIG_FILE" 2>/dev/null || echo "claude-sonnet-4-6")"
 
   # ──────────────────────────────────────────────────────────────────
   # Run-anywhere provider decision (runany-dynamic-model-or-local-fallback,
@@ -1123,6 +1158,21 @@ EOF
   # would normally yell about unquoted expansion; the `# shellcheck`
   # pragmas below opt out for the load-bearing word-splitting that the
   # flag-list pattern needs.
+  # Source class-specific spawn flags persisted by prior heal-dispatch runs.
+  # Written by the heal-dispatch block below on spawn failure; applied here
+  # at the next spawn start so the remedy (e.g. MINSKY_SPAWN_SERIALIZE=1)
+  # is active before the new spawn. Best-effort: a missing or malformed file
+  # never aborts the iteration (rule #6 — let-it-crash at the right boundary).
+  local _spawn_flags_env="$host/.minsky/spawn-flags.env"
+  if [[ -f "$_spawn_flags_env" ]]; then
+    # set -a exports all vars defined while set -a is active so the spawned
+    # subprocess inherits them without explicit `export` in the env file.
+    set -a
+    # shellcheck disable=SC1090
+    source "$_spawn_flags_env" 2>/dev/null || true
+    set +a
+  fi
+
   local spawn_wrapper="$script_dir/../scripts/spawn_with_watchdog.py"
   # Resolve the python interpreter for the spawn shim — prefers
   # ~/.minsky/openhands-venv/bin/python over bare python3. See
@@ -1456,8 +1506,82 @@ print(load_host_config(Path('$host')).default_branch)
       --gh-host "${gh_host:-}" >/dev/null 2>&1 || true
   fi
 
+  # Heal dispatch (spawn-failure-class-heal-dispatch): classify the spawn's
+  # combined stdout+stderr, emit a heal-events JSONL row, and execute the
+  # class-specific remedy so known failure modes self-correct within the next
+  # spawn cycle — no operator inspection gap between failure and remediation.
+  # Best-effort throughout (rule #6 — every || true swallows non-zero so the
+  # iteration loop survives even when jq / python3 / disk writes fail).
+  # Anchor: Nygard, *Release It!* (2018), Ch. 5 — a system that cannot
+  # distinguish failure classes cannot respond differentially.
+  if [[ "$verdict" == "spawn-failed" ]]; then
+    local _heal_dir="$host/.minsky"
+    local _heal_events="$_heal_dir/heal-events.jsonl"
+    local _failure_class="unknown"
+    local _classify_py="$script_dir/../scripts/classify-spawn-failures.py"
+
+    mkdir -p "$_heal_dir" 2>/dev/null || true
+
+    # Classify: read the combined spawn output (stdout+stderr both captured
+    # into $stdout_log via >"$stdout_log" 2>&1) to determine the failure
+    # class. Falls back to "unknown" on any error (missing script, Python
+    # failure, jq absent).
+    if [[ -f "$stdout_log" ]] && [[ -f "$_classify_py" ]]; then
+      local _classify_out
+      _classify_out="$(python3 "$_classify_py" --file "$stdout_log" --json 2>/dev/null || true)"
+      if [[ -n "$_classify_out" ]]; then
+        _failure_class="$(printf '%s' "$_classify_out" | jq -r '.class // "unknown"' 2>/dev/null || echo "unknown")"
+      fi
+    fi
+
+    # Emit heal-events JSONL row — the durable record the Measurement command
+    # queries: `rg -c '"failure_class"' .minsky/heal-events.jsonl`.
+    if command -v jq >/dev/null 2>&1; then
+      jq -n \
+        --arg cls "$_failure_class" \
+        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{event:"spawn-failed",failure_class:$cls,ts:$ts}' \
+        >> "$_heal_events" 2>/dev/null || true
+    fi
+
+    # Dispatch class-specific remediations. Each remedy writes a persistent
+    # signal that the NEXT spawn picks up (via spawn-flags.env sourcing above
+    # or via dynamic_timeout.py reading watchdog-kills).
+    local _spawn_flags_file="$_heal_dir/spawn-flags.env"
+    case "$_failure_class" in
+      "Not logged in")
+        # Auth/session-file contention: serialize spawns so only one claude
+        # worker holds ~/.claude at a time.
+        echo "MINSKY_SPAWN_SERIALIZE=1" >> "$_spawn_flags_file" 2>/dev/null || true
+        ;;
+      "Killed"|"signal 15")
+        # Watchdog kill: increment the persistent kill counter so
+        # dynamic_timeout.py can widen the budget on the next iteration.
+        local _wk_file="$_heal_dir/watchdog-kills"
+        local _wk_count
+        _wk_count="$(cat "$_wk_file" 2>/dev/null || echo "0")"
+        printf '%d\n' "$(( _wk_count + 1 ))" > "$_wk_file" 2>/dev/null || true
+        ;;
+      "ModuleNotFoundError")
+        # Broken openhands venv: skip the importability preflight on the
+        # next spawn so the error is surfaced at the actual spawn site (not
+        # the preflight), and only when the configured backend is claude
+        # (openhands preflight is irrelevant for claude-backend spawns).
+        local _cloud_agent_val
+        _cloud_agent_val="$(jq -r '.cloud_agent // "openhands"' "$CONFIG_FILE" 2>/dev/null || echo "openhands")"
+        if [[ "$_cloud_agent_val" == "claude" ]]; then
+          echo "openhands_preflight_skip=1" >> "$_spawn_flags_file" 2>/dev/null || true
+        fi
+        ;;
+    esac
+  fi
+
+  local failure_log_path=""
+  if [[ -f "$stdout_log" ]]; then
+    failure_log_path="$(grep -o 'MINSKY_FAILURE_LOG_PATH=[^[:space:]]*' "$stdout_log" 2>/dev/null | tail -1 | cut -d= -f2-)" || true
+  fi
   rm -f "$brief_file" "$stdout_log"
-  record_iteration "$host" "$iter_n" "$task_id" "$branch" "$verdict" "$pr_url" "$notes" "$gh_host"
+  record_iteration "$host" "$iter_n" "$task_id" "$branch" "$verdict" "$pr_url" "$notes" "$gh_host" "$failure_log_path"
 }
 
 # --- 5b. CTO audit (queue-empty trigger) -----------------------------------
@@ -1510,7 +1634,7 @@ print(load_host_config(Path('$host')).host_repo)
   local gh_host
   gh_host="$(resolve_gh_host_for "$host")"
   local model
-  model="$(jq -r '.openhands.model // "claude-opus-4-7"' "$CONFIG_FILE" 2>/dev/null || echo "claude-opus-4-7")"
+  model="$(jq -r '.openhands.model // "claude-sonnet-4-6"' "$CONFIG_FILE" 2>/dev/null || echo "claude-sonnet-4-6")"
 
   # Same env vars as a regular iteration so the agent's host-side
   # rule lints work (parity port from PR #853).
@@ -1644,6 +1768,7 @@ record_iteration() {
   local pr_url="$6"
   local notes="$7"
   local gh_host="${8:-}"
+  local failure_log_path="${9:-}"
   local store_dir="$host/.minsky/experiment-store/cross-repo"
   mkdir -p "$store_dir"
   local out
@@ -1676,6 +1801,13 @@ record_iteration() {
     pr_url_json="$(jq -n --arg u "$pr_url" '$u')"
   fi
 
+  local failure_log_path_json
+  if [[ -z "$failure_log_path" ]]; then
+    failure_log_path_json="null"
+  else
+    failure_log_path_json="$(jq -n --arg p "$failure_log_path" '$p')"
+  fi
+
   out="$(jq -nc \
     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
     --arg experiment_id "$task_id" \
@@ -1684,8 +1816,46 @@ record_iteration() {
     --arg verdict "$verdict" \
     --argjson pr_url "$pr_url_json" \
     --arg notes "$notes" \
-    '{ts: $ts, experiment_id: $experiment_id, host_repo: $host_repo, branch: $branch, verdict: $verdict, pr_url: $pr_url, notes: $notes}')"
+    --argjson failure_log_path "$failure_log_path_json" \
+    '{ts: $ts, experiment_id: $experiment_id, host_repo: $host_repo, branch: $branch, verdict: $verdict, pr_url: $pr_url, notes: $notes, failure_log_path: $failure_log_path}')"
   printf '%s\n' "$out" >> "$path"
+
+  # --- Session ledger (session-converts-repo-ledger-bootstrap) ---------
+  # Append a compact per-iteration record to .minsky/session-ledger.jsonl
+  # so that scripts/compute-session-metrics.mjs can derive M1.5
+  # (session_converts_repo) and M1.7 (baseline_delta_per_cycle) from
+  # real observations instead of emitting (stub). Only written for
+  # non-no-task iterations (verdict != "no-task") because "no eligible
+  # task" carries no delta signal. git diff HEAD~1 HEAD measures the
+  # agent's committed change; if HEAD~1 doesn't exist (first commit) or
+  # git fails, both fields fall back to 0 (fail-safe — rule #7).
+  if [[ "${verdict:-}" != "no-task" && -n "${task_id:-}" ]]; then
+    local ledger_dir="$host/.minsky"
+    mkdir -p "$ledger_dir" 2>/dev/null || true
+    local ledger_path="$ledger_dir/session-ledger.jsonl"
+    local files_changed=0
+    local loc_delta=0
+    if [[ -d "$host/.git" ]] && \
+       git -C "$host" rev-parse HEAD~1 >/dev/null 2>&1; then
+      local _fc
+      _fc="$(git -C "$host" diff --stat HEAD~1 HEAD 2>/dev/null \
+             | /usr/bin/awk 'END{print ($1+0)}' || echo 0)"
+      files_changed="${_fc:-0}"
+      local _ld
+      _ld="$(git -C "$host" diff --numstat HEAD~1 HEAD 2>/dev/null \
+             | /usr/bin/awk '{add+=$1; del+=$2} END{print add-del+0}' || echo 0)"
+      loc_delta="${_ld:-0}"
+    fi
+    jq -nc \
+      --arg session_id "${MINSKY_RUN_ID:-${task_id}}" \
+      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+      --arg task_id "$task_id" \
+      --arg verdict "$verdict" \
+      --argjson files_changed "$files_changed" \
+      --argjson loc_delta "$loc_delta" \
+      '{session_id: $session_id, ts: $ts, task_id: $task_id, verdict: $verdict, files_changed: $files_changed, loc_delta: $loc_delta}' \
+      >> "$ledger_path" 2>/dev/null || true
+  fi
 
   # Surface the iteration outcome on daemon.log for glanceability (task
   # daemon-log-lacks-iteration-detail). One line per JSONL record.
@@ -1851,6 +2021,13 @@ if [[ "$LOOP_FOREVER" == "1" ]]; then
   outer_sleep_seconds=$(( TICK_INTERVAL_MS > 0 ? TICK_INTERVAL_MS / 1000 : 5 ))
   [[ "$outer_sleep_seconds" -lt 1 ]] && outer_sleep_seconds=1
   _consecutive_fail_walks=0
+  # Idle-walk backoff (drained-queue-not-an-iteration): a walk that
+  # completed zero iterations because every host's queue is drained
+  # should not re-poll at the 5s base cadence — that hot loop emitted
+  # ~1800 drained records/day and burned gh API calls while the queue
+  # was empty. Same exponential shape as the spawn-fail backoff below
+  # (5s → 10s → … capped at 300s); any completed iteration resets it.
+  _consecutive_idle_walks=0
   while true; do
     # Load-gate: skip the walk when the host is oversubscribed.
     # MINSKY_LOAD_GATE_SLEEP_S: how long to wait before re-checking load
@@ -1865,26 +2042,67 @@ if [[ "$LOOP_FOREVER" == "1" ]]; then
       continue
     fi
 
-    walk_hosts
-    walk_exit=$?
+    # Pre-walk self-heal sweep (M1.13 phase 2): fire the catalogued
+    # automated heals (stale-pid / corrupt-state-json /
+    # partial-config-write) before walking, recording HealEvents to
+    # `<home>/.minsky/heal-events.jsonl`. The dispatcher is exit-0-always
+    # by contract (rule #6); `|| true` belts-and-suspenders so a missing
+    # node/script can't kill the supervisor.
+    _minsky_home="${MINSKY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+    node "$(dirname "${BASH_SOURCE[0]}")/../scripts/heal-dispatch.mjs" \
+      --host "$_minsky_home" --boundary pre-walk \
+      2>>"${_minsky_home}/.minsky/tick-loop.err.log" || true
+
+    _completed_before_walk=$COMPLETED_COUNT
+    # `set -e` is active (line 27). A BARE `walk_hosts` call exits the whole
+    # supervisor the instant walk_hosts returns non-zero — e.g. when the
+    # CTO-audit-on-drain spawn-fails, walk_hosts inherits that non-zero and the
+    # `while true` loop dies on its FIRST drained walk instead of backing off.
+    # Capturing into `walk_exit=$?` on the next line is dead code under `set -e`
+    # (the script already exited). Guard the call with `|| walk_exit=$?` so a
+    # failed walk is data the loop acts on (backoff), not a fatal signal.
+    walk_exit=0
+    walk_hosts || walk_exit=$?
     if [[ "$walk_exit" -eq 75 ]]; then
       exit 75
     fi
 
-    # Count consecutive all-spawn-fail walks for backoff.
+    # Count consecutive all-spawn-fail walks for backoff. Drained
+    # verdicts are bookkeeping (like aborted) — they must not reset
+    # the spawn-fail counter.
     _tick_log="${MINSKY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/.minsky/tick-loop.err.log"
-    _this_walk_verdicts="$(grep -oE 'verdict=[a-z-]+' "$_tick_log" 2>/dev/null | tail -$(( ITERATIONS_PER_HOST * 2 )) | grep -v 'verdict=aborted' | sort -u)"
+    _this_walk_verdicts="$(grep -oE 'verdict=[a-z-]+' "$_tick_log" 2>/dev/null | tail -$(( ITERATIONS_PER_HOST * 2 )) | grep -vE 'verdict=(aborted|drained)' | sort -u)"
     if [[ -n "$_this_walk_verdicts" ]] && echo "$_this_walk_verdicts" | grep -qvE '^verdict=spawn-failed$'; then
       _consecutive_fail_walks=0
     elif echo "$_this_walk_verdicts" | grep -q 'verdict=spawn-failed'; then
       _consecutive_fail_walks=$(( _consecutive_fail_walks + 1 ))
     fi
 
-    # Exponential backoff: 5 × 2^N capped at 300s.
+    # Count consecutive idle (zero-completed-iteration) walks: drained
+    # queues should poll progressively slower, not at the 5s base cadence.
+    if [[ "$COMPLETED_COUNT" -eq "$_completed_before_walk" && "$_consecutive_fail_walks" -eq 0 ]]; then
+      _consecutive_idle_walks=$(( _consecutive_idle_walks + 1 ))
+    else
+      _consecutive_idle_walks=0
+    fi
+
+    # Exponential backoff: 5 × 2^N capped at 300s. The shift exponent is
+    # clamped at 8 (5 × 2^8 = 1280 > 300 already) so a long overnight
+    # chain of idle walks can't overflow 64-bit arithmetic into a
+    # negative sleep (which would crash the loop under `set -e`).
     if [[ "$_consecutive_fail_walks" -gt 0 ]]; then
-      _backoff_s=$(( outer_sleep_seconds * (1 << _consecutive_fail_walks) ))
+      _shift_n=$_consecutive_fail_walks
+      [[ "$_shift_n" -gt 8 ]] && _shift_n=8
+      _backoff_s=$(( outer_sleep_seconds * (1 << _shift_n) ))
       [[ "$_backoff_s" -gt 300 ]] && _backoff_s=300
       echo "loop: ${_consecutive_fail_walks} consecutive all-spawn-fail walk(s) — backing off ${_backoff_s}s" >&2
+      sleep "$_backoff_s"
+    elif [[ "$_consecutive_idle_walks" -gt 0 ]]; then
+      _shift_n=$_consecutive_idle_walks
+      [[ "$_shift_n" -gt 8 ]] && _shift_n=8
+      _backoff_s=$(( outer_sleep_seconds * (1 << _shift_n) ))
+      [[ "$_backoff_s" -gt 300 ]] && _backoff_s=300
+      echo "loop: ${_consecutive_idle_walks} consecutive idle (drained-queue) walk(s) — backing off ${_backoff_s}s" >&2
       sleep "$_backoff_s"
     else
       sleep "$outer_sleep_seconds"

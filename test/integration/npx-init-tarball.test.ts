@@ -61,11 +61,14 @@ describe.skipIf(!RUN_INTEGRATION)("`npx minsky init` end-to-end (M1.3)", () => {
       ...process.env,
       PATH: `${process.env["PATH"] ?? ""}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`,
     };
-    const stdout = execSync(`pnpm pack --pack-destination "${packDir}"`, {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-      env,
-    });
+    const stdout = execSync(
+      `pnpm pack --config.ignore-scripts=true --pack-destination "${packDir}"`,
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env,
+      },
+    );
     // pnpm pack prints the tarball path on the last line of stdout.
     const tarballPath = stdout
       .trim()
@@ -92,7 +95,7 @@ describe.skipIf(!RUN_INTEGRATION)("`npx minsky init` end-to-end (M1.3)", () => {
       ...process.env,
       PATH: `${process.env["PATH"] ?? ""}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`,
     };
-    execSync(`pnpm pack --pack-destination "${packDir}"`, {
+    execSync(`pnpm pack --config.ignore-scripts=true --pack-destination "${packDir}"`, {
       cwd: REPO_ROOT,
       env,
       stdio: "pipe",
@@ -132,6 +135,197 @@ describe.skipIf(!RUN_INTEGRATION)("`npx minsky init` end-to-end (M1.3)", () => {
     // (resolved absolute path — macOS `/private` symlink-aware).
     const cfg = JSON.parse(readFileSync(configPath, "utf8"));
     expect(cfg.default_host).toMatch(new RegExp(hostDir.replace(/^\/private/, "/?.*?/?")));
+  });
+
+  test("tarball-extracted bin/minsky-run.sh runs without an exec bit (mode 644)", () => {
+    // Blocker (B): npm/pnpm pack only chmods the `bin`-entry file
+    // (bin/minsky); every other bin/ file lands mode 644 in the artifact.
+    // The runner must therefore be invoked via `bash "$runner"` and its
+    // guards must test `-s` (non-empty), never `-x`. This test extracts
+    // the published tarball, asserts minsky-run.sh is NOT executable
+    // (mode bits stripped — the real-world artifact state), then runs it
+    // via `bash` and confirms it reaches its own usage/invariant path
+    // instead of `Permission denied` / a silent reject.
+    const packDir = mkdtempSync(join(tmpdir(), "minsky-pack-test-"));
+    const pkgDir = mkdtempSync(join(tmpdir(), "minsky-pkg-test-"));
+    const env = {
+      ...process.env,
+      PATH: `${process.env["PATH"] ?? ""}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`,
+    };
+    execSync(`pnpm pack --config.ignore-scripts=true --pack-destination "${packDir}"`, {
+      cwd: REPO_ROOT,
+      env,
+      stdio: "pipe",
+    });
+    const tarballMatch = execSync(`ls "${packDir}"/*minsky-*.tgz`, { encoding: "utf8" }).trim();
+    execSync(`tar -xzf "${tarballMatch}" -C "${pkgDir}" --strip-components=1`, {
+      env,
+      stdio: "pipe",
+    });
+    const runner = join(pkgDir, "bin", "minsky-run.sh");
+    expect(existsSync(runner)).toBe(true);
+    // The artifact ships the runner WITHOUT an exec bit — pin that fact so
+    // the fix can never silently regress into requiring one.
+    const mode = statSync(runner).mode & 0o111;
+    expect(mode).toBe(0); // no execute bits anywhere
+    // Invoked via `bash`, the runner reaches its arg parser and rejects a
+    // missing --host/--hosts-dir with an INVARIANT FAIL — proof the
+    // exec-bit-stripped file is runnable, not blocked by a -x guard.
+    let _stderr = "";
+    let exitCode = 0;
+    try {
+      execSync(`bash "${runner}" --help`, {
+        encoding: "utf8",
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (err) {
+      const e = err as { stderr?: Buffer | string; status?: number };
+      _stderr = String(e.stderr ?? "");
+      exitCode = e.status ?? 1;
+    }
+    // --help exits 0 and prints usage — the runner executed via bash.
+    expect(exitCode).toBe(0);
+  });
+
+  test("the openhands spawn shim IS in the published tarball file list", () => {
+    // Blocker (C): the agent spawn shim
+    // novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py
+    // was excluded from package.json `files`, so the runner died with
+    // "INVARIANT FAIL: no OpenHands backend available" on a fresh npx run
+    // that resolved the openhands backend. Pin that the shim ships.
+    const packDir = mkdtempSync(join(tmpdir(), "minsky-pack-test-"));
+    const env = {
+      ...process.env,
+      PATH: `${process.env["PATH"] ?? ""}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`,
+    };
+    execSync(`pnpm pack --config.ignore-scripts=true --pack-destination "${packDir}"`, {
+      cwd: REPO_ROOT,
+      env,
+      stdio: "pipe",
+    });
+    const tarballMatch = execSync(`ls "${packDir}"/*minsky-*.tgz`, { encoding: "utf8" }).trim();
+    const contents = execSync(`tar -tzf "${tarballMatch}"`, { encoding: "utf8" });
+    expect(contents).toMatch(
+      /package\/novel\/adapters\/agent-runtime-openhands\/bin\/minsky-openhands-spawn\.py\b/,
+    );
+  });
+
+  test("integrated no-subcommand run from the tarball reaches the daemon path (not silent exit-1)", () => {
+    // Blockers (A) + (C): a bare `npx -y @fyodoriv/minsky` run (no
+    // subcommand) must resolve the repo (self-resolution: the unpacked
+    // package IS the repo) and reach the runner's dry-run path, recording
+    // a "planned" verdict — NOT exit 1 in ~4s with ZERO output. We drive
+    // the integrated path with MINSKY_REPO pointed at the unpacked
+    // package + a `claude`-configured init + --dry-run so no agent spawns.
+    const packDir = mkdtempSync(join(tmpdir(), "minsky-pack-test-"));
+    const pkgDir = mkdtempSync(join(tmpdir(), "minsky-pkg-test-"));
+    const hostDir = mkdtempSync(join(tmpdir(), "minsky-host-test-"));
+    const homeDir = mkdtempSync(join(tmpdir(), "minsky-home-test-"));
+    const env = {
+      ...process.env,
+      PATH: `${process.env["PATH"] ?? ""}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`,
+    };
+    execSync(`pnpm pack --config.ignore-scripts=true --pack-destination "${packDir}"`, {
+      cwd: REPO_ROOT,
+      env,
+      stdio: "pipe",
+    });
+    const tarballMatch = execSync(`ls "${packDir}"/*minsky-*.tgz`, { encoding: "utf8" }).trim();
+    execSync(`tar -xzf "${tarballMatch}" -C "${pkgDir}" --strip-components=1`, {
+      env,
+      stdio: "pipe",
+    });
+    // Fresh git host with one commit.
+    execSync("git init --quiet", { cwd: hostDir, env, stdio: "pipe" });
+    execSync("git config user.email test@example.com && git config user.name test", {
+      cwd: hostDir,
+      env,
+      stdio: "pipe",
+    });
+    writeFileSync(join(hostDir, "README.md"), "# host\n");
+    execSync("git add -A && git commit -m 'init' --quiet --no-verify", {
+      cwd: hostDir,
+      env,
+      stdio: "pipe",
+    });
+    const minskyBin = join(pkgDir, "bin", "minsky");
+    // init writes ~/.minsky/config.json (cloud_agent: claude so the
+    // openhands invariant skips on a fresh box).
+    const isolated = { ...env, HOME: homeDir, MINSKY_REPO: pkgDir };
+    execSync(`bash "${minskyBin}" init "${hostDir}"`, { env: isolated, stdio: "pipe" });
+    // Integrated dry-run: no subcommand path → resolver → bash runner →
+    // dry-run plan. MINSKY_ORCH_DRY/--dry-run avoids any real agent spawn.
+    let stdout = "";
+    let stderr = "";
+    let _exitCode = 0;
+    try {
+      stdout = execSync(`bash "${minskyBin}" --once "${hostDir}" --dry-run`, {
+        encoding: "utf8",
+        env: { ...isolated, MINSKY_ORCH_DRY: "1", MINSKY_PR_FETCH_LIMIT: "0" },
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 60_000,
+      });
+    } catch (err) {
+      const e = err as { stdout?: Buffer | string; stderr?: Buffer | string; status?: number };
+      stdout = String(e.stdout ?? "");
+      stderr = String(e.stderr ?? "");
+      _exitCode = e.status ?? 1;
+    }
+    const combined = `${stdout}\n${stderr}`;
+    // The run MUST reach the runner (dry-run banner / planned verdict),
+    // never the silent exit-1. We assert it produced runner output.
+    expect(combined).toMatch(/dry-run|planned|iteration|host=/i);
+    // And the exit-1-with-zero-output failure mode is gone.
+    expect(combined.trim().length).toBeGreaterThan(0);
+  });
+
+  test("resolver failure prints an actionable error naming MINSKY_REPO (not silent exit-1)", () => {
+    // Blocker (A): the inline repo resolver ran inside `$( ... 2>&1 )`
+    // under `set -euo pipefail`, so a non-zero exit aborted the script
+    // BEFORE the error-echo line — `npx -y @fyodoriv/minsky` exited 1 in
+    // ~4s with ZERO output. After the fix, an unresolvable repo prints a
+    // one-line actionable error naming MINSKY_REPO. We run the in-tree
+    // bin/minsky with a fresh HOME (no ~/minsky clone) and MINSKY_REPO
+    // unset so the resolver exhausts every candidate.
+    const homeDir = mkdtempSync(join(tmpdir(), "minsky-home-test-"));
+    const env = {
+      ...process.env,
+      PATH: `${process.env["PATH"] ?? ""}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`,
+      HOME: homeDir,
+    };
+    // Unset MINSKY_REPO so the resolver can't short-circuit on it, AND
+    // run from a tmp cwd so self-resolution (the package dir) can't find a
+    // runner either — forcing the actionable-error path.
+    (env as Record<string, string | undefined>)["MINSKY_REPO"] = undefined;
+    const isolatedBin = mkdtempSync(join(tmpdir(), "minsky-lonebin-test-"));
+    // Copy ONLY bin/minsky to an isolated dir with no sibling runner, so
+    // self-resolution (../bin/minsky-run.sh) misses and the resolver
+    // falls all the way through to the actionable error.
+    execSync(
+      `mkdir -p "${isolatedBin}/bin" && cp "${join(REPO_ROOT, "bin", "minsky")}" "${isolatedBin}/bin/minsky"`,
+      {
+        env,
+        stdio: "pipe",
+      },
+    );
+    let stderr = "";
+    let exitCode = 0;
+    try {
+      execSync(`bash "${join(isolatedBin, "bin", "minsky")}"`, {
+        encoding: "utf8",
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (err) {
+      const e = err as { stderr?: Buffer | string; status?: number };
+      stderr = String(e.stderr ?? "");
+      exitCode = e.status ?? 1;
+    }
+    expect(exitCode).not.toBe(0);
+    // The actionable error MUST name MINSKY_REPO so the operator knows the
+    // exact next command. The pre-fix failure printed NOTHING.
+    expect(stderr).toMatch(/MINSKY_REPO/);
   });
 
   test("init refuses to write config when the target is not a git repo", () => {

@@ -179,6 +179,66 @@ _minsky_count_bootstrapped_siblings() {
   printf '%s' "$_count"
 }
 
+_minsky_autostart_sentinel() {
+  printf '%s' "${MINSKY_STATE_DIR}/autostart-enabled"
+}
+
+_minsky_autostart_enabled() {
+  [ -f "$(_minsky_autostart_sentinel)" ]
+}
+
+# Hard-off sentinel: written by `disable-autostart`, it durably blocks
+# `enable-autostart` so a routine update or an accidental re-enable can
+# never silently bring the supervisor back. Re-enabling is an explicit
+# operator action (`--force`, or remove the sentinel).
+_minsky_autostart_hard_off_sentinel() {
+  printf '%s' "${MINSKY_STATE_DIR}/autostart-disabled"
+}
+
+_minsky_launchd_agent_labels() {
+  printf '%s\n' \
+    com.minsky.tick-loop \
+    com.minsky.daemon \
+    com.minsky.watchdog \
+    com.minsky.budget-guard \
+    com.minsky.runany \
+    com.minsky.auto-merge \
+    com.minsky.weekly-competitive \
+    com.minsky.corpus-refresh-check \
+    com.minsky.daily-metrics
+}
+
+_minsky_bootout_all_launchagents() {
+  local _label
+  for _label in $(_minsky_launchd_agent_labels); do
+    launchctl bootout "gui/$(id -u)/$_label" 2>/dev/null || true
+  done
+}
+
+_minsky_set_all_plists_disabled() {
+  local _disabled="$1"
+  local _f
+  for _f in "$HOME/Library/LaunchAgents"/com.minsky.*.plist; do
+    [ -f "$_f" ] || continue
+    plutil -replace Disabled -bool "$_disabled" "$_f" 2>/dev/null || true
+  done
+}
+
+_minsky_render_launchd_templates() {
+  # Render distribution/launchd/*.plist templates into
+  # ~/Library/LaunchAgents/ with ${MINSKY_HOME} + ${HOME} substituted.
+  local _repo_dir="$1"
+  local _unit_dir="$HOME/Library/LaunchAgents"
+  local _template_dir="$_repo_dir/distribution/launchd"
+  local _f _target
+  mkdir -p "$_unit_dir"
+  for _f in "$_template_dir"/*.plist; do
+    [ -f "$_f" ] || continue
+    _target="$_unit_dir/$(basename "$_f")"
+    MINSKY_HOME="$_repo_dir" HOME="$HOME" envsubst '${MINSKY_HOME} ${HOME}' < "$_f" > "$_target"
+  done
+}
+
 # ── Built-runtime guard (fresh-clone bootstrap, rule #6 loud-fail) ───
 #
 # On a fresh clone the foreground/daemon paths below `exec` a run
@@ -214,11 +274,18 @@ _minsky_assert_built() {
 
   # A runnable Node runner is a NON-EMPTY .mjs (`-s`): the gutted
   # Path-A placeholder is a zero-byte file, which `-f` would wrongly
-  # accept. The bash runner just needs to exist + be executable.
+  # accept.
   if [ -s "$_ab_node_runner" ]; then
     return 0
   fi
-  if [ -x "$_ab_bash_runner" ]; then
+  # The bash runner is accepted on NON-EMPTY (`-s`), NOT executable
+  # (`-x`): the published npm tarball strips the exec bit from every
+  # bin/ file except the `bin`-entry `minsky` itself (npm only chmods
+  # the entry), so `bin/minsky-run.sh` lands mode 644 in the artifact.
+  # The runner is always invoked via `bash "$runner"` downstream, so the
+  # exec bit is irrelevant — gating on it wrongly rejected the npx path.
+  # See blocker (B), TASKS.md `npx-integrated-run-blockers`.
+  if [ -s "$_ab_bash_runner" ]; then
     return 0
   fi
 
@@ -312,19 +379,25 @@ _run_bash_skeleton_probes() {
     _bd_skeleton_crit_fail=1
   fi
 
-  # CRITICAL — bin/minsky-run.sh executable
-  if [ -x "$_bd_repo_dir/bin/minsky-run.sh" ]; then
+  # CRITICAL — bin/minsky-run.sh present + non-empty. `-s` not `-x`:
+  # these scripts are always invoked via `bash "$script"`, so the exec
+  # bit is irrelevant — and the published npm tarball ships bin/ files
+  # mode 644 (npm only chmods the `bin`-entry). Gating on `-x` made
+  # `doctor` crit-fail on every npx install. See blocker (B), TASKS.md
+  # `npx-integrated-run-blockers`.
+  if [ -s "$_bd_repo_dir/bin/minsky-run.sh" ]; then
     _bd_print PASS "minsky-run.sh" "$_bd_repo_dir/bin/minsky-run.sh"
   else
-    _bd_print FAIL "minsky-run.sh" "not executable at $_bd_repo_dir/bin/minsky-run.sh (run: chmod +x $_bd_repo_dir/bin/minsky-run.sh)"
+    _bd_print FAIL "minsky-run.sh" "missing or empty at $_bd_repo_dir/bin/minsky-run.sh (run \`pnpm install\` from $_bd_repo_dir)"
     _bd_skeleton_crit_fail=1
   fi
 
-  # CRITICAL — bin/minsky-default-session.sh executable
-  if [ -x "$_bd_repo_dir/bin/minsky-default-session.sh" ]; then
+  # CRITICAL — bin/minsky-default-session.sh present + non-empty (`-s`,
+  # invoked via bash; see the minsky-run.sh note above).
+  if [ -s "$_bd_repo_dir/bin/minsky-default-session.sh" ]; then
     _bd_print PASS "default-session.sh" "$_bd_repo_dir/bin/minsky-default-session.sh"
   else
-    _bd_print FAIL "default-session.sh" "not executable at $_bd_repo_dir/bin/minsky-default-session.sh"
+    _bd_print FAIL "default-session.sh" "missing or empty at $_bd_repo_dir/bin/minsky-default-session.sh"
     _bd_skeleton_crit_fail=1
   fi
 
@@ -584,8 +657,12 @@ IUSAGE
   local _io_repo_dir
   _io_repo_dir=$(dirname "$(dirname "$_io_real_bin")")
   local _io_runner="$_io_repo_dir/bin/minsky-run.sh"
-  if [ ! -x "$_io_runner" ]; then
-    echo "--once: $_io_runner not executable (run: chmod +x $_io_runner)" >&2
+  # `-s` (non-empty), not `-x`: the runner is invoked via `bash
+  # "$_io_runner"` below, so the exec bit is irrelevant — and the
+  # published npm tarball ships it mode 644 (npm only chmods the
+  # `bin`-entry). Gating on `-x` wrongly rejected the npx path.
+  if [ ! -s "$_io_runner" ]; then
+    echo "--once: $_io_runner missing or empty (run \`pnpm install\` from $_io_repo_dir)" >&2
     return 1
   fi
   # PR #875: upgrade the doctor's "config not found" check from a
@@ -1676,7 +1753,7 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
   doctor)
     if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
       cat <<'EOF'
-Usage: minsky doctor [--quiet]
+Usage: minsky doctor [--quiet] [--sandbox]
 
 Health probe for this host machine. Prints PASS / WARN / FAIL for
 each of: node 20+, git, gh CLI, pnpm, repo `.minsky/` directory,
@@ -1686,7 +1763,14 @@ but ≥2 bootstrapped hosts exist under its parent), OpenHands SDK
 installation, and any other invariant the supervisor needs.
 
 Flags:
-  --quiet   Only print FAIL lines + exit non-zero on any failure.
+  --quiet     Only print FAIL lines + exit non-zero on any failure.
+  --sandbox   Run only the macOS SBPL toolchain preflight (delegates
+              to scripts/check-supervisor-sandbox.mjs): test-execs
+              python3 / git / gh / claude / node and reads
+              ~/.gitconfig.local / ~/.config/gh / ~/.claude.json under
+              the real `(deny default)` profile, and asserts
+              CLAUDE_CODE_OAUTH_TOKEN is exported. Exits 0 with a
+              SKIPPED line on non-macOS hosts.
 
 Exit codes: 0 if every check passes; 1 if any check fails.
 
@@ -1720,9 +1804,25 @@ EOF
     # Source: M1 milestone exit criterion §13 (self-heal).
     _crit_fail=0
     _quiet=0
+    _sandbox_only=0
     for _a in "$@"; do
       [ "$_a" = "--quiet" ] && _quiet=1
+      [ "$_a" = "--sandbox" ] && _sandbox_only=1
     done
+
+    # `minsky doctor --sandbox` — preflight the SBPL profile against the live
+    # operator toolchain (sandbox-allowlist-derive-from-operator-toolchain).
+    # Delegates to scripts/check-supervisor-sandbox.mjs which test-execs
+    # python3 / git / gh / claude / node + reads ~/.gitconfig.local /
+    # ~/.config/gh / ~/.claude.json under the real `(deny default)` profile
+    # AND asserts CLAUDE_CODE_OAUTH_TOKEN is exported (gap 6 — auth via env,
+    # not Keychain). Exits non-zero on any gap with per-gap remediation;
+    # exits 0 on non-macOS hosts (graceful degrade — rule #7).
+    if [ "$_sandbox_only" = "1" ]; then
+      _bd_repo_dir="$(dirname "$(readlink "$0" 2>/dev/null || echo "$0")")/.."
+      [ -f "$_bd_repo_dir/scripts/check-supervisor-sandbox.mjs" ] || _bd_repo_dir="$(dirname "$0")/.."
+      exec node "$_bd_repo_dir/scripts/check-supervisor-sandbox.mjs" "$@"
+    fi
 
     _doctor_print() {
       # _doctor_print STATUS NAME MESSAGE
@@ -2214,6 +2314,12 @@ EOF
 $(env | grep -E '^(DEVIN_|CLAUDE_|OPENAI_|ANTHROPIC_)' || true)
 EOF
 
+    _dotfiles_bin=""
+    for _dfb in "$HOME/apps/tooling/dotfiles/bin" "$HOME/apps/dotfiles/bin"; do
+      [ -x "$_dfb/python3" ] && _dotfiles_bin="$_dfb" && break
+    done
+    _daemon_path="${_dotfiles_bin:+${_dotfiles_bin}:}/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:$HOME/.fnm/aliases/default/bin"
+
     # Generate the new plist content into a tempfile so we can
     # idempotency-check against the existing file before overwriting +
     # reloading launchd. Without this, every `minsky install-daemon`
@@ -2224,6 +2330,10 @@ EOF
     # overwrite + reload as before. `MINSKY_INSTALL_DAEMON_QUIET=1`
     # suppresses the "already up to date" line for hook callers.
     _plist_tmp="$(mktemp)"
+    _daemon_disabled="true"
+    if _minsky_autostart_enabled; then
+      _daemon_disabled="false"
+    fi
     cat > "$_plist_tmp" << PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -2239,6 +2349,8 @@ $_program_args
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>Disabled</key>
+  <${_daemon_disabled}/>
   <key>ProcessType</key>
   <string>Standard</string>
   <key>StandardOutPath</key>
@@ -2248,7 +2360,7 @@ $_program_args
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:$HOME/.local/bin:$HOME/.fnm/aliases/default/bin</string>
+    <string>$_daemon_path</string>
     <key>HOME</key>
     <string>$HOME</string>
     <key>MINSKY_NON_INTERACTIVE</key>
@@ -2278,12 +2390,23 @@ PLIST_EOF
       echo "✅ Wrote com.minsky.daemon plist (dry-run: launchctl reload skipped)"
       echo "   plist: $_plist"
       echo "   host: $_default_host"
+      if ! _minsky_autostart_enabled; then
+        echo "   dormant: run \`minsky enable-autostart\` to load at login"
+      fi
       exit 0
     fi
 
     launchctl bootout "gui/$(id -u)/com.minsky.daemon" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$_plist"
-    echo "✅ Installed com.minsky.daemon"
+    if _minsky_autostart_enabled; then
+      plutil -replace Disabled -bool false "$_plist" 2>/dev/null || true
+      launchctl bootstrap "gui/$(id -u)" "$_plist"
+      echo "✅ Installed com.minsky.daemon (autostart enabled)"
+    else
+      plutil -replace Disabled -bool true "$_plist" 2>/dev/null || true
+      echo "✅ Wrote com.minsky.daemon plist (dormant — not bootstrapped)"
+      echo "   Enable: minsky enable-autostart"
+      exit 0
+    fi
     echo "   plist: $_plist"
     echo "   host: $_default_host"
     # Count propagated agent-auth env vars (DEVIN_*, CLAUDE_*, OPENAI_*,
@@ -2312,6 +2435,98 @@ PLIST_EOF
     echo "✅ Removed com.minsky.daemon"
     echo "   minsky will no longer auto-start on login/reboot"
     exit 0
+    ;;
+  enable-autostart)
+    # Opt-in: bootstrap ALL com.minsky.* LaunchAgents at login.
+    # Requires endpoint-bootstrap sentinel (EPM-safe jq shims) before
+    # tick-loop can run. Default is dormant (Disabled=true in every plist).
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    _endpoint_ready="$HOME/.local/state/dotfiles/endpoint-ready"
+    _autostart_sentinel="$(_minsky_autostart_sentinel)"
+    _tick_sentinel="${MINSKY_HOME:-$_repo_dir}/.minsky/tick-loop-enabled"
+    _hard_off="$(_minsky_autostart_hard_off_sentinel)"
+
+    # Hard-off guard: refuse unless the operator explicitly clears the
+    # block (`--force` or removing the sentinel). Keeps autostart off
+    # "for good" across pulls, `dotfiles update`, and stray re-enables.
+    _force=0
+    for _a in "$@"; do [ "$_a" = "--force" ] && _force=1; done
+    if [ -f "$_hard_off" ] && [ "$_force" -ne 1 ]; then
+      echo "✗ minsky autostart is hard-disabled: $_hard_off" >&2
+      echo "  Autostart was explicitly turned off. To re-enable, run:" >&2
+      echo "    minsky enable-autostart --force" >&2
+      echo "  (or: rm $_hard_off && minsky enable-autostart)" >&2
+      exit 1
+    fi
+    rm -f "$_hard_off"
+
+    if [ ! -f "$_endpoint_ready" ]; then
+      echo "✗ endpoint-ready sentinel missing: $_endpoint_ready" >&2
+      echo "  Wait for com.dotfiles.endpoint-bootstrap at login, or run:" >&2
+      echo "    chezmoi apply && launchctl kickstart -k gui/\$(id -u)/com.dotfiles.endpoint-bootstrap" >&2
+      exit 1
+    fi
+
+    # shellcheck source=lib-launchd-path.sh
+    . "$_repo_dir/distribution/systemd/lib-launchd-path.sh"
+    if [ -z "${MINSKY_JQ:-}" ]; then
+      echo "✗ no EPM-safe jq found (dotfiles/bin/jq missing or broken symlink)" >&2
+      echo "  Fix: chezmoi apply && dotfiles doctor --module security --fix" >&2
+      exit 1
+    fi
+
+    mkdir -p "$(dirname "$_autostart_sentinel")" "$(dirname "$_tick_sentinel")"
+    printf '%s\n' "$(date -u +%FT%TZ)" > "$_autostart_sentinel"
+    printf '%s\n' "$(date -u +%FT%TZ)" > "$_tick_sentinel"
+
+    _minsky_render_launchd_templates "$_repo_dir"
+    MINSKY_INSTALL_DAEMON_QUIET=1 "$0" install-daemon 2>/dev/null || "$0" install-daemon
+
+    _minsky_set_all_plists_disabled false
+    for _f in "$HOME/Library/LaunchAgents"/com.minsky.*.plist; do
+      [ -f "$_f" ] || continue
+      _label="$(basename "$_f" .plist)"
+      launchctl bootout "gui/$(id -u)/$_label" 2>/dev/null || true
+      if launchctl bootstrap "gui/$(id -u)" "$_f"; then
+        echo "   bootstrapped: $_label"
+      else
+        echo "   ⚠ failed to bootstrap: $_label (check Console.app)" >&2
+      fi
+    done
+
+    echo "✅ minsky autostart enabled (all com.minsky.* agents)"
+    echo "   sentinel: $_autostart_sentinel"
+    echo "   jq:       $MINSKY_JQ"
+    echo "   Disable:  minsky disable-autostart"
+    exit 0
+    ;;
+  disable-autostart)
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    _autostart_sentinel="$(_minsky_autostart_sentinel)"
+    _tick_sentinel="${MINSKY_HOME:-$_repo_dir}/.minsky/tick-loop-enabled"
+
+    _hard_off="$(_minsky_autostart_hard_off_sentinel)"
+
+    _minsky_bootout_all_launchagents
+    _minsky_set_all_plists_disabled true
+    rm -f "$_autostart_sentinel" "$_tick_sentinel"
+    mkdir -p "$(dirname "$_hard_off")"
+    printf '%s\n' "$(date -u +%FT%TZ)" > "$_hard_off"
+
+    echo "✅ minsky autostart disabled (no com.minsky.* agents at login)"
+    echo "   hard-off: $_hard_off (blocks re-enable until cleared)"
+    echo "   Re-enable: minsky enable-autostart --force"
+    exit 0
+    ;;
+  enable-tick-loop)
+    echo "minsky: enable-tick-loop is deprecated — use: minsky enable-autostart" >&2
+    exec "$0" enable-autostart
+    ;;
+  disable-tick-loop)
+    echo "minsky: disable-tick-loop is deprecated — use: minsky disable-autostart" >&2
+    exec "$0" disable-autostart
     ;;
   update)
     # Graceful pause → pull latest → rebuild → restart from same spot.
@@ -2675,6 +2890,11 @@ EOF
     case "${2:-}" in
       collect) node "$_met_repo/scripts/collect-metrics.mjs" "${@:3}" ;;
       render)  node "$_met_repo/scripts/metrics-render.mjs" "${@:3}" ;;
+      refresh)
+        # Regenerate heal-class coverage matrix and print coverage JSON.
+        node "$_met_repo/scripts/generate-heal-coverage-matrix.mjs" --write-md "${@:3}"
+        node "$_met_repo/scripts/generate-heal-coverage-matrix.mjs" --json "${@:3}"
+        ;;
       ""|show)
         # `minsky metrics` with no verb = show current METRICS.md
         if [ -f "$_met_repo/docs/METRICS.md" ]; then
@@ -2691,6 +2911,7 @@ minsky metrics [verb] — success-metrics ops
   (no verb)  — show current docs/METRICS.md (default)
   collect    — collect current metric values (was: pnpm metrics:collect)
   render     — regenerate docs/METRICS.md (was: pnpm metrics:render)
+  refresh    — regenerate heal-class coverage matrix (was: pnpm minsky:metrics-refresh)
 EOF
         ;;
       *) echo "minsky metrics: unknown verb '$2'. See: minsky metrics --help" >&2; exit 2 ;;
@@ -3152,6 +3373,27 @@ fi
 SHIM_HOME="${HOME:-/root}"
 SHIM_ENV_REPO="${MINSKY_REPO:-}"
 
+# Self-resolution candidate: the directory that contains THIS bin/minsky,
+# one level up. When invoked from an unpacked npx package
+# (`npx -y @fyodoriv/minsky`), the package IS the minsky repo — but the
+# resolver historically only checked $MINSKY_REPO and HOME-relative clone
+# paths, so the npx artifact could never find itself. Compute the package
+# root here (exec-bit-independent realpath) and feed it to the resolver as
+# a first-class candidate. See blocker (A), TASKS.md
+# `npx-integrated-run-blockers`.
+SHIM_SELF_ROOT="$(dirname "$(dirname "$(_minsky_realpath "$0")")")"
+export SHIM_SELF_ROOT
+
+# The resolver runs in a command substitution. Under `set -euo pipefail` a
+# non-zero exit from `$( … )` in a simple assignment ABORTS the script —
+# which historically killed `bin/minsky` BEFORE the RESOLVE_EXIT/echo
+# recovery block could print the actionable error (the `2>&1` capture
+# folded stderr into the dead variable). Disable `set -e` across the
+# substitution so the resolver's exit code is observable, then re-enable
+# it. stdout carries ONLY the resolved path; stderr carries the actionable
+# error — kept on separate streams so the error actually reaches the
+# operator. See blocker (A), TASKS.md `npx-integrated-run-blockers`.
+set +e
 MINSKY_REPO_PATH="$(node --input-type=module -e "
   import { existsSync } from 'node:fs';
   import { homedir } from 'node:os';
@@ -3177,6 +3419,15 @@ MINSKY_REPO_PATH="$(node --input-type=module -e "
     process.stderr.write(\`minsky: MINSKY_REPO=\${envRepo} but path does not exist\\n\`);
     process.exit(1);
   }
+  // Self-resolution: the unpacked package directory that ships THIS
+  // bin/minsky. Accept it only when it carries a runnable bash runner
+  // (a non-empty bin/minsky-run.sh) so an arbitrary parent dir can't
+  // false-positive. This is the npx path's primary candidate.
+  const selfRoot = process.env.SHIM_SELF_ROOT;
+  if (selfRoot && selfRoot.length > 0 && existsSync(\`\${selfRoot}/bin/minsky-run.sh\`)) {
+    process.stdout.write(selfRoot);
+    process.exit(0);
+  }
   for (const rel of FALLBACKS) {
     const full = \`\${home}/\${rel}\`;
     if (existsSync(full)) {
@@ -3184,12 +3435,15 @@ MINSKY_REPO_PATH="$(node --input-type=module -e "
       process.exit(0);
     }
   }
-  process.stderr.write('minsky: could not find the minsky repo. Looked at MINSKY_REPO (unset), ~/minsky, ~/code/minsky, ~/src/minsky, ~/apps/minsky. Set MINSKY_REPO=/path/to/minsky or clone to ~/minsky.\\n');
+  process.stderr.write('minsky: could not find the minsky repo. Looked at MINSKY_REPO (unset), the package dir (' + (selfRoot || 'unknown') + '), ~/minsky, ~/code/minsky, ~/src/minsky, ~/apps/minsky. Set MINSKY_REPO=/path/to/minsky or clone to ~/minsky.\\n');
   process.exit(1);
-" 2>&1)"
+")"
 RESOLVE_EXIT=$?
+set -e
 if [ $RESOLVE_EXIT -ne 0 ]; then
-  echo "$MINSKY_REPO_PATH" >&2
+  # The resolver already wrote the actionable error to its own stderr,
+  # which inherits this shell's stderr (no capture) — so it's already on
+  # the terminal. Exit with the same code; no echo needed.
   exit 1
 fi
 export SHIM_HOME SHIM_ENV_REPO
@@ -3274,8 +3528,7 @@ trap '' HUP
 #   1. Run health checks (doctor) FIRST — if any critical check fails,
 #      print + exit non-zero. The operator's machine isn't ready.
 #   2. If a daemon is already running for $PWD → attach with watch.
-#   3. Otherwise → start one in daemon mode + auto-install persistence
-#      + attach.
+#   3. Otherwise → start one in daemon mode + attach.
 # This makes `minsky` in a folder always do the right thing:
 #   - machine broken? → tell the operator exactly what to fix
 #   - daemon running for this host? → attach (watch)
@@ -3401,6 +3654,10 @@ if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" !=
   # Fallback (explicit --host, or resolver unavailable): single host at cwd.
   [ "${#_launch_args[@]}" -eq 0 ] && _launch_args=(--host "$_target_host")
 
+  if [ "$(uname)" = "Darwin" ] && [ -f "$HOME/Library/LaunchAgents/com.minsky.daemon.plist" ] && _minsky_autostart_enabled; then
+    MINSKY_INSTALL_DAEMON_QUIET=1 "$0" install-daemon "$_target_host" 2>/dev/null || true
+  fi
+
   if _daemon_running_for_host "$_target_host"; then
     _pid=$(cat "$MINSKY_DAEMON_PID")
     echo "minsky: daemon already running (PID $_pid) for $(basename "$_target_host")"
@@ -3410,18 +3667,11 @@ if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" !=
     exec "$0" watch "$_target_host"
   fi
 
-  # No daemon running — start one, auto-install launchd persistence, attach.
-  # Persistence is DEFAULT — minsky should survive reboots without extra steps.
+  # No daemon running — start one and attach. Persistent supervisors are
+  # operator-explicit (`minsky install-daemon`) and are only refreshed above
+  # once the plist already exists.
   echo "minsky: no daemon running for $(basename "$_target_host"). Starting (scope: ${_launch_args[0]})..."
   "$0" --daemon "${_launch_args[@]}"
-
-  # Auto-install launchd plist if not already installed (macOS only).
-  # This makes the daemon survive reboots by default. The operator
-  # can remove it with `minsky uninstall-daemon`.
-  if [ "$(uname)" = "Darwin" ] && ! launchctl list 2>/dev/null | grep -q 'com.minsky.daemon'; then
-    echo "minsky: installing launchd persistence (survives reboot)..."
-    "$0" install-daemon "$_target_host" 2>/dev/null || true
-  fi
 
   sleep 2
   exec "$0" watch "$_target_host"

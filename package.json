@@ -18,6 +18,7 @@
     "bin/",
     "scripts/",
     "distribution/",
+    "novel/adapters/agent-runtime-openhands/bin/",
     "lefthook.yml",
     "AGENTS.md",
     "vision.md",
@@ -80,7 +81,8 @@
     "minsky:ui": "bin/minsky ui",
     "minsky:logs": "bin/minsky logs",
     "minsky:status": "bin/minsky status",
-    "minsky:stop": "bin/minsky stop"
+    "minsky:stop": "bin/minsky stop",
+    "minsky:metrics-refresh": "bin/minsky metrics refresh"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.16",
@@ -92,6 +94,7 @@
     "@semantic-release/git": "10.0.1",
     "@semantic-release/github": "12.0.8",
     "@semantic-release/release-notes-generator": "14.1.1",
+    "@tasks-md/lint": "^0.7.0",
     "@types/node": "25.9.2",
     "@vitest/coverage-v8": "^4.1.5",
     "conventional-changelog-conventionalcommits": "9.3.1",
@@ -102,7 +105,7 @@
     "markdownlint-cli2": "0.22.1",
     "semantic-release": "25.0.5",
     "typescript": "6.0.3",
-    "vite": "^7.0.0",
+    "vite": "^8.0.16",
     "vitest": "^4.1.5"
   },
   "optionalDependencies": {
@@ -118,7 +121,10 @@
   },
   "pnpm": {
     "overrides": {
-      "protobufjs@<8.0.2": ">=8.0.2"
+      "protobufjs@<8.0.2": ">=8.0.2",
+      "esbuild@>=0.17.0 <0.28.1": "0.28.1",
+      "undici@>=7.23.0 <7.28.0": "7.28.0",
+      "undici@>=6.0.0 <6.27.0": "6.27.0"
     }
   }
 }

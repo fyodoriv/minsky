@@ -39,8 +39,12 @@ Placeholders substituted by setup.sh via envsubst:
     <dict>
         <key>MINSKY_HOME</key>
         <string>${MINSKY_HOME}</string>
+        <!-- EPM-safe PATH: dotfiles shims before /usr/bin/{jq,grep,python3}
+             (CyberArk EPM / Software Signing watchlist). run-auto-merge.sh
+             also sources lib-launchd-path.sh; this is belt-and-suspenders
+             for children spawned outside that runner. -->
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <string>${HOME}/apps/tooling/dotfiles/bin:${HOME}/apps/dotfiles/bin:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 
     <key>ProgramArguments</key>
@@ -72,6 +76,11 @@ Placeholders substituted by setup.sh via envsubst:
     before the first cycle.
     -->
     <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Dormant by default (2026-06-17). Operator enables via
+         `minsky enable-autostart`. -->
+    <key>Disabled</key>
     <true/>
 
     <!--

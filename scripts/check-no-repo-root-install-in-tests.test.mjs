@@ -178,4 +178,15 @@ describe("checkNoRepoRootInstallInTests", () => {
     const result = checkNoRepoRootInstallInTests();
     expect(result.ok).toBe(true);
   });
+
+  it("ignores nested worktree checkouts", () => {
+    const result = checkNoRepoRootInstallInTests(
+      fakeFs({
+        ".worktrees/old-branch/scripts/foo.test.mjs":
+          'const r = spawnSync("pnpm", ["install"], { encoding: "utf8" });',
+        "scripts/clean.test.mjs": "expect(true).toBe(true);",
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
 });

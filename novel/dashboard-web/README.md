@@ -19,7 +19,7 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
 - **`createServer({ metrics })`** — Adapter shape (Gamma et al. 1994) over Hono v4. The HTTP runtime is one Strategy; native `http.createServer` or Fastify would be alternatives. **Conformance: full** for the routing contract.
 - **`render({ metrics })`** — Pure-function HTML renderer (Martin, *Clean Architecture*, 2017). Every input is data; output is a string. Cold-start safe (empty `metrics` yields a well-formed document with an empty `<ul>`). **Conformance: full**.
 - **`SuccessMetric`** — Information-visualization atom (Card & Mackinlay, *Readings in Information Visualization*, 1999): id + label + formula + unit + `freshnessBudgetMs` + optional `monotonic: "ok"` + **goal + pivot + anchor** (operator directive 2026-05-21 — every metric explicitly carries its success threshold, pivot threshold, and literature anchor verbatim from vision.md § "Success criteria") + optional **milestone** tag (which MILESTONES.md milestone gates this metric to "must be observed"); nothing else. Glanceable per Wilkie 2018 (RED Method) at the service-level lens. **Conformance: full** — the 10 vision.md success criteria are typed as `SUCCESS_METRICS: readonly SuccessMetric[]` (sub-task 2/4 — `dashboard-web-metrics-enum`). The `freshnessBudgetMs` field (Munafò et al. 2017 — pre-registration of the staleness threshold *before* observation) is consumed by `scripts/generate-metrics-md.mjs` and the planned `scripts/check-metric-freshness.mjs` lint to decide whether each metric reads as a fresh value or an explicit `(stub)` (canonical-metric-list-per-repo, vision.md row 82); the optional `monotonic: "ok"` flag is the explicit opt-in for lifetime-inventory metrics where monotonic increase is intentional (Ries 2011 vanity-metric escape valve — currently set only on `extraction-count`).
-- **`ProposedMetric`** — Same module exports a separate `ProposedMetric` interface + `PROPOSED_METRICS` constant for metrics that *should* exist on the dashboard but don't yet (M1.1 stability ratio, M1.13 self-heal MTTR top-level, M2.7 SWE-bench resolve rate, etc.). Each row carries id + label + rationale + milestone + optional blocker task + sketch of the future collection formula. Rendered in METRICS.md's trailing `## Metrics to add` section so the gap is surfaced explicitly (operator directive 2026-05-21).
+- **`ProposedMetric`** — Same module exports a separate `ProposedMetric` interface + `PROPOSED_METRICS` constant for metrics that *should* exist on the dashboard but don't yet (M1.1 stability ratio, M1.13 self-heal MTTR top-level, M1.13 heal-class catalog coverage, M2.7 SWE-bench resolve rate, etc.). Each row carries id + label + rationale + milestone + optional blocker task + sketch of the future collection formula. Rendered in METRICS.md's trailing `## Metrics to add` section so the gap is surfaced explicitly (operator directive 2026-05-21).
 
 ## Failure modes & chaos verification
 
@@ -192,3 +192,21 @@ The relevant cross-links emitted by this package:
 - Supervisor-restart hint in `activity.ts` → `pnpm minsky:stop` (was: `pnpm dogfood:stop`)
 
 Old `pnpm dogfood:*` names are removed in `package.json`; `./setup.sh --dogfood` is a deprecated alias kept until 2026-06-26 (prints a one-line warning, runs as `--setup`). See `.claude/skills/minsky-supervisor/SKILL.md` for the full operator-side command surface.
+
+## Run-relative run metrics (2026-06-19)
+
+Minsky is not always-on — it runs only during operator-started sessions
+(operator directive 2026-06-19). Two run-based tiles measure WHEN it runs,
+not wall-clock:
+
+- `runtime-accumulated-24h` — run health over the most recent 24h of
+  ACCUMULATED runtime (runs newest-oldest, summing uptime to 24h, the last
+  run counted partially), with `host` + `minskyVersion` breakdown.
+- `longest-run` — the single longest uninterrupted run.
+
+Both read minsky-local `.minsky/runs/<id>/run-summary.json` via the pure
+reducers in `scripts/runs-aggregate.mjs` and render an honest `(stub)` until
+a run is recorded. Relatedly, `scripts/check-metric-freshness.mjs` is now
+run-relative: its clock is the last real run end (falling back to the
+committed `docs/metrics-last-run.json` marker on CI), so an idle machine
+never reports false staleness while a new uncollected run still does.

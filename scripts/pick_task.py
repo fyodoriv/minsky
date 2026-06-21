@@ -600,12 +600,17 @@ def pick_from_source(
 # --- CLI -----------------------------------------------------------------
 
 
+_TASK_SOURCES = ("tasks-md", "github-issues")
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(
             "usage: pick_task.py <path-to-TASKS.md> [--branch-prefix=feat/]"
             " [--open-pr-branches=<csv>] [--skip-task-ids=<csv>]"
-            " [--all-prs-json=<path>] [--find=<query>]",
+            " [--all-prs-json=<path>] [--find=<query>]"
+            " [--task-source=tasks-md|github-issues]"
+            " [--gh-issues-repo=<owner/name>]",
             file=sys.stderr,
         )
         return 2
@@ -615,6 +620,11 @@ def main(argv: list[str]) -> int:
     skip_task_ids: list[str] = []
     all_prs: list[dict] | None = None
     find_query: str | None = None
+    # `task_source` selects which adapter satisfies the `TaskSource` port.
+    # `tasks-md` is the default — every existing host stays unchanged.
+    # `github-issues` routes through `scripts/gh_issue_task_source.py`.
+    task_source_kind = "tasks-md"
+    gh_issues_repo: str | None = None
     for arg in argv[2:]:
         if arg.startswith("--branch-prefix="):
             branch_prefix = arg.split("=", 1)[1]
@@ -646,16 +656,37 @@ def main(argv: list[str]) -> int:
                 all_prs = None
         elif arg.startswith("--find="):
             find_query = arg.split("=", 1)[1]
+        elif arg.startswith("--task-source="):
+            task_source_kind = arg.split("=", 1)[1]
+            if task_source_kind not in _TASK_SOURCES:
+                print(
+                    f"--task-source: {task_source_kind!r} is not one of {_TASK_SOURCES}",
+                    file=sys.stderr,
+                )
+                return 2
+        elif arg.startswith("--gh-issues-repo="):
+            gh_issues_repo = arg.split("=", 1)[1] or None
         else:
             print(f"unknown flag: {arg}", file=sys.stderr)
             return 2
-    if not path.is_file():
-        print(f"file not found: {path}", file=sys.stderr)
-        return 1
-    # Obtain tasks through the TaskSource port — not by parsing TASKS.md
-    # inline (rule #2). `TasksMdTaskSource` is the markdown adapter; a
-    # GitHub-Issues adapter is an additive impl behind the same port.
-    source: TaskSource = TasksMdTaskSource(path)
+    # Resolve the TaskSource. For `tasks-md`, parse the positional path. For
+    # `github-issues`, route through the gh-backed adapter — the positional
+    # path is ignored (kept positional so the CLI shape stays parity-stable).
+    source: TaskSource
+    if task_source_kind == "github-issues":
+        # Local import keeps the tasks-md path import-free of the gh adapter
+        # (the github_issues_task_source module imports subprocess + reuses
+        # the parser; it has no runtime cost when tasks-md is selected).
+        from gh_issue_task_source import GhIssueTaskSource  # noqa: PLC0415
+        source = GhIssueTaskSource(repo=gh_issues_repo)
+    else:
+        if not path.is_file():
+            print(f"file not found: {path}", file=sys.stderr)
+            return 1
+        # Obtain tasks through the TaskSource port — not by parsing TASKS.md
+        # inline (rule #2). `TasksMdTaskSource` is the markdown adapter; the
+        # GitHub-Issues adapter above is the second impl behind the same port.
+        source = TasksMdTaskSource(path)
     if find_query is not None:
         result = source.find(find_query)
         if result.ok and result.task is not None and result.task.id is not None:

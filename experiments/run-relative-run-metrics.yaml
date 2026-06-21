@@ -1,0 +1,9 @@
+id: run-relative-run-metrics
+hypothesis: |
+  Minsky is no longer always-on (operator directive 2026-06-19): it runs only during operator-started sessions, so wall-clock metric-freshness wedges every idle day. `scripts/runs-aggregate.mjs` makes observability run-relative — `accumulate24h` windows the last 24h of ACCUMULATED runtime (runs newest-oldest summed to 24h, last run partial) and `longestRun` reports the longest uninterrupted run, both segmentable by host + minskyVersion — and the metric-freshness gate keys its clock off the last real run (`.minsky/runs/`) instead of wall-clock. Prediction: with run-relative freshness an idle machine produces ZERO false-stale failures while a new uncollected run is still flagged; the two new metrics render honest `(stub)` until a run exists, then real values.
+success: "scripts/runs-aggregate.test.mjs passes (>=9 cases): accumulate24h fills the 24h window with the last run partial, filters by host/version, returns null on no data; longestRun picks the max uninterrupted span. metric-freshness is green on an idle checkout (no .minsky/runs) and on a freshly-rendered METRICS.md."
+pivot: "if run-relative freshness lets a genuinely-stale committed METRICS.md slip past CI for >1 release, add a hard upper bound (fail when the committed marker is older than 90d regardless of run history) rather than reverting to wall-clock."
+measurement: "npx vitest run scripts/runs-aggregate.test.mjs --reporter=json 2>/dev/null | jq -e '.numPassedTests >= 9 and .numFailedTests == 0'"
+timeout_seconds: 120
+anchor: |
+  Avizienis, Laprie, Randell, Landwehr, "Basic Concepts and Taxonomy of Dependable and Secure Computing", IEEE TDSC 2004 — continuity/uptime is measured over actual operation, not wall-clock; an idle system has no continuity to measure, so freshness must be run-relative.
