@@ -614,6 +614,7 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-no-delivered-retained-blocks.mjs"],
+    env: { NO_DELIVERED_BLOCKS_DIFF_BASE: "origin/main" },
   },
   // ---- full stage ----------------------------------------------------------
   {

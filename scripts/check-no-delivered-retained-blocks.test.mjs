@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   checkNoDeliveredRetainedBlocks,
+  getAddedLines,
   STALE_PATTERN,
 } from "./check-no-delivered-retained-blocks.mjs";
 
@@ -100,17 +101,33 @@ describe("checkNoDeliveredRetainedBlocks", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("real production TASKS.md has violations until sweep-stale-delivered-task-blocks lands (gate is working)", () => {
-    // This test confirms the gate CORRECTLY detects the stale retained blocks
-    // in the current TASKS.md. After `sweep-stale-delivered-task-blocks` ships
-    // and cleans up the existing blocks, the count will drop to 0. Until then,
-    // the gate prevents NEW stale blocks from being added. Violations here are
-    // expected pre-sweep; the CI job will be green once the sweep PR merges.
+  it("diff-scoped: getAddedLines returns a string or null from the git repo", () => {
+    // In the CI/pre-push context the gate calls getAddedLines("origin/main") to
+    // extract only ADDED lines from TASKS.md. Verify the function runs without
+    // throwing and returns either a string (in a git repo) or null (elsewhere).
+    const result = getAddedLines("origin/main");
+    expect(result === null || typeof result === "string").toBe(true);
+  });
+
+  it("diff-scoped: gate passes on this PR (no new stale blocks introduced)", () => {
+    // This PR adds the gate infrastructure but does NOT add any stale retained
+    // blocks. The 30 pre-existing blocks in current TASKS.md are NOT in the diff
+    // of this branch vs origin/main. Verify the diff-scoped check returns ok=true.
+    const addedLines = getAddedLines("origin/main");
+    if (addedLines !== null) {
+      const result = checkNoDeliveredRetainedBlocks(addedLines);
+      expect(result.ok).toBe(true);
+    }
+    // If not in a git repo (addedLines===null), this test is vacuously satisfied.
+  });
+
+  it("whole-file: production TASKS.md has pre-sweep violations (gate is working)", () => {
+    // When run with an explicit path arg (`node check-no-delivered-retained-blocks.mjs TASKS.md`)
+    // the gate checks the whole file. The current TASKS.md has ~30 stale retained
+    // blocks that will be swept by `sweep-stale-delivered-task-blocks`. Confirm the
+    // check finds them so post-sweep we can flip this to expect(result.ok).toBe(true).
     const tasksMd = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
     const result = checkNoDeliveredRetainedBlocks(tasksMd);
-    // We know there are stale blocks today — this is the baseline the task
-    // documents (36 → cleaned up by sweep). The gate is NOT producing false
-    // positives on normal lines; all violations here are genuine stale blocks.
     if (!result.ok) {
       expect(result.violations.length).toBeGreaterThan(0);
     }

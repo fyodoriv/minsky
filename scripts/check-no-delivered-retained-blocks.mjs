@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 // @ts-check
 // <!-- scope: human-approved stale-delivered-block-ci-gate — deterministic CI gate, no novel UX surface -->
-// check-no-delivered-retained-blocks — rejects any TASKS.md commit that
+// check-no-delivered-retained-blocks — rejects any TASKS.md diff that
 // introduces a `**Blocked**:` field containing the substring
 // `DELIVERED.*block retained`, preventing re-accumulation of the stale
 // citation pattern that `sweep-stale-delivered-task-blocks` cleans up.
+//
+// Diff-scoped by default: in CI/pre-push mode (no explicit path arg) the
+// gate inspects only lines ADDED to TASKS.md in this branch vs the diff
+// base (env NO_DELIVERED_BLOCKS_DIFF_BASE, default origin/main). This
+// is the ratchet model — the 30 pre-existing stale blocks are swept by
+// `sweep-stale-delivered-task-blocks`; new additions are blocked here.
+// With an explicit path arg the gate checks the whole file (for post-sweep
+// verification: `node check-no-delivered-retained-blocks.mjs TASKS.md`).
 //
 // Pattern: deterministic gate over TASKS.md (rule #10). Pure grep — no
 // LLM, no network, no side effects. Target wall-clock <100ms.
@@ -15,6 +23,7 @@
 // unaddressed stale block raises tolerance for the next; a CI gate is
 // the mechanical zero-tolerance policy that closes the accumulation loop.
 
+import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
@@ -22,6 +31,8 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
+
+export const DEFAULT_DIFF_BASE = process.env["NO_DELIVERED_BLOCKS_DIFF_BASE"] ?? "origin/main";
 
 /**
  * Regex matching the stale retained-block pattern specifically in a
@@ -39,13 +50,15 @@ export const STALE_PATTERN = /^\s*-\s+\*\*Blocked\*\*:.*DELIVERED.*block retaine
  */
 
 /**
- * Scan TASKS.md text for stale delivered-retained-block patterns.
+ * Scan text for stale delivered-retained-block patterns.
+ * In diff-scoped mode pass only the added lines; for whole-file
+ * verification pass the full TASKS.md content.
  *
- * @param {string} tasksMd
+ * @param {string} content
  * @returns {CheckResult}
  */
-export function checkNoDeliveredRetainedBlocks(tasksMd) {
-  const lines = tasksMd.split("\n");
+export function checkNoDeliveredRetainedBlocks(content) {
+  const lines = content.split("\n");
   /** @type {{ line: number, text: string }[]} */
   const violations = [];
   for (let i = 0; i < lines.length; i++) {
@@ -57,18 +70,66 @@ export function checkNoDeliveredRetainedBlocks(tasksMd) {
   return { ok: violations.length === 0, violations };
 }
 
+/**
+ * Extract lines added to TASKS.md in the diff of diffBase...HEAD.
+ * Returns null if not in a git repo or TASKS.md has no diff.
+ *
+ * @param {string} diffBase
+ * @returns {string | null}
+ */
+export function getAddedLines(diffBase) {
+  try {
+    const diff = execSync(`git diff ${diffBase}...HEAD -- TASKS.md`, {
+      encoding: "utf8",
+      cwd: REPO_ROOT,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const added = diff
+      .split("\n")
+      .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
+      .map((l) => l.slice(1))
+      .join("\n");
+    return added;
+  } catch {
+    return null;
+  }
+}
+
 // --------------------------------------------------------------- CLI -------
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const tasksMdPath = process.argv[2] ?? resolve(REPO_ROOT, "TASKS.md");
-  const tasksMd = readFileSync(tasksMdPath, "utf8");
-  const result = checkNoDeliveredRetainedBlocks(tasksMd);
+  const explicitPath = process.argv[2];
+
+  let content;
+  let modeLabel;
+
+  if (explicitPath) {
+    // Whole-file mode: used for post-sweep verification
+    content = readFileSync(explicitPath, "utf8");
+    modeLabel = `whole-file (${explicitPath})`;
+  } else {
+    // Diff-scoped mode: default CI/pre-push path
+    const diffBase = DEFAULT_DIFF_BASE;
+    const added = getAddedLines(diffBase);
+    if (added !== null) {
+      content = added;
+      modeLabel = `diff-scoped (added lines vs ${diffBase})`;
+    } else {
+      // Not in a git repo — fall back to whole file
+      content = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
+      modeLabel = "whole-file fallback (no git)";
+    }
+  }
+
+  const result = checkNoDeliveredRetainedBlocks(content);
   if (result.ok) {
-    process.stdout.write("check-no-delivered-retained-blocks: ok (0 stale retained blocks)\n");
+    process.stdout.write(
+      `check-no-delivered-retained-blocks: ok (0 stale retained blocks introduced) [${modeLabel}]\n`,
+    );
     process.exit(0);
   }
   process.stderr.write(
-    `check-no-delivered-retained-blocks: ${result.violations.length} stale retained block(s) found in TASKS.md:\n`,
+    `check-no-delivered-retained-blocks: ${result.violations.length} stale retained block(s) introduced [${modeLabel}]:\n`,
   );
   for (const v of result.violations) {
     process.stderr.write(`  line ${v.line}: ${v.text}\n`);
