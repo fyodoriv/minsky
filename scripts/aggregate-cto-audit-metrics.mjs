@@ -61,6 +61,7 @@
 //     fixed window, not per-iteration spot checks.
 
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -106,11 +107,31 @@ export const TASK_ID_RE = /\*\*ID\*\*:\s*([a-z0-9][a-z0-9-]*)/i;
  */
 
 /**
+ * @typedef {object} AuditLogEntry
+ * @property {string} ts                  ISO-8601 timestamp
+ * @property {"audit-skip"|"audit-retry-success"} event  entry type
+ * @property {string} task                kebab-case task ID
+ * @property {string|undefined} reason    reason (audit-skip only)
+ * @property {number|undefined} retriesAttempted  (audit-skip only)
+ * @property {number|undefined} retryCount        (audit-retry-success only)
+ */
+
+/**
+ * @typedef {object} Rule9Metrics
+ * @property {number} rule_9_reject_count        tasks skipped due to rule-9 failure (after retries)
+ * @property {number} rule_9_retry_success_count tasks that succeeded on a retry
+ * @property {number} rule_9_reject_rate         reject_count / (reject_count + filed_count)
+ */
+
+/**
  * @typedef {object} AggregateResult
- * @property {string} ts                       ISO-8601 generation time
- * @property {number} audit_filed_count        tasks filed in the window
- * @property {number} merged_within_30d_count  of those, merged ≤30d after filing
- * @property {number} merge_rate               merged / filed (0 when filed=0)
+ * @property {string} ts                         ISO-8601 generation time
+ * @property {number} audit_filed_count          tasks filed in the window
+ * @property {number} merged_within_30d_count    of those, merged ≤30d after filing
+ * @property {number} merge_rate                 merged / filed (0 when filed=0)
+ * @property {number} rule_9_reject_count        tasks rejected by rule-9 checker (audit-skipped)
+ * @property {number} rule_9_retry_success_count tasks that were retried and succeeded
+ * @property {number} rule_9_reject_rate         reject_count / (reject_count + filed_count)
  */
 
 /**
@@ -230,15 +251,87 @@ function isIdChar(ch) {
 }
 
 /**
+ * Parse the audit-log JSONL text produced by `writeProposedTask` in
+ * `novel/cross-repo-runner/src/host-cto-audit.ts`. Returns one typed entry
+ * per non-blank line; malformed lines are silently skipped (graceful-degrade
+ * rule #6 — the metric degrades to "no rejections observed" rather than
+ * crashing the aggregator).
+ *
+ * Pure over the captured text so the test suite can exercise without I/O.
+ *
+ * @param {string} auditLogText  raw JSONL contents of `.minsky/audit-log.jsonl`
+ * @returns {readonly AuditLogEntry[]}
+ */
+export function parseAuditLog(auditLogText) {
+  /** @type {AuditLogEntry[]} */
+  const entries = [];
+  for (const line of auditLogText.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && (parsed.event === "audit-skip" || parsed.event === "audit-retry-success")) {
+        entries.push(/** @type {AuditLogEntry} */ (parsed));
+      }
+    } catch {
+      // malformed line — skip
+    }
+  }
+  return entries;
+}
+
+/**
+ * Read the audit log from `.minsky/audit-log.jsonl` relative to `repoRoot`.
+ * Returns [] when the file is missing (first run; no rejects yet).
+ *
+ * @param {string} repoRoot
+ * @returns {readonly AuditLogEntry[]}
+ */
+export function readAuditLog(repoRoot) {
+  const logPath = resolve(repoRoot, ".minsky", "audit-log.jsonl");
+  if (!existsSync(logPath)) return [];
+  try {
+    return parseAuditLog(readFileSync(logPath, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Compute rule-9 reject metrics from audit-log entries in a date window.
+ * Pure: same inputs → same result.
+ *
+ * @param {readonly AuditLogEntry[]} entries
+ * @param {number} sinceMs
+ * @param {number} untilMs
+ * @param {number} audit_filed_count  already-computed filed count (from git history)
+ * @returns {Rule9Metrics}
+ */
+export function computeRule9Metrics(entries, sinceMs, untilMs, audit_filed_count) {
+  let rule_9_reject_count = 0;
+  let rule_9_retry_success_count = 0;
+  for (const entry of entries) {
+    const tsMs = Date.parse(entry.ts);
+    if (Number.isNaN(tsMs) || tsMs < sinceMs || tsMs > untilMs) continue;
+    if (entry.event === "audit-skip") rule_9_reject_count += 1;
+    else if (entry.event === "audit-retry-success") rule_9_retry_success_count += 1;
+  }
+  const total = rule_9_reject_count + audit_filed_count;
+  const rule_9_reject_rate = total === 0 ? 0 : roundTo(rule_9_reject_count / total, 4);
+  return { rule_9_reject_count, rule_9_retry_success_count, rule_9_reject_rate };
+}
+
+/**
  * Compute the aggregate metric from the filed set + the merged-map.
  * Pure: same inputs → same result.
  *
  * @param {ReadonlyMap<string, AuditFiledTask>} filed
  * @param {ReadonlyMap<string, boolean>} mergedMap
  * @param {number} nowMs  generation clock (caller supplies for determinism)
+ * @param {Rule9Metrics} [rule9]  optional rule-9 metrics (defaults to zeros)
  * @returns {AggregateResult}
  */
-export function computeMergeRate(filed, mergedMap, nowMs) {
+export function computeMergeRate(filed, mergedMap, nowMs, rule9) {
   const audit_filed_count = filed.size;
   let merged_within_30d_count = 0;
   for (const isMerged of mergedMap.values()) {
@@ -246,11 +339,15 @@ export function computeMergeRate(filed, mergedMap, nowMs) {
   }
   const merge_rate =
     audit_filed_count === 0 ? 0 : roundTo(merged_within_30d_count / audit_filed_count, 4);
+  const r9 = rule9 ?? { rule_9_reject_count: 0, rule_9_retry_success_count: 0, rule_9_reject_rate: 0 };
   return {
     ts: new Date(nowMs).toISOString(),
     audit_filed_count,
     merged_within_30d_count,
     merge_rate,
+    rule_9_reject_count: r9.rule_9_reject_count,
+    rule_9_retry_success_count: r9.rule_9_retry_success_count,
+    rule_9_reject_rate: r9.rule_9_reject_rate,
   };
 }
 
@@ -265,19 +362,20 @@ function roundTo(n, digits) {
 }
 
 /**
- * Full pure pipeline: commits + PRs + window + clock → AggregateResult.
+ * Full pure pipeline: commits + PRs + audit-log entries + window + clock → AggregateResult.
  * Filters filed tasks to the `[sinceMs, untilMs]` window before the join.
  *
  * @param {{
  *   commits: readonly GitTaskCommit[],
  *   prs: readonly PrRecord[],
+ *   auditLogEntries?: readonly AuditLogEntry[],
  *   sinceMs: number,
  *   untilMs: number,
  *   nowMs: number,
  * }} input
  * @returns {AggregateResult}
  */
-export function aggregate({ commits, prs, sinceMs, untilMs, nowMs }) {
+export function aggregate({ commits, prs, auditLogEntries, sinceMs, untilMs, nowMs }) {
   const allFiled = extractAuditFiledTasks(commits);
   /** @type {Map<string, AuditFiledTask>} */
   const inWindow = new Map();
@@ -287,7 +385,8 @@ export function aggregate({ commits, prs, sinceMs, untilMs, nowMs }) {
     }
   }
   const mergedMap = joinMergedPrs(inWindow, prs);
-  return computeMergeRate(inWindow, mergedMap, nowMs);
+  const rule9 = computeRule9Metrics(auditLogEntries ?? [], sinceMs, untilMs, inWindow.size);
+  return computeMergeRate(inWindow, mergedMap, nowMs, rule9);
 }
 
 // --------------------------------------------------------------- args ------
@@ -492,6 +591,7 @@ export function readMergedPrs(repo) {
  * @param {{
  *   readCommits?: (repoRoot: string) => GitTaskCommit[],
  *   readPrs?: (repo: string | undefined) => PrRecord[],
+ *   readLog?: (repoRoot: string) => readonly AuditLogEntry[],
  *   writeLine?: (line: string) => void,
  *   repoRoot?: string,
  *   nowMs?: number,
@@ -502,6 +602,7 @@ export function main(argv, deps = {}) {
   const {
     readCommits = readTasksMdCommits,
     readPrs = readMergedPrs,
+    readLog = readAuditLog,
     writeLine = console.info,
     repoRoot = REPO_ROOT,
   } = deps;
@@ -509,9 +610,11 @@ export function main(argv, deps = {}) {
   const nowMs = args.nowMs ?? deps.nowMs ?? Date.now();
   const commits = readCommits(repoRoot);
   const prs = readPrs(args.repo);
+  const auditLogEntries = readLog(repoRoot);
   const result = aggregate({
     commits,
     prs,
+    auditLogEntries,
     sinceMs: args.sinceMs,
     untilMs: args.untilMs,
     nowMs,

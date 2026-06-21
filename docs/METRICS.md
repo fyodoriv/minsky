@@ -320,6 +320,22 @@ _Updated: 2026-06-20T00:00:00Z · Budget: 365d · Source: `.minsky/metric-snapsh
 
 _9 metrics that should exist on the dashboard but don't yet. Each row names the milestone that introduces it, the task that lands the collector, and a sketch of the future formula. Operator directive 2026-05-21 — gap is surfaced explicitly so the 10-metric set above is understood as the current state, not the steady state._
 
+### cto-audit-rule-9-reject-rate — CTO-audit rule-9 field-quality reject rate
+
+_Milestone: M1.5_
+
+**Why it belongs:** user-story 007 § "Pattern conformance" flags that LLM-generated rule-#9 fields are "occasionally malformed and require post-hoc cleanup". The pre-write validator in `novel/cross-repo-runner/src/host-cto-audit.ts` logs every rejected or retried task to `.minsky/audit-log.jsonl`. This metric makes the pre-registration discipline measurable: if the reject rate stays below 5% for 7 days, the retry loop is working; above 5% triggers the template-filler Pivot.
+
+**How to view:** `node scripts/aggregate-cto-audit-metrics.mjs --since=$(date -v-7d +%Y-%m-%dT00:00:00Z) --json | jq '.rule_9_reject_rate'`
+
+**Goal:** `rule_9_reject_rate < 0.05` (< 5% of proposals rejected after 2 retries) over a 7-day window
+
+**Pivot:** `rule_9_reject_rate ≥ 0.05` AND `rule_9_retry_success_count / rule_9_reject_count < 0.50` after 48h → replace retry with deterministic template filler (see TASKS.md `cto-audit-rule-9-field-quality` Pivot clause)
+
+**Anchor:** Munafò et al., "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017 — pre-registration requires the metric to be committed before observation; the validator enforces this mechanically before write.
+
+**Blocked by:** `cto-audit-rule-9-field-quality` implementation (this PR).
+
 ### cto-audit-merge-rate — CTO-audit merge rate — % of daemon-audit-filed tasks merged within 30d
 
 _Milestone: M1.5_

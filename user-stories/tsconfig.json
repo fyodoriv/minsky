@@ -15,13 +15,15 @@
       "@minsky/mape-k-loop": ["../novel/mape-k-loop/src/index.ts"],
       "@minsky/notifier": ["../novel/adapters/notifier/src/index.ts"],
       "@minsky/prompt-optimizer": ["../novel/adapters/prompt-optimizer/src/index.ts"],
-      "@minsky/adapter-types": ["../novel/adapters/types/src/index.ts"]
+      "@minsky/adapter-types": ["../novel/adapters/types/src/index.ts"],
+      "@minsky/cross-repo-runner": ["../novel/cross-repo-runner/src/host-cto-audit.ts"]
     }
   },
   "include": ["**/*.test.ts"],
   "references": [
     { "path": "../novel/adapters/notifier" },
     { "path": "../novel/adapters/prompt-optimizer" },
-    { "path": "../novel/mape-k-loop" }
+    { "path": "../novel/mape-k-loop" },
+    { "path": "../novel/cross-repo-runner" }
   ]
 }
