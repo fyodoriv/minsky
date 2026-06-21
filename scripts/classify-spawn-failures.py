@@ -43,11 +43,13 @@ def classify_text(text: str) -> str:
 
 
 def _parse_window(window_str: str) -> float:
-    """Parse '48h' into seconds. Raises ValueError on bad format."""
-    m = re.fullmatch(r"(\d+)h", window_str.strip())
+    """Parse '48h' or '7d' into seconds. Raises ValueError on bad format."""
+    m = re.fullmatch(r"(\d+)([hd])", window_str.strip())
     if not m:
-        raise ValueError(f"Invalid window format: {window_str!r}; expected NNh")
-    return int(m.group(1)) * 3600.0
+        raise ValueError(f"Invalid window format: {window_str!r}; expected NNh or NNd")
+    n = int(m.group(1))
+    unit = m.group(2)
+    return n * 3600.0 if unit == "h" else n * 86400.0
 
 
 def classify_failures(failures_dir: Path, window_seconds: float) -> dict:
@@ -82,6 +84,7 @@ def classify_failures(failures_dir: Path, window_seconds: float) -> dict:
 
     return {
         "window_hours": int(window_seconds / 3600),
+        "total_classified": total,
         "total_failures": total,
         "top_class": top_class,
         "classes": dict(sorted(classes.items(), key=lambda x: -x[1])),

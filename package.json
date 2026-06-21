@@ -81,7 +81,8 @@
     "minsky:ui": "bin/minsky ui",
     "minsky:logs": "bin/minsky logs",
     "minsky:status": "bin/minsky status",
-    "minsky:stop": "bin/minsky stop"
+    "minsky:stop": "bin/minsky stop",
+    "minsky:metrics-refresh": "bin/minsky metrics refresh"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.16",

@@ -376,6 +376,16 @@ _Milestone: M1.13_
 
 **Future formula:** `node scripts/heal-mttr-report.mjs --window=30d --json ⟨TBD-AFTER: ≥1 heal fires in production⟩`
 
+### heal-class-coverage-pct — Heal-class catalog coverage — % of observed spawn-failure classes with a dispatch handler
+
+_Milestone: M1.13_
+
+**Why it belongs:** MAPE-K's Analyze step matches observed symptoms to known healing policies; an unmatched failure class has no policy and falls through to operator escalation. `scripts/generate-heal-coverage-matrix.mjs` ships the collector that joins observed classes against `parseHealIds`; this entry stays in PROPOSED until the daemon's daily snapshot ingests its output into `.minsky/metric-snapshots` so the dashboard tile renders a live observation.
+
+**Blocked by:** `heal-class-catalog-coverage-matrix` in `TASKS.md`.
+
+**Future formula:** `node scripts/generate-heal-coverage-matrix.mjs --json | jq '.coverage_pct' ⟨TBD-AFTER: daemon ingests the matrix output into .minsky/metric-snapshots⟩`
+
 ### swe-bench-resolve-rate — SWE-bench Verified resolve rate, Minsky vs. competitors
 
 _Milestone: M2.7_
