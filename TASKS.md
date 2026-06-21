@@ -560,6 +560,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `heal-dispatch-production-fire-gate` — verify the inline heal-dispatch wired in PR #1251 has fired ≥1 time in production; if `.minsky/heal-events.jsonl` is still empty, identify the routing gap rather than flipping M1.13 to ✅
   - **ID**: heal-dispatch-production-fire-gate
   - **Tags**: p0, milestone-m1, observability, m1-13, self-heal, automation
+  - **Touches**: MILESTONES.md, TASKS.md
   - **Milestone**: M1
   - **Competitive-goal**: closes M1.13 (`mttr-self-heal` p95 <5min) — the inline heal-dispatch substrate shipped in PR #1251 but M1.13 stays 🟡 until ≥1 production heal-fire is observed; unconfirmed self-heal is an unverifiable moat claim
   - **Hypothesis**: PR #1251 wired `scripts/heal-dispatch.mjs` into `bin/minsky-run.sh` at the spawn-failure boundary. Since spawn failures still occur regularly (observed via `rg -c 'spawn failed' .minsky/tick-loop.err.log`), the first production iteration post-#1251 that ends in a dispatchable failure class should have written ≥1 entry to `.minsky/heal-events.jsonl`. If the ledger is still empty after ≥5 spawn failures since #1251 merged, the wiring has a conditional gap — the observed failure class is not in the catalogue of dispatchable classes, or the dispatch path is unreachable under the current error-path flow.
@@ -577,6 +578,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `openhands-vs-claude-m110-corpus-live-ab` — run `bin/minsky competitive --backend openhands` against the M1.10 corpus and compare its scorecard to `--backend claude`; publish the delta in `competitors/openhands.md` to close M1.14
   - **ID**: openhands-vs-claude-m110-corpus-live-ab
   - **Tags**: p1, milestone-m1, competitive, openhands, benchmark, m1-14
+  - **Touches**: competitors/openhands.md, MILESTONES.md, docs/benchmarks/*.json
   - **Milestone**: M1
   - **Competitive-goal**: closes `competitive-benchmark-openhands-vs-claude` — M1.14 requires this since 2026-05-24 (PR #782 shipped the substrate); without the live A/B number, the claim "OpenHands backend improves agent-tier performance" is unverified and the M1.10 scorecard's OpenHands row has no observed value
   - **Hypothesis**: the `@minsky/agent-runtime-openhands` adapter (PR #782, #786) spawns OpenHands in the same task flow as the `claude` backend. Running `bin/minsky competitive --backend openhands` on the M1.10 corpus and comparing to `--backend claude` will produce a measurable `swe_bench_delta_pp` — expected positive (OpenHands wraps Claude with critic + best-of-N, published 65.8% SWE-bench Verified uplift), or if negative, confirms the strategy must pivot to a different backend assumption and triggers the documented Pivot below.
@@ -592,6 +594,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `cto-audit-rule-9-field-quality` — add a pre-write validator to the daemon's CTO audit that runs `scripts/check-rule-9-tasksmd-fields.mjs` on each proposed task block before writing to TASKS.md; retry the LLM call with the error message if it fails
   - **ID**: cto-audit-rule-9-field-quality
   - **Tags**: p1, milestone-m1, cto-audit, rule-9, quality, observability
+  - **Touches**: novel/cross-repo-runner/src/host-cto-audit.ts, scripts/aggregate-cto-audit-metrics.mjs, METRICS.md, user-stories/007-cto-audit-files-new-tasks.test.ts
   - **Milestone**: M1
   - **Competitive-goal**: drives `cto_audit_filed_tasks_merged_within_30d` merge rate toward ≥40% (user-story-007 § Metric threshold) — malformed tasks are rejected by the rule-9 lint on the next PR and never merge; a pre-write validator catches malformation at generation time and lets the retry path self-correct before the write, raising the merge rate
   - **Hypothesis**: `novel/cross-repo-runner/src/host-cto-audit.ts`'s `runHostCtoAudit` writes LLM-generated task bodies to TASKS.md without running `scripts/check-rule-9-tasksmd-fields.mjs` on them first. Adding a pre-write call to the rule-9 checker and a 2-retry loop (each retry appends the specific field error to the system prompt) will raise the pass rate from the estimated ~70% baseline to ≥95% across a 7-day window. Falsifiable: if `cto_audit_rule_9_reject_rate` does not drop to <5% within 7 days, the retry mechanism is insufficient and the template-fallback Pivot applies.

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // @ts-check
+// <!-- scope: human-approved stale-delivered-block-ci-gate — deterministic CI gate, no novel UX surface -->
 // check-no-delivered-retained-blocks — rejects any TASKS.md commit that
 // introduces a `**Blocked**:` field containing the substring
 // `DELIVERED.*block retained`, preventing re-accumulation of the stale
