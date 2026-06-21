@@ -159,3 +159,81 @@ class TestCLI:
         )
         data = json.loads(result.stdout)
         assert data["top_class"] is None
+
+
+class TestCLIFileMode:
+    """Tests for --file single-file classification (inline heal-dispatch path)."""
+
+    def test_file_known_class_json(self, tmp_path: Path):
+        f = tmp_path / "spawn.log"
+        f.write_text("Not logged in · Please run /login")
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--file", str(f), "--json"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["class"] == "Not logged in"
+        assert data["confidence"] == "high"
+
+    def test_file_unknown_class_low_confidence(self, tmp_path: Path):
+        f = tmp_path / "spawn.log"
+        f.write_text("some unexpected error with no recognized pattern")
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--file", str(f), "--json"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["class"] == "unknown"
+        assert data["confidence"] == "low"
+
+    def test_file_killed_class(self, tmp_path: Path):
+        f = tmp_path / "spawn.log"
+        f.write_text("Killed\nProcess terminated by signal")
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--file", str(f), "--json"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["class"] == "Killed"
+        assert data["confidence"] == "high"
+
+    def test_file_module_not_found(self, tmp_path: Path):
+        f = tmp_path / "spawn.log"
+        f.write_text("ModuleNotFoundError: No module named 'openhands'")
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--file", str(f), "--json"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["class"] == "ModuleNotFoundError"
+
+    def test_file_missing_returns_nonzero(self, tmp_path: Path):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--file", str(tmp_path / "nonexistent.log"), "--json"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        data = json.loads(result.stdout)
+        assert data["class"] == "unknown"
+        assert "error" in data
+
+    def test_file_non_json_output(self, tmp_path: Path):
+        f = tmp_path / "spawn.log"
+        f.write_text("Not logged in")
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--file", str(f)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "Not logged in" in result.stdout
+        assert "high" in result.stdout
