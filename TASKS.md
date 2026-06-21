@@ -591,23 +591,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P1
 
-- [ ] `openhands-vs-claude-m110-corpus-live-ab` — run `bin/minsky competitive --backend openhands` against the M1.10 corpus and compare its scorecard to `--backend claude`; publish the delta in `competitors/openhands.md` to close M1.14
-  - **ID**: openhands-vs-claude-m110-corpus-live-ab
-  - **Tags**: p1, milestone-m1, competitive, openhands, benchmark, m1-14
-  - **Touches**: competitors/openhands.md, MILESTONES.md, docs/benchmarks/*.json
-  - **Milestone**: M1
-  - **Competitive-goal**: closes `competitive-benchmark-openhands-vs-claude` — M1.14 requires this since 2026-05-24 (PR #782 shipped the substrate); without the live A/B number, the claim "OpenHands backend improves agent-tier performance" is unverified and the M1.10 scorecard's OpenHands row has no observed value
-  - **Hypothesis**: the `@minsky/agent-runtime-openhands` adapter (PR #782, #786) spawns OpenHands in the same task flow as the `claude` backend. Running `bin/minsky competitive --backend openhands` on the M1.10 corpus and comparing to `--backend claude` will produce a measurable `swe_bench_delta_pp` — expected positive (OpenHands wraps Claude with critic + best-of-N, published 65.8% SWE-bench Verified uplift), or if negative, confirms the strategy must pivot to a different backend assumption and triggers the documented Pivot below.
-  - **Success**: `bin/minsky competitive --backend openhands --json | jq '.swe_bench_delta_pp != null'` → true; `competitors/openhands.md` § "Scorecard readings" table gains a row with `{date, backend: openhands, delta_pp, corpus_size}`; MILESTONES.md M1.14 row updated to ✅ done (if delta_pp ≥ 0) or 🔴 with rationale (if delta_pp < 0).
-  - **Pivot**: if `@minsky/agent-runtime-openhands` fails to spawn (OpenHands SDK not importable in the current env — `python3 -c "import openhands"` exits non-zero), skip the live run; document the env gap in `competitors/openhands.md` as `Blocked: env-gap`; file `fix-openhands-sdk-env-import` as a P0 follow-up and mark M1.14 🔴 with "env-gap" rationale. Threshold: if spawn fails ≥3 times, the env gap is the priority, not the benchmark.
-  - **Measurement**: `bin/minsky competitive --backend openhands --json | jq '.swe_bench_delta_pp != null'` → true; `grep -c 'delta_pp' competitors/openhands.md` ≥ 1 in the Scorecard readings section.
-  - **Anchor**: All-Hands AI, "SOTA on SWE-bench Verified with Inference-Time Scaling and Critic Model", all-hands.dev/blog, 2025-04-15 — the claimed 65.8% SWE-bench Verified score is the pre-registered baseline; Kohavi, Tang, Xu, *Trustworthy Online Controlled Experiments*, Cambridge University Press 2020, Ch. 3 — "Run the experiment before drawing conclusions."
-  - **Surfaced-by**: daemon CTO audit 2026-06-21 — MILESTONES.md M1.14 has been 🟡 since 2026-05-24; the substrate shipped but the live A/B benchmark that closes the milestone criterion has no task block.
-  - **Details**: (1) Run `bin/minsky competitive --backend openhands 2>&1 | tee /tmp/openhands-benchmark.log`. (2) If succeeds: extract `swe_bench_delta_pp` from JSON; add scorecard row to `competitors/openhands.md`; update MILESTONES.md M1.14. (3) If fails with import error: run `python3 -c "import openhands" 2>&1`; note error in `competitors/openhands.md`; file follow-up bug task. (4) Open a PR with the scorecard update + MILESTONES.md change.
-  - **Files**: `competitors/openhands.md` (add Scorecard row), `MILESTONES.md` (M1.14 → ✅ or 🔴), optional `docs/benchmarks/openhands-vs-claude-YYYY-MM-DD.json`
-  - **Touches**: competitors/openhands.md, MILESTONES.md
-  - **Acceptance**: (a) `bin/minsky competitive --backend openhands --json | jq '.swe_bench_delta_pp'` is a number (not null), OR documented env-gap with follow-up filed; (b) `competitors/openhands.md` has a new Scorecard row with date and delta_pp; (c) MILESTONES.md M1.14 is updated; (d) PR passes `pnpm pre-pr-lint --stage=fast`.
-
 - [ ] `cto-audit-rule-9-field-quality` — add a pre-write validator to the daemon's CTO audit that runs `scripts/check-rule-9-tasksmd-fields.mjs` on each proposed task block before writing to TASKS.md; retry the LLM call with the error message if it fails
   - **ID**: cto-audit-rule-9-field-quality
   - **Tags**: p1, milestone-m1, cto-audit, rule-9, quality, observability
