@@ -1,0 +1,36 @@
+# <!-- scope: human-approved 2026-06-11 operator task "daily METRICS.md regen lands on main" — daily regen timer; Linux/systemd parallel of com.minsky.daily-metrics.plist's StartCalendarInterval. -->
+# <!-- pattern: not-applicable — systemd .timer unit mirroring the launchd StartCalendarInterval in com.minsky.daily-metrics.plist; the periodic-task supervisor pattern (Borg/Bashir/Burns/Hightower 2017) is declared at vision.md § "Pattern conformance index". Same shape as minsky-weekly-competitive.timer. -->
+#
+# Minsky daily metrics regen timer — fires `minsky-daily-metrics.service`
+# every day at 00:10 UTC while `minsky-supervisor.target` is active.
+# Parallels the launchd `com.minsky.daily-metrics.plist` (which fires
+# hourly at :10 because launchd speaks local time only; the script's
+# one-PR-per-UTC-date idempotence guards make the cadences equivalent).
+#
+# Why 00:10 UTC: the `cross-repo-pr-rate` freshness budget rolls at
+# midnight UTC — main goes red at 00:00Z when the previous day's render
+# is the latest on main. Firing 10 minutes later keeps the red window
+# bounded to minutes instead of relying on a hand-unwedge (PR #1208).
+#
+# Pattern: periodic-task supervisor (Borg/Bashir/Burns/Hightower 2017).
+# The timer is the cadence kernel; the service is the unit of work.
+
+[Unit]
+Description=Minsky daily metrics regen timer — refresh docs/METRICS.md every day 00:10 UTC
+PartOf=minsky-supervisor.target
+
+[Timer]
+Unit=minsky-daily-metrics.service
+# Daily at 00:10 UTC — right after the freshness budget rolls.
+OnCalendar=*-*-* 00:10:00 UTC
+# Regen on boot too, so a host that slept through UTC midnight
+# unwedges main without waiting until the next 00:10 UTC.
+OnBootSec=2min
+# Small jitter so multi-host fleets don't race the same dated branch
+# (the branch-exists guard makes the loser a silent no-op anyway).
+RandomizedDelaySec=120s
+# Persistent=true ensures the daily tick fires after sleep / reboot.
+Persistent=true
+
+[Install]
+WantedBy=minsky-supervisor.target

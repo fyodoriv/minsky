@@ -25,10 +25,12 @@ describe("assessSandboxProbes (pure)", () => {
     const result = assessSandboxProbes({
       disallowed: { exitCode: 1 },
       allowed: { exitCode: 0 },
+      toolchain: { exitCode: 0 },
     });
     expect(result).toMatchObject({
       disallowed_read_denied: true,
       allowed_read_permitted: true,
+      toolchain_probe_permitted: true,
       skipped: false,
       ok: true,
     });
@@ -38,6 +40,7 @@ describe("assessSandboxProbes (pure)", () => {
     const result = assessSandboxProbes({
       disallowed: { exitCode: 0 },
       allowed: { exitCode: 0 },
+      toolchain: { exitCode: 0 },
     });
     expect(result.disallowed_read_denied).toBe(false);
     expect(result.ok).toBe(false);
@@ -47,8 +50,19 @@ describe("assessSandboxProbes (pure)", () => {
     const result = assessSandboxProbes({
       disallowed: { exitCode: 1 },
       allowed: { exitCode: 1 },
+      toolchain: { exitCode: 0 },
     });
     expect(result.allowed_read_permitted).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  test("operator toolchain DENIED (false-positive EPERM) → not ok", () => {
+    const result = assessSandboxProbes({
+      disallowed: { exitCode: 1 },
+      allowed: { exitCode: 0 },
+      toolchain: { exitCode: 1 },
+    });
+    expect(result.toolchain_probe_permitted).toBe(false);
     expect(result.ok).toBe(false);
   });
 
@@ -56,6 +70,7 @@ describe("assessSandboxProbes (pure)", () => {
     const result = assessSandboxProbes({
       disallowed: { exitCode: null },
       allowed: { exitCode: 0 },
+      toolchain: { exitCode: 0 },
     });
     expect(result.disallowed_read_denied).toBe(false);
     expect(result.ok).toBe(false);
@@ -65,6 +80,7 @@ describe("assessSandboxProbes (pure)", () => {
     const result = assessSandboxProbes({
       disallowed: { exitCode: null },
       allowed: { exitCode: null },
+      toolchain: { exitCode: null },
       skip: "not macOS (platform=linux); sandbox-exec is macOS-only",
     });
     expect(result.skipped).toBe(true);

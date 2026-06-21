@@ -53,7 +53,7 @@ supervisor needs. Anything not listed below fails with `EPERM`.
 | Operation | Allowed | Why |
 | --- | --- | --- |
 | `process-fork` / `process-exec` / `signal` | yes | the supervisor spawns `claude --print` / `node` / `git` / `pnpm` / `gh` per iteration; the binary allow-list is enforced at the `run-tick-loop.sh` PATH boundary |
-| `file-read*` system prefixes | `/usr`, `/bin`, `/sbin`, `/opt/homebrew`, `/Library`, `/System`, `/private/etc`, `/dev/null`, `/dev/urandom` | read tool binaries + their dylibs (none writable) |
+| `file-read*` system prefixes | `/usr`, `/bin`, `/sbin`, `/opt/homebrew`, `/Library`, `/System`, `/Applications/Xcode.app/Contents/Developer`, `/private/etc`, `/dev/null`, `/dev/urandom` | read tool binaries + their dylibs (none writable); `xcrun` resolves developer tools through the active Xcode developer directory |
 | `file-read* file-write*` repo | `${MINSKY_HOME}` subtree | git operations, log writes, the agent's tracked-file edits |
 | `file-read*` operator caches | `~/.claude` (token-monitor JSONLs), `~/.gitconfig`, `~/.config/git`, node version managers (`~/.local/share/fnm`, `~/.nvm`, `~/.asdf`) | resolve git/node config without false `EPERM` |
 | `file-read* file-write*` state + temp | `~/.minsky`, `/private/tmp`, `/private/var/folders` (the per-user `TMPDIR`) | per-machine config + experiment store + PID file; subprocess scratch |
@@ -120,9 +120,9 @@ While the substrate is inert (today):
 
 macOS slice (shipped today) — these run green on a macOS host:
 
-- **Profile denies the disallowed read, permits the allowed one** (the task block's Measurement):
-  `sandbox-exec -D MINSKY_HOME="$PWD" -D HOME="$HOME" -f distribution/launchd/com.minsky.tick-loop.sb /bin/cat ~/.ssh/known_hosts; echo $?` returns non-zero, while the same invocation against `README.md` returns 0.
-- **Chaos test**: `node scripts/chaos-sandbox-disallowed-read.mjs --json` prints `{"disallowed_read_denied":true,"allowed_read_permitted":true,"skipped":false,"ok":true}` on macOS (and `skipped:true, ok:true` on Linux). `pnpm exec vitest run scripts/chaos-sandbox-disallowed-read.test.mjs` exercises the pure decision core on every platform.
+- **Profile denies the disallowed read, permits the allowed one, and permits the operator toolchain probe** (the task block's Measurement):
+  `sandbox-exec -D MINSKY_HOME="$PWD" -D HOME="$HOME" -f distribution/launchd/com.minsky.tick-loop.sb /bin/cat ~/.ssh/known_hosts; echo $?` returns non-zero, while the same invocation against `README.md` returns 0 and `sandbox-exec -D MINSKY_HOME="$PWD" -D HOME="$HOME" -f distribution/launchd/com.minsky.tick-loop.sb /usr/bin/xcrun --find git` returns 0.
+- **Chaos test**: `node scripts/chaos-sandbox-disallowed-read.mjs --json` prints `{"disallowed_read_denied":true,"allowed_read_permitted":true,"toolchain_probe_permitted":true,"skipped":false,"ok":true}` on macOS (and `skipped:true, ok:true` on Linux). `pnpm exec vitest run scripts/chaos-sandbox-disallowed-read.test.mjs` exercises the pure decision core on every platform.
 - **Drift gate**: `node scripts/check-supervisor-sandbox-hardening.mjs` asserts the `.sb` profile opens with `(deny default)` and is wired into the plist's `ProgramArguments`.
 
 When the Linux slice (4) lands, the verification surface extends:

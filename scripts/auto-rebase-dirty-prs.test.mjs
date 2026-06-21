@@ -94,16 +94,20 @@ describe("executeDecisions — actions via injected seams", () => {
     const closeFn = () => {
       throw new Error("close should NOT be called when rebase succeeds");
     };
+    const recheckFn = () => {
+      throw new Error("recheck should NOT be called when rebase succeeds");
+    };
     const out = executeDecisions([{ pr: 100, action: "rebase", reason: "DIRTY for 3h" }], {
       rebaseFn,
       closeFn,
+      recheckFn,
       dryRun: false,
     });
     expect(out).toHaveLength(1);
     expect(out[0]?.outcome).toBe("rebased");
   });
 
-  test("conflict escalates to close-superseded", () => {
+  test("conflict + still-stuck recheck escalates to close-superseded", () => {
     let closeCalled = 0;
     const rebaseFn = () => /** @type {const} */ ("conflict");
     const closeFn = () => {
@@ -112,11 +116,46 @@ describe("executeDecisions — actions via injected seams", () => {
     const out = executeDecisions([{ pr: 200, action: "rebase", reason: "DIRTY for 5h" }], {
       rebaseFn,
       closeFn,
+      recheckFn: () => "CONFLICTING",
       dryRun: false,
     });
     expect(out).toHaveLength(1);
     expect(out[0]?.outcome).toBe("closed-superseded");
     expect(closeCalled).toBe(1);
+  });
+
+  // TOCTOU guard pin (PR #1213 incident 2026-06-11): the author rebased
+  // the branch green between the janitor's snapshot and its execute
+  // step; the janitor must NOT close on stale evidence.
+  test("conflict + recovered recheck skips the close (recovered-externally)", () => {
+    let closeCalled = 0;
+    const rebaseFn = () => /** @type {const} */ ("conflict");
+    const closeFn = () => {
+      closeCalled += 1;
+    };
+    const out = executeDecisions([{ pr: 1213, action: "rebase", reason: "CONFLICTING for 3h" }], {
+      rebaseFn,
+      closeFn,
+      recheckFn: () => "MERGEABLE",
+      dryRun: false,
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]?.outcome).toBe("recovered-externally");
+    expect(closeCalled).toBe(0);
+  });
+
+  test("conflict + UNKNOWN recheck fails safe (no close, retry next cycle)", () => {
+    let closeCalled = 0;
+    const out = executeDecisions([{ pr: 500, action: "rebase", reason: "DIRTY for 3h" }], {
+      rebaseFn: () => /** @type {const} */ ("conflict"),
+      closeFn: () => {
+        closeCalled += 1;
+      },
+      recheckFn: () => "UNKNOWN",
+      dryRun: false,
+    });
+    expect(out[0]?.outcome).toBe("recovered-externally");
+    expect(closeCalled).toBe(0);
   });
 
   test("transient error → no close, just record for retry next cycle", () => {
@@ -128,6 +167,7 @@ describe("executeDecisions — actions via injected seams", () => {
     const out = executeDecisions([{ pr: 300, action: "rebase", reason: "DIRTY for 4h" }], {
       rebaseFn,
       closeFn,
+      recheckFn: () => "DIRTY",
       dryRun: false,
     });
     expect(out).toHaveLength(1);
@@ -148,6 +188,7 @@ describe("executeDecisions — actions via injected seams", () => {
     const out = executeDecisions([{ pr: 400, action: "rebase", reason: "DIRTY for 3h" }], {
       rebaseFn,
       closeFn,
+      recheckFn: () => "CONFLICTING",
       dryRun: true,
     });
     expect(out).toHaveLength(1);
@@ -164,6 +205,7 @@ describe("executeDecisions — actions via injected seams", () => {
         closeFn: () => {
           /* no-op */
         },
+        recheckFn: () => "CONFLICTING",
         dryRun: false,
       },
     );
@@ -179,6 +221,7 @@ describe("executeDecisions — actions via injected seams", () => {
         closeFn: () => {
           /* no-op */
         },
+        recheckFn: () => "CONFLICTING",
         dryRun: false,
       },
     );
@@ -194,6 +237,7 @@ describe("executeDecisions — actions via injected seams", () => {
         closeFn: () => {
           closeCalled += 1;
         },
+        recheckFn: () => "CONFLICTING",
         dryRun: false,
       },
     );

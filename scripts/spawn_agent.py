@@ -85,6 +85,7 @@ Cross-references
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import shutil
@@ -105,6 +106,27 @@ DEFAULT_SHIM_PATH = (
     / "bin"
     / "minsky-openhands-spawn.py"
 )
+
+
+def _capture_spawn_failure(stderr_text: str, stdout_text: str) -> Optional[str]:
+    """Write stderr.txt + stdout.txt to .minsky/failures/<task-id>-<utc-ts>/.
+
+    Returns the dir path on success, or None on any I/O failure.
+    Graceful-degrade (rule #6): capture failure must never abort the caller.
+    Reads MINSKY_TASK_ID and MINSKY_HOST_ROOT from the environment — both are
+    exported by bin/minsky-run.sh before every spawn.
+    """
+    task_id = os.environ.get("MINSKY_TASK_ID") or "unknown"
+    host_root = os.environ.get("MINSKY_HOST_ROOT") or ".minsky"
+    utc_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    fail_dir = Path(host_root) / "failures" / f"{task_id}-{utc_ts}"
+    try:
+        fail_dir.mkdir(parents=True, exist_ok=True)
+        (fail_dir / "stderr.txt").write_text(stderr_text or "", encoding="utf-8")
+        (fail_dir / "stdout.txt").write_text(stdout_text or "", encoding="utf-8")
+        return str(fail_dir)
+    except OSError:
+        return None
 
 
 def resolve_configured_agent() -> str:
@@ -167,7 +189,20 @@ def resolve_claude_argv(claude_bin: str, brief_file: str, model: str) -> list[st
         prompt = Path(brief_file).read_text()
     except OSError:
         prompt = "Work on the top unclaimed task in TASKS.md per AGENTS.md + vision.md."
-    return [claude_bin, "-p", prompt, "--model", model, "--dangerously-skip-permissions"]
+    # --strict-mcp-config: ignore user/project MCP servers (chrome-devtools,
+    # playwright, …). Without it every worker spawn boots a Chrome instance
+    # that dies with the session — on the operator's machine that surfaced as
+    # "Chrome starts for ~1s every ~10s" while iterations were retried, plus
+    # a per-spawn endpoint-security (EPM/EPDLP) scan of each MCP child.
+    return [
+        claude_bin,
+        "-p",
+        prompt,
+        "--model",
+        model,
+        "--dangerously-skip-permissions",
+        "--strict-mcp-config",
+    ]
 
 
 def claude_config_dir_for_worker(repo: str) -> Path:
@@ -378,33 +413,59 @@ def _main(argv: Optional[list[str]] = None) -> int:
             )
             return 127
         claude_argv = resolve_claude_argv(claude_bin, args.brief_file, args.model)
-        # Per-worker CLAUDE_CONFIG_DIR isolation (worker-claude-concurrent-auth-
-        # and-watchdog). Concurrent `claude -p` spawns against the shared
-        # default `~/.claude/` intermittently fail `Not logged in` in ~1s when
-        # one worker's session-file write races another's read. Each worker
-        # gets its own dir under the throwaway worktree; auth flows through
-        # CLAUDE_CODE_OAUTH_TOKEN (env-exported by the supervisor per PR #1172)
-        # so the isolated dir bootstraps itself from the token.
-        worker_config_dir = claude_config_dir_for_worker(args.repo)
-        try:
-            worker_config_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            # Rule #6 — fail at the boundary, not later. An unwritable worktree
-            # is an iteration-level problem, not a daemon-loop one; surface and
-            # exit so the bash caller records the spawn-failed verdict cleanly.
-            print(
-                f"spawn_agent: cannot create CLAUDE_CONFIG_DIR={worker_config_dir}: {exc}",
-                file=sys.stderr,
-            )
-            return 127
         env = os.environ.copy()
-        env["CLAUDE_CONFIG_DIR"] = str(worker_config_dir)
+        # Per-worker CLAUDE_CONFIG_DIR isolation (worker-claude-concurrent-auth-
+        # and-watchdog) ONLY authenticates when CLAUDE_CODE_OAUTH_TOKEN is
+        # exported: the isolated dir starts EMPTY and bootstraps its session
+        # from that token (PR #1172). With no token, an isolated empty dir has
+        # no credentials and the worker exits `Not logged in · Please run
+        # /login` in ~1s → spawn-failed (the keychain/subscription creds the
+        # default dir uses are not read from a fresh CLAUDE_CONFIG_DIR). So
+        # isolate only when a token is present; otherwise fall back to the
+        # operator's DEFAULT config dir — the same keychain/subscription auth
+        # the brain's `claude --print` review uses. Isolation is a concurrency
+        # optimization; an authenticatable worker is correctness, and
+        # correctness wins when the two conflict (sequential single-host runs
+        # have no contention to isolate against anyway).
+        if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+            worker_config_dir = claude_config_dir_for_worker(args.repo)
+            try:
+                worker_config_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                # Rule #6 — fail at the boundary, not later. An unwritable
+                # worktree is an iteration-level problem, not a daemon-loop one;
+                # surface and exit so the bash caller records the spawn-failed
+                # verdict cleanly.
+                print(
+                    f"spawn_agent: cannot create CLAUDE_CONFIG_DIR={worker_config_dir}: {exc}",
+                    file=sys.stderr,
+                )
+                return 127
+            env["CLAUDE_CONFIG_DIR"] = str(worker_config_dir)
         try:
-            completed = subprocess.run(claude_argv, check=False, cwd=args.repo, env=env)
+            proc = subprocess.Popen(
+                claude_argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=args.repo,
+                env=env,
+            )
+            stdout_bytes, stderr_bytes = proc.communicate()
+            sys.stdout.buffer.write(stdout_bytes)
+            sys.stdout.buffer.flush()
+            sys.stderr.buffer.write(stderr_bytes)
+            sys.stderr.buffer.flush()
         except FileNotFoundError as exc:
             print(f"spawn_agent: claude CLI not executable: {exc}", file=sys.stderr)
             return 127
-        return completed.returncode
+        if proc.returncode != 0:
+            fail_path = _capture_spawn_failure(
+                stderr_bytes.decode("utf-8", errors="replace")[:4096],
+                stdout_bytes.decode("utf-8", errors="replace")[:4096],
+            )
+            if fail_path:
+                print(f"MINSKY_FAILURE_LOG_PATH={fail_path}", file=sys.stderr)
+        return proc.returncode
 
     resolved = resolve_agent_argv(
         brief_file=args.brief_file,
@@ -431,17 +492,35 @@ def _main(argv: Optional[list[str]] = None) -> int:
         )
         return 127
 
-    # Exec into the resolved backend. Streams stdout/stderr directly to
-    # the caller (the bash watchdog + the iteration log).
+    # Spawn the resolved backend with stdout/stderr piped so failures can
+    # be captured to .minsky/failures/<task-id>-<utc-ts>/ for diagnosis.
+    # AGENT_ENABLE_BROWSING=false (setdefault — operator export wins):
+    # OpenHands' browsing tool launches a playwright Chromium per spawn;
+    # daemon tasks are repo-edit work that never needs it, and on the
+    # operator's machine each launch tripped endpoint-security scans and
+    # flashed a browser for the life of the (watchdog-bounded) spawn.
+    os.environ.setdefault("AGENT_ENABLE_BROWSING", "false")
     try:
-        completed = subprocess.run(resolved, check=False)
+        proc = subprocess.Popen(resolved, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout_bytes, stderr_bytes = proc.communicate()
+        sys.stdout.buffer.write(stdout_bytes)
+        sys.stdout.buffer.flush()
+        sys.stderr.buffer.write(stderr_bytes)
+        sys.stderr.buffer.flush()
     except FileNotFoundError as exc:
         # `openhands` was on PATH at probe time but execve failed. Rare —
         # only when PATH changes between the probe and the exec. Treat
         # the same as "no backend".
         print(f"spawn_agent: backend not executable: {exc}", file=sys.stderr)
         return 127
-    return completed.returncode
+    if proc.returncode != 0:
+        fail_path = _capture_spawn_failure(
+            stderr_bytes.decode("utf-8", errors="replace")[:4096],
+            stdout_bytes.decode("utf-8", errors="replace")[:4096],
+        )
+        if fail_path:
+            print(f"MINSKY_FAILURE_LOG_PATH={fail_path}", file=sys.stderr)
+    return proc.returncode
 
 
 if __name__ == "__main__":

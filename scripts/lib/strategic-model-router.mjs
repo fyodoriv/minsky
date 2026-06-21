@@ -9,8 +9,10 @@
 // Ported to .mjs / JSDoc in phase-11b step 2 alongside
 // `runany-provider-decision.mjs` (which composes this) so the bash
 // runner's runany-model-audit lint stops depending on @minsky/tick-loop.
-// No production runtime path consumes this either — the bash skeleton
-// hard-codes openhands. This module is lint-only / audit-only.
+// NOTE: this IS a production runtime path — `bin/minsky-run.sh` calls
+// `scripts/runany-resolve-model.mjs` every iteration, which composes
+// `decideRunAnyProvider` → `pickStrategicModel`. The dynamic pick
+// overrides the config-sourced model for claude spawns.
 //
 // Source: parent task `claude-usage-aware-strategic-model-router` slice
 // 4; recency-anchored 2026-05-10.

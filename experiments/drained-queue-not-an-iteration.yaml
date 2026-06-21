@@ -1,0 +1,8 @@
+id: drained-queue-not-an-iteration
+hypothesis: |
+  the stability SLI (successful/total over `.minsky/experiment-store/cross-repo/*.jsonl`) counts drained-queue ticks (verdict `aborted`, notes "no eligible task") as failed iterations; ~6000 such records over 2026-06-09..11 vs 10 validated drove the one-day window to 0% (9/1845) while the true task-attempt ratio was far higher. Recording drained ticks with verdict `drained`, excluding them (plus the legacy aborted+"no eligible task" shape) from the SLI denominator, and backing the idle loop off exponentially (5s→300s cap) raises the measured one-day stability from 0% to the true task-attempt ratio and cuts drained-record volume by ≥10x.
+success: "total iterations counted in the one-day stability window drop from ~1845 to ≤ 200 (real task attempts only) with a non-null ratio; drained-record cadence falls to ≤ 6 records/host/hour at the 300 s backoff cap (was ≥ 60/hour)."
+pivot: "if the one-day ratio still reads < 0.05 after the exclusion lands (i.e. the remaining counted records are real spawn/iteration failures, not bookkeeping), the metric-poisoning framing is wrong — pivot to fixing the dominant real failure class (spawn-failed) instead of metric qualification."
+measurement: "grep -q 'verdict === \"drained\"' scripts/lib/stability.mjs && node scripts/stability-report.mjs --window=24h --json | jq -e 'type == \"array\"'"
+anchor: |
+  Beyer, Jones, Petoff, Murphy (eds.), *Site Reliability Engineering* (2016), Ch. 4 — an SLI must qualify which received events are valid before computing the ratio; idle polls are not valid request events.

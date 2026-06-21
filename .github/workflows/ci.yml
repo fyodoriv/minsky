@@ -1978,6 +1978,30 @@ jobs:
       - name: unit tests
         run: pnpm exec vitest run scripts/check-bot-commit-hook-bypass.test.mjs
 
+  no-delivered-retained-blocks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history so the gate can resolve `origin/main` and compute the
+          # diff-scoped `origin/main...HEAD` base. Without this the shallow
+          # checkout has no `origin/main`, the diff fails, and the gate would
+          # (pre-fix) block every PR on pre-existing stale blocks.
+          fetch-depth: 0
+      - run: git fetch --no-tags origin main
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-delivered-retained-blocks lint
+        run: node scripts/check-no-delivered-retained-blocks.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-no-delivered-retained-blocks.test.mjs
+
   pre-push-hook-stays-fast:
     runs-on: ubuntu-latest
     steps:
@@ -2266,6 +2290,28 @@ jobs:
           node-version-file: ".node-version"
       - run: node scripts/check-milestone-alignment.mjs --strict --min-aligned=10
 
+  metrics-freshness:
+    # metrics-freshness-ci-gate: parses the `## Primary metrics` table in
+    # docs/METRICS.md and fails when any row's date column is >7 days old
+    # AND .minsky/orchestrate.jsonl exists (active daemon). On CI (no daemon
+    # history) and fresh clones the check always skips (exit 0). Vision rule
+    # #4 (visible-not-silent); Forsgren/Humble/Kim Accelerate 2018 Ch.2.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: metrics-freshness lint
+        run: node scripts/check-metrics-freshness.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-metrics-freshness.test.mjs
+
   metric-freshness:
     # Substrate slice 2/N of `canonical-metric-list-per-repo` — gates the
     # canonical `METRICS.md` artefact (vision.md row 82) against drift.
@@ -2356,6 +2402,7 @@ jobs:
       - measure-agent-install
       - measurement-inspects-output
       - metric-freshness
+      - metrics-freshness
       - milestone-alignment
       - no-singleton-experiment
       - gate-scratch-resolvable
@@ -2411,6 +2458,7 @@ jobs:
       - no-hardcoded-timeouts
       - no-no-verify-bypass
       - bot-commit-hook-bypass
+      - no-delivered-retained-blocks
       - pre-push-hook-stays-fast
       - launchd-safe-paths
       - typecheck
@@ -2450,6 +2498,7 @@ jobs:
                    "${{ needs.measure-agent-install.result }}" \
                    "${{ needs.measurement-inspects-output.result }}" \
                    "${{ needs.metric-freshness.result }}" \
+                   "${{ needs.metrics-freshness.result }}" \
                    "${{ needs.milestone-alignment.result }}" \
                    "${{ needs.no-singleton-experiment.result }}" \
                    "${{ needs.gate-scratch-resolvable.result }}" \
@@ -2501,6 +2550,7 @@ jobs:
                    "${{ needs.no-hardcoded-timeouts.result }}" \
                    "${{ needs.no-no-verify-bypass.result }}" \
                    "${{ needs.bot-commit-hook-bypass.result }}" \
+                   "${{ needs.no-delivered-retained-blocks.result }}" \
                    "${{ needs.pre-push-hook-stays-fast.result }}" \
                    "${{ needs.launchd-safe-paths.result }}" \
                    "${{ needs.typecheck.result }}" \

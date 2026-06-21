@@ -9,7 +9,8 @@
 #   (stability.mjs, iteration-ship-rate.ts, competitive-benchmark, etc).
 # - Per-host write path: `<host>/.minsky/experiment-store/cross-repo/<task-id>.jsonl`.
 # - --dry-run never spawns openhands and emits `verdict: "planned"`.
-# - Empty TASKS.md hosts emit `verdict: "aborted"` with `notes: "no eligible task"`.
+# - Empty TASKS.md hosts emit `verdict: "drained"` with `notes: "no eligible task"`
+#   (a bookkeeping event, excluded from the stability SLI denominator).
 # - --self-check exits 0 even when openhands isn't installed (operator-friendly).
 # - The picker is invoked with `--open-pr-branches=` so the daemon
 #   self-heals after a salvage-merge (2026-05-16 example-service-plugin
@@ -97,6 +98,17 @@ EOF
   [ "$status" -eq 2 ]
 }
 
+# --- 1b. Config JSON invariant ------------------------------------------------
+
+@test "invalid JSON config names the file in the error message" {
+  # Pin for watchdog-invariant-config-not-valid-json-spam: error must include
+  # the absolute path so operators can identify which file failed.
+  printf '{not valid json' > "$CONFIG_FILE"
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"INVARIANT FAIL: config not valid JSON: $CONFIG_FILE"* ]]
+}
+
 # --- 2. --hosts-dir validation --------------------------------------------
 
 @test "missing --hosts-dir fails the invariant" {
@@ -177,21 +189,21 @@ EOF
 
 # --- 5. No-eligible-task path ---------------------------------------------
 
-@test "empty TASKS.md produces 'aborted' verdict with no-eligible-task note" {
+@test "empty TASKS.md produces 'drained' verdict with no-eligible-task note" {
   host="$(make_host empty "$(printf '# Tasks\n\n## P0\n\n')")"
   run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
   [ "$status" -eq 0 ]
   jsonl="$host/.minsky/experiment-store/cross-repo/_no-task.jsonl"
   [ -f "$jsonl" ]
   line="$(head -1 "$jsonl")"
-  [ "$(echo "$line" | jq -r .verdict)" = "aborted" ]
+  [ "$(echo "$line" | jq -r .verdict)" = "drained" ]
   [ "$(echo "$line" | jq -r .experiment_id)" = "" ]
   [[ "$(echo "$line" | jq -r .notes)" == *"no eligible task"* ]]
 }
 
-@test "empty host writes exactly 1 aborted record per pass even when iterations-per-host>1" {
+@test "empty host writes exactly 1 drained record per pass even when iterations-per-host>1" {
   # Skip-empty-hosts behaviour: when a host has no eligible task, the
-  # walker breaks the inner round-robin loop after recording ONE aborted
+  # walker breaks the inner round-robin loop after recording ONE drained
   # record, instead of emitting iterations-per-host copies. Matches the
   # TypeScript host-walker.ts implementation (rule #1 — port behavior).
   host="$(make_host empty "$(printf '# Tasks\n\n## P0\n\n')")"
@@ -2358,4 +2370,20 @@ EOF
   run "$MINSKY_RUN" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"--once"* ]]
+}
+
+@test "LOOP_FOREVER walk is set-e-safe (guarded non-zero walk_hosts) — regression for supervisor-dies-on-spawn-failed-walk" {
+  # Bug: under `set -e` (line 27) a BARE `walk_hosts` in the `while true`
+  # supervisor exits the whole daemon the instant a walk returns non-zero —
+  # e.g. CTO-audit-on-drain spawn-failed — killing the loop on its first
+  # drained walk instead of backing off. The loop must capture the exit
+  # without tripping set -e.
+  run grep -nE 'walk_hosts[[:space:]]*\|\|[[:space:]]*walk_exit=' "$MINSKY_RUN"
+  [ "$status" -eq 0 ]
+  # The LOOP_FOREVER block must NOT invoke walk_hosts in the bare form that
+  # set -e turns fatal. (The non-loop single-walk path at the very end is
+  # allowed to be bare — it has no surrounding retry loop to protect.)
+  loop_block="$(sed -n '/^  while true; do/,/^  done/p' "$MINSKY_RUN")"
+  run bash -c "printf '%s' \"\$1\" | grep -qE '^[[:space:]]*walk_hosts[[:space:]]*\$'" _ "$loop_block"
+  [ "$status" -ne 0 ]
 }

@@ -20,13 +20,14 @@
 // observed spawn-failure class becomes a hard gate the next time).
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const MINSKY_RUN = join(REPO_ROOT, "bin", "minsky-run.sh");
+const BASH_DOCTOR_PROBES = join(REPO_ROOT, "scripts", "bash-doctor-probes.sh");
 const VENV_PYTHON = join(homedir(), ".minsky", "openhands-venv", "bin", "python");
 
 // Hermetic config fixture: the invariant first reads the agent from
@@ -135,5 +136,37 @@ describe("bin/minsky-run.sh — openhands python resolution", () => {
     expect(result.stderr).not.toMatch(/openhands not importable/);
     expect(result.stderr).not.toMatch(/INVARIANT FAIL.*openhands/);
     expect(result.status).toBe(0);
+  });
+});
+
+describe("bash-doctor-probes — openhands python resolution", () => {
+  test("openhands-sdk probe uses the documented venv before bare python3", () => {
+    const home = mkdtempSync(join(tmpdir(), "minsky-doctor-home-"));
+    const fakeBin = join(mkdtempSync(join(tmpdir(), "minsky-doctor-bin-")), "python3");
+    const venvPython = join(home, ".minsky", "openhands-venv", "bin", "python");
+    const secondArg = "$" + "{2:-}";
+    mkdirSync(join(venvPython, ".."), { recursive: true });
+
+    writeFileSync(fakeBin, "#!/usr/bin/env bash\nexit 1\n", { mode: 0o755 });
+    writeFileSync(
+      venvPython,
+      `#!/usr/bin/env bash\ncase "${secondArg}" in\n  *getattr*) echo fake-sdk-version ;;\nesac\nexit 0\n`,
+      { mode: 0o755 },
+    );
+    chmodSync(fakeBin, 0o755);
+    chmodSync(venvPython, 0o755);
+
+    const result = spawnSync(BASH_DOCTOR_PROBES, ["openhands-sdk"], {
+      env: {
+        ...process.env,
+        HOME: home,
+        PATH: `${join(fakeBin, "..")}:/usr/bin:/bin`,
+        MINSKY_OPENHANDS_PYTHON: "",
+      },
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe("fake-sdk-version");
   });
 });

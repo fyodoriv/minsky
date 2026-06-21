@@ -47,85 +47,42 @@
 
 set -euo pipefail
 
+# launchd inherits BASH_ENV from the GUI session; tick-loop's sandbox profile
+# denies ~/.config/dotfiles — unset before any bash child (with-endpoint-path parity).
+unset BASH_ENV ENV
+
 # Default to the repo root when not bootstrapped by setup.sh's envsubst.
 MINSKY_HOME="${MINSKY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 export MINSKY_HOME
 
-# launchd / systemd-user run with a minimal PATH (often just /usr/bin:/bin)
-# that doesn't include operator-installed node managers (fnm, nvm, asdf,
-# Homebrew). Prepend the common node-installation locations so `exec node`
-# below finds the binary. The first match wins; if `node` is already on
-# PATH (e.g., the operator pre-set PATH in the unit file), the original
-# PATH stays first and this is a no-op for resolution.
-#
-# Search strategy: glob fnm + nvm + asdf install dirs (operator-local), plus
-# Homebrew (system-installed), plus /usr/local/bin (manual installs). We
-# pick the highest-numbered version dir per manager to avoid pinning to a
-# stale version. ${HOME} is always set under launchd / systemd-user.
-node_path_extras=""
-for fnm_dir in "${HOME}"/.local/share/fnm/node-versions/*/installation/bin; do
-  [ -x "${fnm_dir}/node" ] && node_path_extras="${fnm_dir}:${node_path_extras}"
-done
-for nvm_dir in "${HOME}"/.nvm/versions/node/*/bin; do
-  [ -x "${nvm_dir}/node" ] && node_path_extras="${nvm_dir}:${node_path_extras}"
-done
-for asdf_dir in "${HOME}"/.asdf/installs/nodejs/*/bin; do
-  [ -x "${asdf_dir}/node" ] && node_path_extras="${asdf_dir}:${node_path_extras}"
-done
-for brew_prefix in /opt/homebrew/bin /usr/local/bin; do
-  [ -x "${brew_prefix}/node" ] && node_path_extras="${brew_prefix}:${node_path_extras}"
-done
-PATH="${node_path_extras}${PATH:-/usr/bin:/bin}"
+# launchd / systemd-user run with a minimal PATH (often just /usr/bin:/bin).
+# Source the shared helper (rule #1 — compose, don't duplicate) so node,
+# claude, gh, opencode, uv python, and dotfiles/{jq,python3} shims all
+# resolve before /usr/bin/{jq,python3} (CyberArk EPM / tool-shim-public).
+_tick_loop_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib-launchd-path.sh
+. "${_tick_loop_dir}/lib-launchd-path.sh"
+unset _tick_loop_dir
 
-# Same problem as `node`, separate axis: the supervisor spawns `claude
-# --print` (the headless Claude Code CLI) per iteration. The Claude
-# Code installer's default location is `~/.local/bin/claude` (also
-# `~/.npm-global/bin/claude` for npm-global installs and
-# `/opt/homebrew/bin/claude` / `/usr/local/bin/claude` for Homebrew).
-# A spawn against a missing `claude` is `ENOENT`, which the daemon
-# surfaces as an unhandled exception → process exit → launchd respawn
-# loop at `ThrottleInterval` cadence (5s). Surfaced live 2026-05-04
-# during the post-#158 dogfood restart.
-for claude_dir in "${HOME}"/.local/bin "${HOME}"/.npm-global/bin /opt/homebrew/bin /usr/local/bin; do
-  [ -x "${claude_dir}/claude" ] && PATH="${claude_dir}:${PATH}" && break
-done
-# Same pattern for `gh` (GitHub CLI) — used by the file-collision check and
-# auto-merge sweep. Homebrew is the canonical install path on macOS.
-for gh_dir in /opt/homebrew/bin /usr/local/bin "${HOME}"/.local/bin; do
-  [ -x "${gh_dir}/gh" ] && PATH="${gh_dir}:${PATH}" && break
-done
-# Same problem as `node`, hardest axis: the task picker
-# (scripts/pick_task.py) runs under `python3`, and a silent failure here
-# aborts every iteration with "no eligible task". Three traps under the
-# sandbox profile (distribution/launchd/com.minsky.tick-loop.sb), which can
-# only exec binaries it can read (under /usr, /opt/homebrew, /Library,
-# MINSKY_HOME): (1) an operator PATH shim outside those (e.g. a dotfiles
-# ~/bin/python3) is read-denied; (2) /usr/bin/python3 is an Xcode stub that
-# shells out to xcrun, whose dylib lives under /Applications and is
-# read-denied; (3) /usr/local/bin/python3 is often a broken symlink. So
-# `-x` is not enough — test-execute each candidate and pick the first that
-# actually runs under the sandbox (self-adjusting: detects a dead interpreter
-# instead of trusting the path). Homebrew first (common case), then the
-# python.org framework (allowlisted under /Library), /usr/bin last resort.
-python_candidates=(/opt/homebrew/bin/python3 /usr/local/bin/python3)
-for fw in /Library/Frameworks/Python.framework/Versions/*/bin/python3; do
-  python_candidates+=("${fw}")
-done
-python_candidates+=(/usr/bin/python3)
-for py in "${python_candidates[@]}"; do
-  if [ -x "${py}" ] && "${py}" -c '' >/dev/null 2>&1; then
-    PATH="$(dirname "${py}"):${PATH}"
-    break
-  fi
-done
-# Same pattern for `opencode` — the local-LLM spawn target used when the
-# daemon falls back to Ollama/local models. Default install is
-# ~/.opencode/bin/opencode (the opencode CLI installer's standard location).
-# Surfaced via ENOENT in the daemon error log when launchd PATH lacks it.
-for opencode_dir in "${HOME}"/.opencode/bin "${HOME}"/.local/bin "${HOME}"/.npm-global/bin /opt/homebrew/bin /usr/local/bin; do
-  [ -x "${opencode_dir}/opencode" ] && PATH="${opencode_dir}:${PATH}" && break
-done
-export PATH
+# IRON gate (2026-06-17): exit 0 when prerequisites are missing so launchd's
+# KeepAlive: SuccessfulExit=false does NOT respawn every ThrottleInterval and
+# hammer /usr/bin/{jq,python3} (CyberArk EPM popups). Non-zero exit = respawn.
+_endpoint_ready="${HOME}/.local/state/dotfiles/endpoint-ready"
+_tick_enabled_sentinel="${MINSKY_HOME}/.minsky/tick-loop-enabled"
+_autostart_sentinel="${HOME}/.minsky/autostart-enabled"
+if [[ ! -f "${_endpoint_ready}" ]]; then
+  printf 'tick-loop: dormant — endpoint-ready sentinel missing (%s); exit 0 (no respawn)\n' "${_endpoint_ready}" >&2
+  exit 0
+fi
+if [[ "${MINSKY_TICK_LOOP_ENABLED:-0}" != "1" && ! -f "${_autostart_sentinel}" && ! -f "${_tick_enabled_sentinel}" ]]; then
+  printf 'tick-loop: dormant — not enabled (run: minsky enable-autostart); exit 0\n' >&2
+  exit 0
+fi
+if [[ -z "${MINSKY_JQ:-}" ]]; then
+  printf 'tick-loop: dormant — no EPM-safe jq (MINSKY_JQ unset); exit 0\n' >&2
+  exit 0
+fi
+unset _endpoint_ready _tick_enabled_sentinel
 
 # Optional env-var → CLI arg mapping. The CLI itself accepts the same
 # flags directly, so explicit args (passed by the operator) override.

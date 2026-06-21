@@ -63,6 +63,17 @@
  *   that should exist on the dashboard but don't yet — rendered in a
  *   trailing `## Metrics to add` section so the reader sees the gap
  *   explicitly. Operator directive 2026-05-21.
+ * @property {Readonly<Record<string, string>>} [priorRawValues]
+ *   Map of metric id → the verbatim `**Value:**` text from a prior
+ *   rendered `METRICS.md`. When a metric has no fresh observation but
+ *   `priorRawValues[id]` is a NON-stub value, render the prior value
+ *   with a carry-forward annotation instead of overwriting it with
+ *   `(stub)`. A genesis-mode all-stub render against a real
+ *   `docs/METRICS.md` would otherwise downgrade committed values to
+ *   stubs, which flips the pre-push milestone-alignment gate red and
+ *   wedges every contributor.
+ *   Same input → same output (rule #10): the prior values are an
+ *   explicit input, not implicit on-disk state.
  */
 
 /** ms in one day */
@@ -163,13 +174,52 @@ function renderExplicitFields(metric) {
 }
 
 /**
+ * Decide whether a prior raw value (the verbatim `**Value:**` line text
+ * from a previously-rendered METRICS.md, with the leading marker
+ * already stripped) represents a real observation worth carrying
+ * forward. The two stub shapes the renderer emits both start with the
+ * literal `(stub)` token; everything else is a real value.
+ *
+ * Pure — same input, same output.
+ *
+ * @param {string | undefined} raw
+ * @returns {boolean}
+ */
+export function isCarryForwardCandidate(raw) {
+  if (typeof raw !== "string") return false;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return false;
+  return !trimmed.startsWith("(stub)");
+}
+
+/**
+ * @param {SuccessMetricLike} metric
+ * @param {string} priorRawValue
+ * @returns {string}
+ */
+function renderCarryForwardSection(metric, priorRawValue) {
+  const monotonicTag = metric.monotonic === "ok" ? " · _monotonic: ok_" : "";
+  return [
+    `## ${metric.id} — ${metric.label}`,
+    "",
+    `_Carry-forward: prior value retained — no fresh observation today; rerun the collector to refresh · Budget: ${humanizeBudget(metric.freshnessBudgetMs)}${monotonicTag}${milestoneTag(metric)}_`,
+    "",
+    `**Value:** ${priorRawValue}`,
+    "",
+    renderExplicitFields(metric),
+    "",
+  ].join("\n");
+}
+
+/**
  * @param {SuccessMetricLike} metric
  * @param {Observation | undefined} obs
  * @param {number} nowMs
  * @param {string} stubFollowUp
+ * @param {string | undefined} priorRawValue
  * @returns {string}
  */
-function renderSection(metric, obs, nowMs, stubFollowUp) {
+function renderSection(metric, obs, nowMs, stubFollowUp, priorRawValue) {
   const freshness = classifyFreshness(metric, obs, nowMs);
   const monotonicTag = metric.monotonic === "ok" ? " · _monotonic: ok_" : "";
   const heading = `## ${metric.id} — ${metric.label}`;
@@ -186,6 +236,10 @@ function renderSection(metric, obs, nowMs, stubFollowUp) {
       renderExplicitFields(metric),
       "",
     ].join("\n");
+  }
+
+  if (isCarryForwardCandidate(priorRawValue)) {
+    return renderCarryForwardSection(metric, /** @type {string} */ (priorRawValue).trim());
   }
 
   const reason =
@@ -236,11 +290,13 @@ function renderProposedSection(proposed) {
  * @returns {string}
  */
 export function buildMetricsMd(input) {
-  const { metrics, observations, nowMs, stubFollowUp, proposedMetrics } = input;
+  const { metrics, observations, nowMs, stubFollowUp, proposedMetrics, priorRawValues } = input;
   const followUp = stubFollowUp ?? DEFAULT_STUB_FOLLOW_UP;
   const clock = nowMs ?? 0;
 
-  const sections = metrics.map((m) => renderSection(m, observations?.[m.id], clock, followUp));
+  const sections = metrics.map((m) =>
+    renderSection(m, observations?.[m.id], clock, followUp, priorRawValues?.[m.id]),
+  );
 
   const header = [
     "# METRICS.md — canonical observability surface",

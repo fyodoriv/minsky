@@ -14,7 +14,7 @@
 // Forsgren-Humble-Kim 2018 (DORA deployment-frequency SLI).
 
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -23,9 +23,12 @@ const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const BIN_MINSKY = join(REPO_ROOT, "bin", "minsky");
 const SCRIPT = join(REPO_ROOT, "scripts", "throughput-benchmark.mjs");
 const FIXTURES = join(REPO_ROOT, "test-fixtures", "throughput");
+const BENCHMARK_EXEC_TIMEOUT_MS = 120_000;
+const BENCHMARK_TEST_TIMEOUT_MS = BENCHMARK_EXEC_TIMEOUT_MS + 10_000;
 
 let fleet: string;
 let scorecardPath: string;
+let configPath: string;
 
 beforeAll(() => {
   fleet = mkdtempSync(join(tmpdir(), "minsky-throughput-"));
@@ -37,6 +40,8 @@ beforeAll(() => {
     cpSync(join(FIXTURES, host), join(fleet, host), { recursive: true });
   }
   scorecardPath = join(fleet, "scorecard.json");
+  configPath = join(fleet, "config.json");
+  writeFileSync(configPath, JSON.stringify({ cloud_agent: "claude", local_llm_enabled: false }));
 });
 
 afterAll(() => {
@@ -44,60 +49,76 @@ afterAll(() => {
 });
 
 describe("throughput-benchmark — scorecard contract", () => {
-  it("writes the three falsifiable rows for the full fixture fleet", () => {
-    const out = execFileSync(
-      "node",
-      [
-        SCRIPT,
-        `--hosts-dir`,
-        fleet,
-        `--fixture-hosts=5`,
-        `--duration=24h`,
-        `--scorecard`,
-        scorecardPath,
-        `--json`,
-      ],
-      { encoding: "utf8", timeout: 120_000 },
-    );
-    const report = JSON.parse(out);
-    expect(report.fixture_hosts).toBe(5);
-    expect(report.duration_seconds).toBe(86400);
+  it(
+    "writes the three falsifiable rows for the full fixture fleet",
+    () => {
+      const out = execFileSync(
+        "node",
+        [
+          SCRIPT,
+          `--hosts-dir`,
+          fleet,
+          `--fixture-hosts=5`,
+          `--duration=24h`,
+          `--scorecard`,
+          scorecardPath,
+          `--json`,
+        ],
+        {
+          encoding: "utf8",
+          env: { ...process.env, MINSKY_CONFIG: configPath },
+          timeout: BENCHMARK_EXEC_TIMEOUT_MS,
+        },
+      );
+      const report = JSON.parse(out);
+      expect(report.fixture_hosts).toBe(5);
+      expect(report.duration_seconds).toBe(86400);
 
-    const doc = JSON.parse(readFileSync(scorecardPath, "utf8"));
-    const values = doc.competitors["minsky-self"].values;
-    // The two task-named rows plus the iterations companion must exist and
-    // be well-typed + non-negative. We pin the CONTRACT (keys, types,
-    // sign), not the live values — the actual PRs/day depends on whether
-    // the host has a configured runner, which is an environment fact, not
-    // a benchmark-correctness fact.
-    expect(typeof values.minsky_throughput_prs_per_day).toBe("number");
-    expect(values.minsky_throughput_prs_per_day).toBeGreaterThanOrEqual(0);
-    expect(typeof values.minsky_draft_acceptance_rate).toBe("number");
-    expect(values.minsky_draft_acceptance_rate).toBeGreaterThanOrEqual(0);
-    expect(values.minsky_draft_acceptance_rate).toBeLessThanOrEqual(1);
-    expect(typeof values.minsky_throughput_iterations_per_day).toBe("number");
-    expect(typeof values.measured_at).toBe("string");
-  });
+      const doc = JSON.parse(readFileSync(scorecardPath, "utf8"));
+      const values = doc.competitors["minsky-self"].values;
+      // The two task-named rows plus the iterations companion must exist and
+      // be well-typed + non-negative. We pin the CONTRACT (keys, types,
+      // sign), not the live values — the actual PRs/day depends on whether
+      // the host has a configured runner, which is an environment fact, not
+      // a benchmark-correctness fact.
+      expect(typeof values.minsky_throughput_prs_per_day).toBe("number");
+      expect(values.minsky_throughput_prs_per_day).toBeGreaterThanOrEqual(0);
+      expect(typeof values.minsky_draft_acceptance_rate).toBe("number");
+      expect(values.minsky_draft_acceptance_rate).toBeGreaterThanOrEqual(0);
+      expect(values.minsky_draft_acceptance_rate).toBeLessThanOrEqual(1);
+      expect(typeof values.minsky_throughput_iterations_per_day).toBe("number");
+      expect(typeof values.measured_at).toBe("string");
+    },
+    BENCHMARK_TEST_TIMEOUT_MS,
+  );
 
-  it("honours --fixture-hosts=3 (walks a subset of the fleet)", () => {
-    const out = execFileSync(
-      "node",
-      [
-        SCRIPT,
-        `--hosts-dir`,
-        fleet,
-        `--fixture-hosts=3`,
-        `--duration=90m`,
-        `--json`,
-        `--scorecard`,
-        scorecardPath,
-      ],
-      { encoding: "utf8", timeout: 120_000 },
-    );
-    const report = JSON.parse(out);
-    expect(report.fixture_hosts).toBe(3);
-    expect(report.duration_seconds).toBe(5400);
-  });
+  it(
+    "honours --fixture-hosts=3 (walks a subset of the fleet)",
+    () => {
+      const out = execFileSync(
+        "node",
+        [
+          SCRIPT,
+          `--hosts-dir`,
+          fleet,
+          `--fixture-hosts=3`,
+          `--duration=90m`,
+          `--json`,
+          `--scorecard`,
+          scorecardPath,
+        ],
+        {
+          encoding: "utf8",
+          env: { ...process.env, MINSKY_CONFIG: configPath },
+          timeout: BENCHMARK_EXEC_TIMEOUT_MS,
+        },
+      );
+      const report = JSON.parse(out);
+      expect(report.fixture_hosts).toBe(3);
+      expect(report.duration_seconds).toBe(5400);
+    },
+    BENCHMARK_TEST_TIMEOUT_MS,
+  );
 });
 
 describe("throughput-benchmark — CLI surface", () => {
@@ -110,35 +131,44 @@ describe("throughput-benchmark — CLI surface", () => {
     expect(out.toLowerCase()).toContain("usage");
   });
 
-  it("`bin/minsky benchmark --throughput` routes to the throughput runner", () => {
-    const out = execFileSync(
-      "bash",
-      [
-        BIN_MINSKY,
-        "benchmark",
-        "--throughput",
-        "--hosts-dir",
-        fleet,
-        "--fixture-hosts=2",
-        "--json",
-        "--scorecard",
-        scorecardPath,
-      ],
-      { encoding: "utf8", timeout: 120_000 },
-    );
-    const report = JSON.parse(out);
-    // The throughput runner emits `fixture_hosts`; the plain benchmark
-    // runner emits `iterations`. Asserting the former proves the
-    // `--throughput` flag routed correctly.
-    expect(report.fixture_hosts).toBe(2);
-    expect(report).not.toHaveProperty("pass_rate");
-  });
+  it(
+    "`bin/minsky benchmark --throughput` routes to the throughput runner",
+    () => {
+      const out = execFileSync(
+        "bash",
+        [
+          BIN_MINSKY,
+          "benchmark",
+          "--throughput",
+          "--hosts-dir",
+          fleet,
+          "--fixture-hosts=2",
+          "--json",
+          "--scorecard",
+          scorecardPath,
+        ],
+        {
+          encoding: "utf8",
+          env: { ...process.env, MINSKY_CONFIG: configPath },
+          timeout: BENCHMARK_EXEC_TIMEOUT_MS,
+        },
+      );
+      const report = JSON.parse(out);
+      // The throughput runner emits `fixture_hosts`; the plain benchmark
+      // runner emits `iterations`. Asserting the former proves the
+      // `--throughput` flag routed correctly.
+      expect(report.fixture_hosts).toBe(2);
+      expect(report).not.toHaveProperty("pass_rate");
+    },
+    BENCHMARK_TEST_TIMEOUT_MS,
+  );
 
   it("rejects an empty fleet with exit 2 and an actionable message", () => {
     const empty = mkdtempSync(join(tmpdir(), "minsky-throughput-empty-"));
     try {
       execFileSync("node", [SCRIPT, `--hosts-dir`, empty, `--json`], {
         encoding: "utf8",
+        env: { ...process.env, MINSKY_CONFIG: configPath },
         timeout: 30_000,
       });
       throw new Error("expected non-zero exit for an empty fleet");
@@ -155,6 +185,7 @@ describe("throughput-benchmark — CLI surface", () => {
     try {
       execFileSync("node", [SCRIPT, `--hosts-dir`, fleet, `--duration=soon`, `--json`], {
         encoding: "utf8",
+        env: { ...process.env, MINSKY_CONFIG: configPath },
         timeout: 30_000,
       });
       throw new Error("expected non-zero exit for a malformed duration");

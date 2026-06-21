@@ -78,6 +78,40 @@ export function mapSnapshotToObservations({ snapshot, metricIds, timestampMs, so
 }
 
 /**
+ * Parse a previously-rendered `METRICS.md` document and return the raw
+ * `**Value:** …` line text (with the leading marker stripped) for every
+ * metric section. Stub sections are included verbatim — the consumer
+ * (`buildMetricsMd`) filters them via `isCarryForwardCandidate`.
+ *
+ * The parser mirrors `check-milestone-alignment.mjs:parseMetricsMd` so
+ * the carry-forward render and the alignment gate agree on what counts
+ * as a "value line" for a given metric id. Pure — same input, same
+ * output (rule #10). The on-disk read happens in the CLI binding below.
+ *
+ * @param {string} content
+ * @returns {Record<string, string>}
+ */
+export function extractPriorRawValues(content) {
+  /** @type {Record<string, string>} */
+  const values = {};
+  if (typeof content !== "string" || content.length === 0) return values;
+  // First chunk is the preamble — every subsequent chunk starts with the
+  // section heading body (the leading `## ` was the split delimiter).
+  const sections = content.split(/^## /m).slice(1);
+  for (const section of sections) {
+    const firstLine = section.split("\n", 1)[0] ?? "";
+    const idMatch = firstLine.match(/^([a-z0-9-]+)\b/);
+    if (!idMatch?.[1]) continue;
+    const id = idMatch[1];
+    const valueMatch = section.match(/\*\*Value:\*\*\s*(.+?)(?:\n|$)/);
+    const rawValue = valueMatch?.[1]?.trim();
+    if (rawValue === undefined || rawValue.length === 0) continue;
+    values[id] = rawValue;
+  }
+  return values;
+}
+
+/**
  * Pure orchestrator: project the snapshot into observations, then build
  * the markdown. Same input → same output (rule #10).
  *
@@ -92,6 +126,7 @@ export function mapSnapshotToObservations({ snapshot, metricIds, timestampMs, so
  *     id: string, label: string, rationale: string,
  *     milestone: string, blockedBy?: string, formula: string,
  *   }>,
+ *   priorRawValues?: Readonly<Record<string, string>>,
  * }} args
  * @returns {string}
  */
@@ -103,6 +138,7 @@ export function runMetricsRender({
   nowMs,
   stubFollowUp,
   proposedMetrics,
+  priorRawValues,
 }) {
   const metricIds = metrics.map((m) => m.id);
   const observations =
@@ -118,6 +154,7 @@ export function runMetricsRender({
   const input = { metrics, observations, nowMs };
   if (stubFollowUp !== undefined) input.stubFollowUp = stubFollowUp;
   if (proposedMetrics !== undefined) input.proposedMetrics = proposedMetrics;
+  if (priorRawValues !== undefined) input.priorRawValues = priorRawValues;
   return buildMetricsMd(input);
 }
 
@@ -213,6 +250,21 @@ async function main() {
     readFile: (path) => fsReadFile(path, "utf8"),
   });
 
+  // Read the existing METRICS.md so a regen that produces only stubs for
+  // SUCCESS_METRICS ids (e.g. the daemon's daily snapshot uses a
+  // non-`SUCCESS_METRICS`-aligned id namespace) doesn't overwrite real
+  // committed values — that downgrade flips the pre-push milestone-
+  // alignment gate red and wedges every push. Graceful-degrade on
+  // ENOENT (genesis case: no prior file → no carry-forward).
+  /** @type {Record<string, string>} */
+  let priorRawValues = {};
+  try {
+    const priorContent = await fsReadFile(outputPath, "utf8");
+    priorRawValues = extractPriorRawValues(priorContent);
+  } catch (err) {
+    if (!isEnoent(err)) throw err;
+  }
+
   const markdown = runMetricsRender({
     metrics: SUCCESS_METRICS,
     snapshot,
@@ -220,11 +272,43 @@ async function main() {
     snapshotSource: `.minsky/metric-snapshots/${date}.json`,
     nowMs: Date.now(),
     proposedMetrics: PROPOSED_METRICS,
+    priorRawValues,
   });
 
   await fsWriteFile(outputPath, markdown);
+
+  // Run-relative freshness marker (committed). The gate prefers the live
+  // `.minsky/runs/` last-run end, but a fresh CI checkout has no `.minsky/`
+  // (gitignored), so it falls back to this tracked timestamp — the run the
+  // committed METRICS.md reflects. Minsky is not always-on (operator
+  // directive 2026-06-19); an idle calendar gap never marks metrics stale.
+  const markerMs = dateToMidnightUtcMs(date);
+  const marker = {
+    lastObservationMs: markerMs,
+    iso: new Date(markerMs).toISOString(),
+    note: "Run-relative freshness marker. Staleness is measured against the last minsky run (.minsky/runs/), falling back to this committed timestamp on CI. Re-run `minsky metrics collect && minsky metrics render` after a run.",
+  };
+  await fsWriteFile(
+    resolvePath(rootDir, "docs/metrics-last-run.json"),
+    `${JSON.stringify(marker, null, 2)}\n`,
+  );
+
   process.stdout.write(`${outputPath}\n`);
   return 0;
+}
+
+/**
+ * Discriminate ENOENT from other read errors. The CLI's prior-file load
+ * graceful-degrades on missing-file (genesis), but any other error
+ * (EACCES, EISDIR, …) propagates so the operator notices.
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isEnoent(err) {
+  if (!(err instanceof Error)) return false;
+  const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+  return typeof code === "string" && code === "ENOENT";
 }
 
 const invokedDirectly =

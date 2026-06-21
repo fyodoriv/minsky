@@ -432,7 +432,7 @@ export function decideAgentForRole(role, cfg) {
   }
   return {
     agent: firstNonEmpty(cfg.cloudAgent) ?? "claude",
-    model: pin ?? firstNonEmpty(cfg.cloudModel) ?? "claude-opus-4-7-max",
+    model: pin ?? firstNonEmpty(cfg.cloudModel) ?? "claude-sonnet-4-6",
     role,
   };
 }

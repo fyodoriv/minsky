@@ -1989,6 +1989,61 @@ export function orchestratorDetachedWorkerFinishInvariant(opts) {
 }
 
 /**
+ * @typedef {object} SpawnFailureClassActionableInvariantOpts
+ * @property {() => Promise<{ total_failures: number, top_class: string | null, classes: Record<string, number> }>} runClassifier - runs classify-spawn-failures.py and returns parsed JSON
+ * @property {number} [minFailures] - only fire when total_failures meets this threshold (default 1)
+ */
+
+/**
+ * Observability invariant: the dominant spawn-failure class in the last 48h is
+ * actionable (non-null `top_class`). When spawn failures accumulate without any
+ * diagnosis the MAPE-K loop has no fix target — every failure is a diagnostic
+ * dead-end. This invariant surfaces the dominant class so the operator (or a
+ * downstream auto-task) can act on the root cause.
+ *
+ * Strategy seam: `runClassifier` is injected so tests drive the decision
+ * function with synthetic results; production calls
+ * `classify-spawn-failures.py --window=48h --json`.
+ *
+ * Anchor: Beyer et al., *Site Reliability Engineering*, O'Reilly 2016, Ch. 6
+ * "Monitoring Distributed Systems" — "If you can't observe it, you can't fix
+ * it; alerts without context generate fatigue, not fixes."
+ *
+ * @param {SpawnFailureClassActionableInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function spawnFailureClassActionableInvariant(opts) {
+  const { runClassifier, minFailures = 1 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const id = "spawn-failure-class-actionable";
+    let result;
+    try {
+      result = await runClassifier();
+    } catch {
+      // rule-6: classifier unavailable ⇒ no signal ⇒ vacuous pass
+      return { id, ok: true };
+    }
+    if (result.total_failures < minFailures || result.top_class === null) {
+      return { id, ok: true };
+    }
+    const topCount = result.classes[result.top_class] ?? 0;
+    const pct =
+      result.total_failures > 0 ? Math.round((100 * topCount) / result.total_failures) : 0;
+    return {
+      id,
+      ok: false,
+      evidence: `${result.total_failures} spawn failure(s) in last 48h; dominant class: "${result.top_class}" (${topCount}/${result.total_failures} = ${pct}%). Full breakdown: ${JSON.stringify(result.classes)}.`,
+      suggestedTaskTitle: `spawn failures: dominant class "${result.top_class}" (${topCount}/${result.total_failures} in 48h)`,
+      suggestedFix: `Run \`python3 scripts/classify-spawn-failures.py --window=48h\` to see the full breakdown. Fix the root cause for "${result.top_class}": ModuleNotFoundError → missing Python dep; "command not found" → missing binary; "Killed"/"signal 15" → OOM/watchdog timeout; "ENOENT" → missing file or PATH misconfiguration; "Not logged in" → CLAUDE_CODE_OAUTH_TOKEN not exported. After fixing, run \`ls -t .minsky/failures/ | head -3\` to confirm new captures carry the expected class.`,
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "spawn-failure-class-actionable";
+  return fn;
+}
+
+/**
  * Production wiring — the invariants the supervisor probes at start-up.
  * Each invariant closes over its production data source; tests bypass
  * this by calling {@link runInvariants} directly with synthetic
@@ -2313,6 +2368,16 @@ export function defaultInvariants() {
     }),
     orchestratorDetachedWorkerFinishInvariant({
       probe: () => probeDetachedWorkers(repoRoot),
+    }),
+    spawnFailureClassActionableInvariant({
+      runClassifier: async () => {
+        const scriptPath = resolve(repoRoot, "scripts/classify-spawn-failures.py");
+        const { stdout } = await execFileAsync("python3", [scriptPath, "--window=48h", "--json"], {
+          timeout: 10_000,
+          cwd: repoRoot,
+        });
+        return JSON.parse(stdout);
+      },
     }),
   ];
 }

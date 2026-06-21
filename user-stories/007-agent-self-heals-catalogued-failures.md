@@ -450,9 +450,54 @@ Per AGENTS.md rule #3 ("Acceptance-scenario gate"): every test file references o
 - **And** total elapsed wall-clock time (start of detect → end of verify) is `< 300_000ms`
 - **And** the fixture host is cleaned up on test teardown (no leaked files in `/tmp/`)
 
+### Scenario: heal-dispatch heals a stale pid file at the pre-walk boundary and writes the ledger row
+
+- **Given** a fixture host dir whose `.minsky/daemon.pid` contains dead pid `99999` (and `MINSKY_STATE_DIR` points at the fixture's `.minsky/`)
+- **When** `node scripts/heal-dispatch.mjs --host <fixture> --boundary pre-walk` runs
+- **Then** the process exits `0`
+- **And** the pid file is removed
+- **And** `<fixture>/.minsky/heal-events.jsonl` contains a row with `failure_class: "stale-pid"`, `outcome: "healed"`, and `duration_ms < 300_000`
+
+### Scenario: heal-dispatch is a no-op on a healthy host
+
+- **Given** a fixture host dir with no injected failure (no pid file, parseable `state.json` and `config.json`)
+- **When** `node scripts/heal-dispatch.mjs --host <fixture> --boundary pre-walk` runs
+- **Then** the process exits `0`
+- **And** no `heal-events.jsonl` ledger row is written (no heal fired)
+
+### Scenario: heal-dispatch never propagates a failure to the caller (rule #6)
+
+- **Given** any host dir — including one where a heal's `apply()` throws mid-cycle
+- **When** the dispatcher runs at either boundary (`pre-walk` or `pre-spawn`)
+- **Then** the process still exits `0` (the dispatcher must never make the loop worse than no dispatcher)
+- **And** the error is reported on stderr, one line per heal
+
+### Scenario: daily-metrics-regen publishes a PR when docs/METRICS.md is stale on main
+
+- **Given** a minsky host whose committed `docs/METRICS.md` on `origin/main` references yesterday's `.minsky/metric-snapshots/<date>.json`
+- **And** no `chore/metrics-daily-regen-<today>` branch exists on `origin`
+- **When** `scripts/daily-metrics-regen.mjs` runs (fired by `com.minsky.daily-metrics` / `minsky-daily-metrics.timer`)
+- **Then** it runs `collect-metrics` + `metrics-render --output <tmpfile>` without touching the shared working tree
+- **And** it creates a plumbing commit on top of `origin/main` containing ONLY `docs/METRICS.md`
+- **And** it pushes `refs/heads/chore/metrics-daily-regen-<today>` and opens a PR via `gh pr create`
+- **And** the PR body carries `## Why needed`, `## Hypothesis self-grade` (Predicted/Observed/Match/Lesson with the captured `check-metric-freshness` output as Observed), the `<!-- security: not-applicable — … -->` opt-out, and `## Vision trace`
+
+### Scenario: daily-metrics-regen is a no-op when main already carries today's render
+
+- **Given** `origin/main`'s `docs/METRICS.md` already references `.minsky/metric-snapshots/<today>.json`
+- **When** `scripts/daily-metrics-regen.mjs` runs
+- **Then** it exits 0 without collecting, rendering, branching, or calling `gh`
+
+### Scenario: daily-metrics-regen is a no-op when the regen branch already exists or the render is unchanged
+
+- **Given** `chore/metrics-daily-regen-<today>` already exists on `origin` (an earlier fire this UTC date published it)
+- **When** `scripts/daily-metrics-regen.mjs` runs
+- **Then** it exits 0 without pushing a second branch or opening a duplicate PR
+- **And** when the freshly rendered markdown is byte-identical to `origin/main`'s `docs/METRICS.md`, it exits 0 without committing
+
 ## Status
 
-- **Phase**: Phase 1 of 2. Ships 4 automated heals + MTTR ledger + reporter + chaos test.
+- **Phase**: Phase 1 of 2 shipped 4 automated heals + MTTR ledger + reporter + chaos test. Phase 2 shipped the remaining 7 helpers (11 total, chaos-validated) and `scripts/heal-dispatch.mjs` — the production binding that fires the unambiguous-seam subset at the `pre-walk` boundary of `bin/minsky-run.sh --loop` and writes the live ledger.
 - **Phase 2 follow-up**: `promote-remaining-heal-recipes` (in TASKS.md) carries the ≥10-automated-heals target.
 - **Plan**: `docs/plans/agents-can-self-heal-minsky-m1-13.md` (reviewer-approved round 2).
 
