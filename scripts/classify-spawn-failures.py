@@ -88,6 +88,25 @@ def classify_failures(failures_dir: Path, window_seconds: float) -> dict:
     }
 
 
+def classify_file(file_path: Path) -> dict:
+    """Classify a single file and return {class, confidence}.
+
+    Used for inline dispatch in bin/minsky-run.sh immediately after a failed
+    spawn: pass the combined stdout+stderr log to get a class + confidence so
+    the caller can emit a heal-events row and execute the class-specific remedy
+    within the same iteration — no offline batch run required.
+    """
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return {"class": "unknown", "confidence": "low", "error": str(exc)}
+    cls = classify_text(text)
+    return {
+        "class": cls,
+        "confidence": "high" if cls != "unknown" else "low",
+    }
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="classify-spawn-failures.py",
@@ -100,7 +119,23 @@ def main(argv: Optional[list[str]] = None) -> int:
         default=None,
         help="Path to failures dir (default: $MINSKY_HOST_ROOT/failures or .minsky/failures)",
     )
+    parser.add_argument(
+        "--file",
+        default=None,
+        help="Classify a single file (e.g. a combined stdout+stderr log); emits {class, confidence} JSON",
+    )
     args = parser.parse_args(argv)
+
+    # Single-file mode: classify one log file and emit {class, confidence}.
+    # Used by bin/minsky-run.sh inline after a non-zero spawn exit so the
+    # heal-dispatch block can act on the failure class without a batch run.
+    if args.file:
+        result = classify_file(Path(args.file))
+        if args.json:
+            print(json.dumps(result))
+        else:
+            print(f"Class: {result['class']} (confidence: {result['confidence']})")
+        return 1 if "error" in result else 0
 
     try:
         window_seconds = _parse_window(args.window)

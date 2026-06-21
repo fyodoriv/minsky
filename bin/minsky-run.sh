@@ -1158,6 +1158,21 @@ EOF
   # would normally yell about unquoted expansion; the `# shellcheck`
   # pragmas below opt out for the load-bearing word-splitting that the
   # flag-list pattern needs.
+  # Source class-specific spawn flags persisted by prior heal-dispatch runs.
+  # Written by the heal-dispatch block below on spawn failure; applied here
+  # at the next spawn start so the remedy (e.g. MINSKY_SPAWN_SERIALIZE=1)
+  # is active before the new spawn. Best-effort: a missing or malformed file
+  # never aborts the iteration (rule #6 — let-it-crash at the right boundary).
+  local _spawn_flags_env="$host/.minsky/spawn-flags.env"
+  if [[ -f "$_spawn_flags_env" ]]; then
+    # set -a exports all vars defined while set -a is active so the spawned
+    # subprocess inherits them without explicit `export` in the env file.
+    set -a
+    # shellcheck disable=SC1090
+    source "$_spawn_flags_env" 2>/dev/null || true
+    set +a
+  fi
+
   local spawn_wrapper="$script_dir/../scripts/spawn_with_watchdog.py"
   # Resolve the python interpreter for the spawn shim — prefers
   # ~/.minsky/openhands-venv/bin/python over bare python3. See
@@ -1489,6 +1504,76 @@ print(load_host_config(Path('$host')).default_branch)
       --pr-url "${pr_url:-}" \
       --notes "${notes:-}" \
       --gh-host "${gh_host:-}" >/dev/null 2>&1 || true
+  fi
+
+  # Heal dispatch (spawn-failure-class-heal-dispatch): classify the spawn's
+  # combined stdout+stderr, emit a heal-events JSONL row, and execute the
+  # class-specific remedy so known failure modes self-correct within the next
+  # spawn cycle — no operator inspection gap between failure and remediation.
+  # Best-effort throughout (rule #6 — every || true swallows non-zero so the
+  # iteration loop survives even when jq / python3 / disk writes fail).
+  # Anchor: Nygard, *Release It!* (2018), Ch. 5 — a system that cannot
+  # distinguish failure classes cannot respond differentially.
+  if [[ "$verdict" == "spawn-failed" ]]; then
+    local _heal_dir="$host/.minsky"
+    local _heal_events="$_heal_dir/heal-events.jsonl"
+    local _failure_class="unknown"
+    local _classify_py="$script_dir/../scripts/classify-spawn-failures.py"
+
+    mkdir -p "$_heal_dir" 2>/dev/null || true
+
+    # Classify: read the combined spawn output (stdout+stderr both captured
+    # into $stdout_log via >"$stdout_log" 2>&1) to determine the failure
+    # class. Falls back to "unknown" on any error (missing script, Python
+    # failure, jq absent).
+    if [[ -f "$stdout_log" ]] && [[ -f "$_classify_py" ]]; then
+      local _classify_out
+      _classify_out="$(python3 "$_classify_py" --file "$stdout_log" --json 2>/dev/null || true)"
+      if [[ -n "$_classify_out" ]]; then
+        _failure_class="$(printf '%s' "$_classify_out" | jq -r '.class // "unknown"' 2>/dev/null || echo "unknown")"
+      fi
+    fi
+
+    # Emit heal-events JSONL row — the durable record the Measurement command
+    # queries: `rg -c '"failure_class"' .minsky/heal-events.jsonl`.
+    if command -v jq >/dev/null 2>&1; then
+      jq -n \
+        --arg cls "$_failure_class" \
+        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{event:"spawn-failed",failure_class:$cls,ts:$ts}' \
+        >> "$_heal_events" 2>/dev/null || true
+    fi
+
+    # Dispatch class-specific remediations. Each remedy writes a persistent
+    # signal that the NEXT spawn picks up (via spawn-flags.env sourcing above
+    # or via dynamic_timeout.py reading watchdog-kills).
+    local _spawn_flags_file="$_heal_dir/spawn-flags.env"
+    case "$_failure_class" in
+      "Not logged in")
+        # Auth/session-file contention: serialize spawns so only one claude
+        # worker holds ~/.claude at a time.
+        echo "MINSKY_SPAWN_SERIALIZE=1" >> "$_spawn_flags_file" 2>/dev/null || true
+        ;;
+      "Killed"|"signal 15")
+        # Watchdog kill: increment the persistent kill counter so
+        # dynamic_timeout.py can widen the budget on the next iteration.
+        local _wk_file="$_heal_dir/watchdog-kills"
+        local _wk_count
+        _wk_count="$(cat "$_wk_file" 2>/dev/null || echo "0")"
+        printf '%d\n' "$(( _wk_count + 1 ))" > "$_wk_file" 2>/dev/null || true
+        ;;
+      "ModuleNotFoundError")
+        # Broken openhands venv: skip the importability preflight on the
+        # next spawn so the error is surfaced at the actual spawn site (not
+        # the preflight), and only when the configured backend is claude
+        # (openhands preflight is irrelevant for claude-backend spawns).
+        local _cloud_agent_val
+        _cloud_agent_val="$(jq -r '.cloud_agent // "openhands"' "$CONFIG_FILE" 2>/dev/null || echo "openhands")"
+        if [[ "$_cloud_agent_val" == "claude" ]]; then
+          echo "openhands_preflight_skip=1" >> "$_spawn_flags_file" 2>/dev/null || true
+        fi
+        ;;
+    esac
   fi
 
   local failure_log_path=""
