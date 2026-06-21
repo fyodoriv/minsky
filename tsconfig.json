@@ -14,6 +14,7 @@
     { "path": "./novel/adapters/types" },
     { "path": "./novel/claude-handoff-spec" },
     { "path": "./novel/competitive-benchmark" },
+    { "path": "./novel/cross-repo-runner" },
     { "path": "./novel/dashboard-web" },
     { "path": "./novel/experiment-record" },
     { "path": "./novel/mape-k-loop" },
