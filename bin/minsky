@@ -2890,6 +2890,11 @@ EOF
     case "${2:-}" in
       collect) node "$_met_repo/scripts/collect-metrics.mjs" "${@:3}" ;;
       render)  node "$_met_repo/scripts/metrics-render.mjs" "${@:3}" ;;
+      refresh)
+        # Regenerate heal-class coverage matrix and print coverage JSON.
+        node "$_met_repo/scripts/generate-heal-coverage-matrix.mjs" --write-md "${@:3}"
+        node "$_met_repo/scripts/generate-heal-coverage-matrix.mjs" --json "${@:3}"
+        ;;
       ""|show)
         # `minsky metrics` with no verb = show current METRICS.md
         if [ -f "$_met_repo/docs/METRICS.md" ]; then
@@ -2906,6 +2911,7 @@ minsky metrics [verb] — success-metrics ops
   (no verb)  — show current docs/METRICS.md (default)
   collect    — collect current metric values (was: pnpm metrics:collect)
   render     — regenerate docs/METRICS.md (was: pnpm metrics:render)
+  refresh    — regenerate heal-class coverage matrix (was: pnpm minsky:metrics-refresh)
 EOF
         ;;
       *) echo "minsky metrics: unknown verb '$2'. See: minsky metrics --help" >&2; exit 2 ;;

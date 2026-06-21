@@ -512,6 +512,17 @@ export const PROPOSED_METRICS: readonly ProposedMetric[] = [
       "node scripts/heal-mttr-report.mjs --window=30d --json ⟨TBD-AFTER: ≥1 heal fires in production⟩",
   },
   {
+    id: "heal-class-coverage-pct",
+    label:
+      "Heal-class catalog coverage — % of observed spawn-failure classes with a dispatch handler",
+    rationale:
+      "MAPE-K's Analyze step matches observed symptoms to known healing policies; an unmatched failure class has no policy and falls through to operator escalation. `scripts/generate-heal-coverage-matrix.mjs` ships the collector that joins observed classes against `parseHealIds`; this entry stays in PROPOSED until the daemon's daily snapshot ingests its output into `.minsky/metric-snapshots` so the dashboard tile renders a live observation.",
+    milestone: "M1.13",
+    blockedBy: "heal-class-catalog-coverage-matrix",
+    formula:
+      "node scripts/generate-heal-coverage-matrix.mjs --json | jq '.coverage_pct' ⟨TBD-AFTER: daemon ingests the matrix output into .minsky/metric-snapshots⟩",
+  },
+  {
     id: "swe-bench-resolve-rate",
     label: "SWE-bench Verified resolve rate, Minsky vs. competitors",
     rationale:
