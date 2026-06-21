@@ -9,7 +9,7 @@
 
 import { execSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const TASK_HEADER_RE = /^- \[ \] `([a-z0-9][a-z0-9-]*)` /;
@@ -39,9 +39,15 @@ export function parseStalePatchCandidates(tasksContent) {
 
   for (const line of lines) {
     const h = TASK_HEADER_RE.exec(line);
-    if (h) { flush(); id = h[1] ?? null; continue; }
+    if (h) {
+      flush();
+      id = h[1] ?? null;
+      continue;
+    }
     const b = BLOCKED_RE.exec(line);
-    if (b && id) { blocked = b[1] ?? null; }
+    if (b && id) {
+      blocked = b[1] ?? null;
+    }
   }
   flush();
   return results;
@@ -50,7 +56,12 @@ export function parseStalePatchCandidates(tasksContent) {
 /** @param {string} taskId @param {string} repoRoot @returns {string[]} */
 export function findCitingFiles(taskId, repoRoot) {
   const dirs = ["tests", "scripts", "user-stories", "novel"].filter((d) => {
-    try { statSync(resolve(repoRoot, d)); return true; } catch { return false; }
+    try {
+      statSync(resolve(repoRoot, d));
+      return true;
+    } catch {
+      return false;
+    }
   });
   if (dirs.length === 0) return [];
   try {
@@ -81,7 +92,7 @@ function main() {
   }));
 
   if (dryRun) {
-    process.stdout.write(JSON.stringify({ would_patch: wouldPatch }, null, 2) + "\n");
+    process.stdout.write(`${JSON.stringify({ would_patch: wouldPatch }, null, 2)}\n`);
     process.exit(0);
   }
   process.stderr.write("Live mode not implemented in slice-1; pass --dry-run.\n");
@@ -89,6 +100,5 @@ function main() {
 }
 
 const invokedAsScript =
-  process.argv[1] !== undefined &&
-  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedAsScript) main();

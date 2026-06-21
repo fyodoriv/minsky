@@ -10,8 +10,8 @@
 
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { describe, expect, test, vi, afterEach } from "vitest";
-import { parseStalePatchCandidates, findCitingFiles } from "./sweep-stale-task-blocks.mjs";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { findCitingFiles, parseStalePatchCandidates } from "./sweep-stale-task-blocks.mjs";
 
 const STALE_BLOCK = [
   "- [ ] `my-task-id` — some task",
