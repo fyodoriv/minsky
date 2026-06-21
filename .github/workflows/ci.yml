@@ -1978,6 +1978,23 @@ jobs:
       - name: unit tests
         run: pnpm exec vitest run scripts/check-bot-commit-hook-bypass.test.mjs
 
+  no-delivered-retained-blocks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-delivered-retained-blocks lint
+        run: node scripts/check-no-delivered-retained-blocks.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-no-delivered-retained-blocks.test.mjs
+
   pre-push-hook-stays-fast:
     runs-on: ubuntu-latest
     steps:
@@ -2434,6 +2451,7 @@ jobs:
       - no-hardcoded-timeouts
       - no-no-verify-bypass
       - bot-commit-hook-bypass
+      - no-delivered-retained-blocks
       - pre-push-hook-stays-fast
       - launchd-safe-paths
       - typecheck
@@ -2525,6 +2543,7 @@ jobs:
                    "${{ needs.no-hardcoded-timeouts.result }}" \
                    "${{ needs.no-no-verify-bypass.result }}" \
                    "${{ needs.bot-commit-hook-bypass.result }}" \
+                   "${{ needs.no-delivered-retained-blocks.result }}" \
                    "${{ needs.pre-push-hook-stays-fast.result }}" \
                    "${{ needs.launchd-safe-paths.result }}" \
                    "${{ needs.typecheck.result }}" \

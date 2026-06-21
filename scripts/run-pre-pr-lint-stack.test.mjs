@@ -123,6 +123,7 @@ describe("STACK_MANIFEST", () => {
         "markdownlint",
         "metrics-freshness",
         "milestone-alignment",
+        "no-delivered-retained-blocks",
         "no-hardcoded-timeouts",
         "no-hardcoded-user-paths",
         "no-no-verify-bypass",
