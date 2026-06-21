@@ -73,7 +73,7 @@ export const ALLOWED_PATHS = Object.freeze([
   {
     pattern: /^bin\/minsky$/,
     rationale:
-      "`install-daemon` subcommand. Operator-explicit by name — the operator must invoke `minsky install-daemon` themselves.",
+      "`install-daemon` and `enable-autostart` subcommands. Operator-explicit by name — the operator must invoke them.",
   },
   {
     pattern: /^distribution\/test-supervisor\.sh$/,
@@ -83,6 +83,11 @@ export const ALLOWED_PATHS = Object.freeze([
   {
     pattern: /^test\/integration\/setup-supervisor-opt-in\.test\.ts$/,
     rationale: "Assertion regexes for the WITH_SUPERVISOR gate, not actual command invocations.",
+  },
+  {
+    pattern: /^test\/integration\/enable-autostart\.test\.ts$/,
+    rationale:
+      "Assertion regexes pinning enable-autostart source shape, not actual command invocations.",
   },
   {
     pattern: /^scripts\/check-supervisor-explicit-start\.mjs$/,

@@ -412,6 +412,44 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
       "Saltzer & Schroeder 1975 (least common mechanism — uninstall is the inverse of install, must enumerate every install effect); user-stories § M1.12 (filed in this PR).",
     milestone: "M1.12",
   },
+  {
+    // Run-relative: minsky is NOT always-on (operator directive 2026-06-19 —
+    // it runs only during operator-started sessions). This windows the most
+    // recent 24h of *accumulated runtime* (runs newest→oldest, summing uptime
+    // to 24h, last run partial) rather than wall-clock 24h, so idle calendar
+    // gaps never distort it. Segmentable by host + version via the aggregator.
+    // Source: scripts/runs-aggregate.mjs over `.minsky/runs/*/run-summary.json`.
+    id: "runtime-accumulated-24h",
+    label: "Run health — last 24h of accumulated runtime",
+    formula:
+      "node scripts/runs-aggregate.mjs --window 24h (runs newest-oldest, sum totalUptimeSec to 24h; restarts + merged PRs over that window; --host / --version filters)",
+    unit: "summary (h runtime · runs · restarts · PRs)",
+    freshnessBudgetMs: 90 * DAY_MS,
+    goal: "≥1 run recorded per operator session; restarts low across the 24h-of-runtime window",
+    pivot:
+      "many restarts within a single 24h-of-runtime window → supervisor stability regressed; fix before adding features",
+    anchor:
+      "Avizienis, Laprie, Randell, Landwehr, IEEE TDSC 2004 — continuity/uptime is a measured dependability attribute, not a vibe.",
+    milestone: "M1.1",
+  },
+  {
+    // The single longest uninterrupted run. By design a record/max (it can
+    // only grow as longer sessions happen), so it opts out of the no-vanity
+    // guard via `monotonic: "ok"` (like extraction-count). Segmentable by
+    // host + version. Source: scripts/runs-aggregate.mjs --longest.
+    id: "longest-run",
+    label: "Longest uninterrupted minsky run",
+    formula:
+      "node scripts/runs-aggregate.mjs --longest (max longestUninterruptedSec across .minsky/runs/<id>/run-summary.json; --host / --version filters)",
+    unit: "s",
+    freshnessBudgetMs: 365 * DAY_MS,
+    monotonic: "ok",
+    goal: "longest uninterrupted span grows toward a full unattended 24h session",
+    pivot:
+      "longest run stays short despite long operator sessions → restarts dominate; fix the supervisor before scaling",
+    anchor: "Beyer et al., _SRE_ 2016, Ch. 4 — continuity as an SLI.",
+    milestone: "M1.1",
+  },
 ];
 
 /**
@@ -472,6 +510,17 @@ export const PROPOSED_METRICS: readonly ProposedMetric[] = [
     blockedBy: "promote-remaining-heal-recipes",
     formula:
       "node scripts/heal-mttr-report.mjs --window=30d --json ⟨TBD-AFTER: ≥1 heal fires in production⟩",
+  },
+  {
+    id: "heal-class-coverage-pct",
+    label:
+      "Heal-class catalog coverage — % of observed spawn-failure classes with a dispatch handler",
+    rationale:
+      "MAPE-K's Analyze step matches observed symptoms to known healing policies; an unmatched failure class has no policy and falls through to operator escalation. `scripts/generate-heal-coverage-matrix.mjs` ships the collector that joins observed classes against `parseHealIds`; this entry stays in PROPOSED until the daemon's daily snapshot ingests its output into `.minsky/metric-snapshots` so the dashboard tile renders a live observation.",
+    milestone: "M1.13",
+    blockedBy: "heal-class-catalog-coverage-matrix",
+    formula:
+      "node scripts/generate-heal-coverage-matrix.mjs --json | jq '.coverage_pct' ⟨TBD-AFTER: daemon ingests the matrix output into .minsky/metric-snapshots⟩",
   },
   {
     id: "swe-bench-resolve-rate",

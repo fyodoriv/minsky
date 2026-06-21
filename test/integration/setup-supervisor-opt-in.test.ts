@@ -36,25 +36,19 @@ describe("setup.sh: supervisor bootstrap is opt-in (--with-supervisor)", () => {
   });
 
   test("bootstrap loop is gated on WITH_SUPERVISOR=1 (dormant by default)", () => {
-    // The gate must short-circuit BEFORE the launchctl bootstrap loop
-    // runs. The `if [ "$WITH_SUPERVISOR" != "1" ]; then ... exit 0; fi`
-    // must appear above the Darwin/Linux case statements that load the
-    // units. Without this, a future refactor could move the bootstrap
-    // call outside the gate and silently re-enable auto-start.
+    // The gate must short-circuit BEFORE the Darwin/Linux case statements
+    // that load units. Darwin now delegates to `minsky enable-autostart`
+    // (which bootstraps com.minsky.* plists); Linux still uses systemctl.
     const src = readFileSync(SETUP_SH, "utf8");
     const gateIdx = src.indexOf('if [ "$WITH_SUPERVISOR" != "1" ]; then');
-    // Match the actual call (which on the bootstrap line lives inside
-    // `if launchctl bootstrap gui/"$(id -u)" "$f"; then`). The leading
-    // `if ` distinguishes the call from the docstring mentions in
-    // comments at the top of the file.
-    const bootstrapMatch = src.match(/if launchctl bootstrap gui\//);
+    const enableAutostartMatch = src.match(/"\$ROOT\/bin\/minsky" enable-autostart/);
     const systemctlEnableMatch = src.match(/^\s*systemctl --user enable --now/m);
     expect(gateIdx).toBeGreaterThan(-1);
-    expect(bootstrapMatch).not.toBeNull();
+    expect(enableAutostartMatch).not.toBeNull();
     expect(systemctlEnableMatch).not.toBeNull();
-    if (bootstrapMatch === null || bootstrapMatch.index === undefined) return;
+    if (enableAutostartMatch === null || enableAutostartMatch.index === undefined) return;
     if (systemctlEnableMatch === null || systemctlEnableMatch.index === undefined) return;
-    expect(bootstrapMatch.index).toBeGreaterThan(gateIdx);
+    expect(enableAutostartMatch.index).toBeGreaterThan(gateIdx);
     expect(systemctlEnableMatch.index).toBeGreaterThan(gateIdx);
   });
 

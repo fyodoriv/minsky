@@ -145,6 +145,26 @@ describe("checkMetricFreshness — failure paths", () => {
     expect(result.errors.some((e) => /stale/.test(e) && e.includes("loop-uptime"))).toBe(true);
   });
 
+  test("run-relative: nowMs=null → the same stale observation is NOT flagged (minsky not always-on)", () => {
+    const eightDaysAgo = new Date(NOW - 8 * DAY_MS).toISOString().replace(/\.\d{3}Z$/, "Z");
+    const md =
+      PREAMBLE +
+      section({ id: "loop-uptime", budget: "7d", updated: eightDaysAgo, value: "0.91 fraction" });
+    // null clock = no run history / no marker → staleness skipped, structural checks still run.
+    const result = checkMetricFreshness({ markdown: md, nowMs: null });
+    expect(result.ok).toBe(true);
+  });
+
+  test("run-relative: nowMs=null still flags a real value missing `_Updated:` (structural)", () => {
+    const md = PREAMBLE + section({ id: "loop-uptime", budget: "7d", value: "0.91 fraction" });
+    const result = checkMetricFreshness({ markdown: md, nowMs: null });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(
+      result.errors.some((e) => e.includes("loop-uptime") && e.includes("no `_Updated:")),
+    ).toBe(true);
+  });
+
   test("`Budget:` annotation missing entirely → fails (malformed)", () => {
     const md = [
       PREAMBLE,

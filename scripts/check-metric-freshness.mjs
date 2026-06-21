@@ -58,10 +58,48 @@
 // first month from legitimately-stale-but-known stubs, tighten the
 // scope to "non-stub sections only" rather than retiring the gate.
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import process from "node:process";
+import { latestRunEndMs, loadRunSummaries } from "./runs-aggregate.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+
+// Run-relative clock. Minsky is NOT always-on (operator directive 2026-06-19);
+// it runs only during operator-started sessions. So "stale" must mean "minsky
+// RAN since this observation and it wasn't re-collected" — NOT "wall-clock time
+// passed while minsky sat idle". Resolution order for the freshness clock:
+//   1. explicit --now (hermetic tests)
+//   2. the most recent real run end (`.minsky/runs/*/run-summary.json`)
+//   3. the committed marker `docs/metrics-last-run.json` (CI: no `.minsky/`)
+//   4. null → SKIP the age check entirely (structural checks still run). An
+//      idle machine with no run history never reports false staleness.
+/**
+ * @param {string} rootDir
+ * @returns {number | null}
+ */
+function readMarkerMs(rootDir) {
+  const file = join(rootDir, "docs", "metrics-last-run.json");
+  if (!existsSync(file)) return null;
+  try {
+    const ms = JSON.parse(readFileSync(file, "utf8")).lastObservationMs;
+    return Number.isFinite(ms) ? Number(ms) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {{ explicitNow: number | null, rootDir: string }} args
+ * @returns {number | null}
+ */
+function resolveRunRelativeNow({ explicitNow, rootDir }) {
+  if (explicitNow !== null && Number.isFinite(explicitNow)) return explicitNow;
+  const runEnd = latestRunEndMs(loadRunSummaries(rootDir));
+  if (runEnd !== null) return runEnd;
+  return readMarkerMs(rootDir);
+}
 
 // Heading: `## <id> — <label>` where id is kebab-case (matches
 // `generate-metrics-md.mjs`'s render). The em-dash is the section
@@ -88,7 +126,7 @@ const MONOTONIC_RE = /_monotonic:[ \t]*ok_/;
 /**
  * @typedef {object} CheckInput
  * @property {string} markdown   the full `METRICS.md` content
- * @property {number} nowMs      caller-supplied clock (pure)
+ * @property {number | null} nowMs  run-relative clock (pure); null = unknown run history → skip the age check
  * @property {readonly string[]} [expectedIds]  when supplied, the
  *   lint also verifies every id is rendered exactly once
  */
@@ -171,7 +209,7 @@ function parseBudget(numStr, unit) {
  * section passes; otherwise the human-readable error string.
  *
  * @param {ParsedSection} s
- * @param {number} nowMs
+ * @param {number | null} nowMs
  * @returns {string | null}
  */
 function checkSection(s, nowMs) {
@@ -185,6 +223,10 @@ function checkSection(s, nowMs) {
   if (s.updatedMs === null || Number.isNaN(s.updatedMs)) {
     return `section \`${s.id}\` carries a real value (\`${truncate(s.valueLine, 40)}\`) but no \`_Updated: <iso-utc>\` timestamp — the freshness lint cannot verify it`;
   }
+  // nowMs === null → run-relative clock is unknown (no run history, no marker):
+  // minsky is not always-on, so do NOT assert staleness. Structural checks
+  // above still apply; only the age comparison is skipped.
+  if (nowMs === null) return null;
   const ageMs = nowMs - s.updatedMs;
   if (ageMs > s.budgetMs) {
     const iso = new Date(s.updatedMs).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -384,14 +426,17 @@ async function main() {
   if (args.expected === null && args.expectedFromSuccessMetrics) {
     args.expected = await loadSuccessMetricIds();
   }
+  const nowMs = resolveRunRelativeNow({ explicitNow: args.now, rootDir: process.cwd() });
   /** @type {CheckInput} */
   const input =
-    args.expected !== null
-      ? { markdown, nowMs: args.now ?? Date.now(), expectedIds: args.expected }
-      : { markdown, nowMs: args.now ?? Date.now() };
+    args.expected !== null ? { markdown, nowMs, expectedIds: args.expected } : { markdown, nowMs };
   const result = checkMetricFreshness(input);
   if (result.ok) {
-    process.stdout.write(`metric-freshness ok: ${result.sections.length} section(s) verified.\n`);
+    const clock =
+      nowMs === null ? "run-relative: no run history → staleness skipped" : "run-relative";
+    process.stdout.write(
+      `metric-freshness ok: ${result.sections.length} section(s) verified (${clock}).\n`,
+    );
     return 0;
   }
   process.stderr.write("metric-freshness violation:\n");

@@ -1,4 +1,8 @@
 # shellcheck shell=bash
+# launchd inherits BASH_ENV/ENV from the GUI session; sandbox-exec profiles
+# (com.minsky.tick-loop.sb) deny ~/.config/dotfiles — unset before any bash
+# child or nested source, same as with-endpoint-path.sh.
+unset BASH_ENV ENV
 # <!-- scope: human-approved task runany-self-restart-bounded-timelimit — rule #1 dedup of the launchd PATH block for the task's supervising wrapper (Touches: distribution/launchd/**); operator 2026-05-16 directive -->
 # <!-- pattern: not-applicable — sourced PATH-resolution helper (no process, no pattern surface); the Supervisor restart pattern (Armstrong 2007) is declared at vision.md § "Pattern conformance index" for the supervisor unit-files this helper supports. -->
 # `lib-launchd-path.sh` — sourced helper: prepend operator-local node /
@@ -54,29 +58,69 @@ done
 for _opencode_dir in "${HOME}"/.opencode/bin "${HOME}"/.local/bin "${HOME}"/.npm-global/bin /opt/homebrew/bin /usr/local/bin; do
   [ -x "${_opencode_dir}/opencode" ] && PATH="${_opencode_dir}:${PATH}" && break
 done
-# uv-managed python (adhoc-signed, EPM-safe). Sandbox profile allows
-# ~/.local/share/uv. Never prepend /usr/bin/python3 — CyberArk EPM blocks
-# Apple's tool-shim-public (Description: python3, Publisher: Software Signing).
-for _uv_py in "${HOME}"/.local/share/uv/python/cpython-3.13*/bin/python3.13; do
-  if [ -x "$_uv_py" ] && "$_uv_py" -c '' >/dev/null 2>&1; then
-    PATH="$(dirname "$_uv_py"):${PATH}"
-    break
-  fi
-done
-# Homebrew bin before dotfiles shims so shims stay leftmost (they may exec brew).
-for _brew_bin in /usr/local/bin /opt/homebrew/bin; do
-  [ -d "${_brew_bin}" ] && PATH="${_brew_bin}:${PATH}"
-done
-if [ -d "${HOME}/.local/bin" ]; then
-  PATH="${HOME}/.local/bin:${PATH}"
-fi
 # dotfiles endpoint-security shims (jq, python3, curl, grep) — leftmost so
-# launchd loops never hit /usr/bin/{jq,python3} (CyberArk EPM / tool-shim-public).
+# launchd loops never hit /usr/bin/{jq,python3} or bare unsigned uv python
+# (CyberArk EPM / tool-shim-public / Publisher: N/A). Do NOT test-execute
+# ~/.local/share/uv/python/*/bin/python3.13 here — post-reboot unsigned uv
+# binaries trigger EPM before com.dotfiles.adhoc-sign-uv-pythons completes.
 for _dotfiles_bin in "${HOME}/apps/tooling/dotfiles/bin" "${HOME}/apps/dotfiles/bin"; do
   if [ -d "${_dotfiles_bin}" ]; then
     PATH="${_dotfiles_bin}:${PATH}"
     break
   fi
 done
+# Homebrew bin after dotfiles shims (shims stay leftmost; may exec brew).
+for _brew_bin in /usr/local/bin /opt/homebrew/bin; do
+  [ -d "${_brew_bin}" ] && PATH="${_brew_bin}:${PATH}"
+done
+if [ -d "${HOME}/.local/bin" ]; then
+  PATH="${HOME}/.local/bin:${PATH}"
+fi
+
+# Wait for login endpoint-bootstrap (closes post-reboot jq/python shim race).
+_endpoint_ready="${HOME}/.local/state/dotfiles/endpoint-ready"
+_wait=0
+while [ ! -f "${_endpoint_ready}" ] && [ "${_wait}" -lt 120 ]; do
+  sleep 1
+  _wait=$((_wait + 1))
+done
+if [ -f "${_endpoint_ready}" ]; then
+  export MINSKY_ENDPOINT_READY=1
+else
+  export MINSKY_ENDPOINT_READY=0
+fi
+
+# EPM-safe jq for supervised loops — never bare /usr/bin/jq.
+# Inline resolution only: tick-loop's sandbox profile allows dotfiles/bin
+# but denies dotfiles/lib, so do not source dotfiles-endpoint-paths.sh here.
+_minsky_jq_candidate_usable() {
+  local candidate="$1" target=""
+  [ -n "$candidate" ] || return 1
+  [ -e "$candidate" ] || return 1
+  [ -x "$candidate" ] || return 1
+  if [ -L "$candidate" ]; then
+    target="$(readlink "$candidate" 2>/dev/null || true)"
+    [ -n "$target" ] || return 1
+    case "$target" in
+      /*) ;;
+      *) target="$(cd "$(dirname "$candidate")" 2>/dev/null && pwd -P)/$target" ;;
+    esac
+    [ -x "$target" ] || return 1
+  fi
+  return 0
+}
+if [ -z "${MINSKY_JQ:-}" ]; then
+  for _jq_candidate in \
+    "${HOME}/apps/tooling/dotfiles/bin/jq" \
+    "${HOME}/apps/dotfiles/bin/jq" \
+    "${HOME}/.local/bin/jq" \
+    /opt/homebrew/bin/jq /usr/local/bin/jq; do
+    if _minsky_jq_candidate_usable "${_jq_candidate}"; then
+      export MINSKY_JQ="${_jq_candidate}"
+      break
+    fi
+  done
+fi
+unset -f _minsky_jq_candidate_usable
 export PATH
-unset _minsky_node_path_extras _fnm_dir _nvm_dir _asdf_dir _brew_prefix _claude_dir _gh_dir _opencode_dir _uv_py _dotfiles_bin _brew_bin
+unset _minsky_node_path_extras _fnm_dir _nvm_dir _asdf_dir _brew_prefix _claude_dir _gh_dir _opencode_dir _dotfiles_bin _brew_bin _endpoint_ready _wait _jq_candidate

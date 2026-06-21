@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "minsky/session-ledger-entry",
+  "title": "SessionLedgerEntry",
+  "description": "One JSONL line written by record_iteration() in bin/minsky-run.sh for each non-no-task iteration. Feeds scripts/compute-session-metrics.mjs (M1.5 + M1.7).",
+  "type": "object",
+  "required": ["session_id", "ts", "task_id", "verdict", "files_changed", "loc_delta"],
+  "additionalProperties": false,
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Unique run identifier ($MINSKY_RUN_ID when set, otherwise task_id). Groups multiple iterations of the same task."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC timestamp when this record was written."
+    },
+    "task_id": {
+      "type": "string",
+      "description": "The task identifier that was picked and iterated (matches experiment_id in the experiment-store record)."
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["planned", "spawn-failed", "shipped", "merged", "validated", "drained"],
+      "description": "Outcome of the iteration. Records with verdict=no-task are never written to the session ledger."
+    },
+    "files_changed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of files changed between HEAD~1 and HEAD in the host repo at record time. 0 when git diff is unavailable or the agent made no commits."
+    },
+    "loc_delta": {
+      "type": "integer",
+      "description": "Net lines-of-code delta (additions minus deletions) between HEAD~1 and HEAD. Negative values indicate net deletions. 0 when git diff is unavailable."
+    }
+  }
+}

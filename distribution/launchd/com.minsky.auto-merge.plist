@@ -78,6 +78,11 @@ Placeholders substituted by setup.sh via envsubst:
     <key>RunAtLoad</key>
     <true/>
 
+    <!-- Dormant by default (2026-06-17). Operator enables via
+         `minsky enable-autostart`. -->
+    <key>Disabled</key>
+    <true/>
+
     <!--
     Cycle cap: 25 min == local-gate-merge.mjs's VET_TIMEOUT_MS. Anything
     longer means launchd thinks the script wedged; SIGKILL it so the
