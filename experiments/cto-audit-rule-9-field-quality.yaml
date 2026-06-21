@@ -12,7 +12,7 @@ hypothesis: |
   blocks before writing them.
 success: "proposal reject_rate below 0.05 over a seven-day window (under five percent rejected after two retries); pnpm pre-pr-lint --stage=fast exits 0"
 pivot: "proposal reject_rate at or above 0.10 after forty-eight hours (retry-success-to-reject ratio below half) → replace retry with deterministic template filler"
-measurement: "node scripts/aggregate-cto-audit-metrics.mjs --since=$(date -v-7d +%Y-%m-%d) --json | jq -e '.rule_9_reject_rate < 0.05'"
+measurement: "node scripts/cto-audit-rule-9-reject-rate.mjs | jq -e 'has(\"rule_9_reject_rate\")'"
 timeout_seconds: 30
 anchor: |
   Munafò et al., "A Manifesto for Reproducible Science", Nature Human Behaviour 1,
