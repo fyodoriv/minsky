@@ -2376,3 +2376,191 @@ EOF
   run bash -c "printf '%s' \"\$1\" | grep -qE '^[[:space:]]*walk_hosts[[:space:]]*\$'" _ "$loop_block"
   [ "$status" -ne 0 ]
 }
+
+# --- CB: consecutive-backend-failure-circuit-breaker -------------------------
+# Pins: Nygard, Release It! 2nd ed., Ch. 5 (circuit-breaker state machine)
+
+@test "CB: spawn failure opens circuit after MINSKY_CB_K=1 (state written to circuit-breaker.json)" {
+  # After 1 failed spawn with K=1, cloud_agent.state must become "open" in
+  # .minsky/circuit-breaker.json. Pins the write path, threshold logic, and
+  # atomic tmp+rename semantics.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "agent failed" >&2
+exit 1
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host cb-open "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+export MINSKY_CB_K=1
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-cbopen.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  cb_json="$host/.minsky/circuit-breaker.json"
+  [ -f "$cb_json" ]
+  state="$(jq -r '.["pick-me-first"]["cloud_agent"].state' "$cb_json")"
+  [ "$state" = "open" ]
+  failures="$(jq -r '.["pick-me-first"]["cloud_agent"].consecutive_failures' "$cb_json")"
+  [ "$failures" -ge 1 ]
+}
+
+@test "CB: validated verdict resets consecutive_failures to 0 in circuit-breaker.json" {
+  # Pre-seed cloud_agent with 2 failures (not yet open with the default K=3).
+  # A successful spawn must reset consecutive_failures to 0 and state to "closed".
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Created PR: https://github.com/test/repo/pull/42"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host cb-reset "$(complete_task_block)")"
+  mkdir -p "$host/.minsky"
+  printf '{"pick-me-first":{"cloud_agent":{"consecutive_failures":2,"state":"closed"}}}\n' \
+    > "$host/.minsky/circuit-breaker.json"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-cbreset.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  cb_json="$host/.minsky/circuit-breaker.json"
+  [ -f "$cb_json" ]
+  state="$(jq -r '.["pick-me-first"]["cloud_agent"].state' "$cb_json")"
+  [ "$state" = "closed" ]
+  failures="$(jq -r '.["pick-me-first"]["cloud_agent"].consecutive_failures' "$cb_json")"
+  [ "$failures" -eq 0 ]
+}
+
+@test "CB: all-backends-open appends needs-human event to orchestrate.jsonl without spawning" {
+  # Pre-seed both cloud_agent and local_fallback as open for the task.
+  # The CB must detect no viable tier and append a needs-human event to
+  # .minsky/orchestrate.jsonl without invoking openhands at all.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  sentinel="$TMPDIR_TEST/openhands-invoked.txt"
+  cat > "$shim_dir/openhands" <<EOF
+#!/usr/bin/env bash
+echo "UNEXPECTED_SPAWN" > "$sentinel"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host cb-allopen "$(complete_task_block)")"
+  mkdir -p "$host/.minsky"
+  printf '{"pick-me-first":{"cloud_agent":{"consecutive_failures":3,"state":"open"},"local_fallback":{"consecutive_failures":3,"state":"open"}}}\n' \
+    > "$host/.minsky/circuit-breaker.json"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-cbhuman.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  [ ! -f "$sentinel" ]
+  orchestrate="$host/.minsky/orchestrate.jsonl"
+  [ -f "$orchestrate" ]
+  grep -q '"event":"needs-human"' "$orchestrate"
+  grep -q '"task_id":"pick-me-first"' "$orchestrate"
+}

@@ -597,6 +597,81 @@ check_restart_sentinel() {
   return 0
 }
 
+# --- Circuit Breaker (consecutive-backend-failure-circuit-breaker) -----------
+# Tracks consecutive no-progress/spawn-failed outcomes per {task_id, backend}.
+# When ≥MINSKY_CB_K failures accumulate, marks the circuit "open" and the
+# next spawn for that task uses the next tier in the priority order:
+#   cloud_agent → cloud_agent_premium → local_fallback → all-open (needs-human)
+# State persists in $host/.minsky/circuit-breaker.json via atomic tmp+rename.
+# Ref: Nygard, Release It! 2nd ed. (Pragmatic Bookshelf, 2018), Ch. 5.
+
+CB_K="${MINSKY_CB_K:-3}"
+
+cb_get_state() {
+  # Returns "open" or "closed" for {task_id, backend}; defaults to "closed".
+  local cb_file="$1" task_id="$2" backend="$3"
+  [[ -f "$cb_file" ]] || { echo "closed"; return 0; }
+  jq -r --arg t "$task_id" --arg b "$backend" \
+    '.[$t][$b].state // "closed"' "$cb_file" 2>/dev/null || echo "closed"
+}
+
+cb_next_tier() {
+  # Returns the next backend tier to try after current_backend is open.
+  # Emits "all-open" when every configured tier is open for this task.
+  local current_backend="$1" cb_file="$2" task_id="$3"
+  local has_premium
+  has_premium="$(jq -r '.cloud_agent_premium // ""' "$CONFIG_FILE" 2>/dev/null || echo "")"
+  case "$current_backend" in
+    cloud_agent)
+      if [[ -n "$has_premium" ]] && \
+         [[ "$(cb_get_state "$cb_file" "$task_id" "cloud_agent_premium")" != "open" ]]; then
+        echo "cloud_agent_premium"; return 0
+      fi
+      if [[ "$(cb_get_state "$cb_file" "$task_id" "local_fallback")" != "open" ]]; then
+        echo "local_fallback"; return 0
+      fi
+      echo "all-open"
+      ;;
+    cloud_agent_premium)
+      if [[ "$(cb_get_state "$cb_file" "$task_id" "local_fallback")" != "open" ]]; then
+        echo "local_fallback"; return 0
+      fi
+      echo "all-open"
+      ;;
+    *) echo "all-open" ;;
+  esac
+}
+
+cb_update() {
+  # Atomically update circuit-breaker state for {task_id, backend} based on verdict.
+  # Success (validated/signaled-but-pr-opened): reset consecutive_failures=0, state=closed.
+  # Failure (no-progress, spawn-failed, other): increment; open circuit when ≥CB_K.
+  local cb_file="$1" task_id="$2" backend="$3" verdict="$4"
+  mkdir -p "$(dirname "$cb_file")" 2>/dev/null || true
+  local current="{}"
+  if [[ -f "$cb_file" ]]; then
+    current="$(cat "$cb_file" 2>/dev/null || echo "{}")"
+    printf '%s' "$current" | jq -e . >/dev/null 2>&1 || current="{}"
+  fi
+  local new
+  if [[ "$verdict" == "validated" || "$verdict" == "signaled-but-pr-opened" ]]; then
+    new="$(printf '%s' "$current" | jq --arg t "$task_id" --arg b "$backend" \
+      '.[$t] //= {} | .[$t][$b] = {consecutive_failures: 0, state: "closed"}' 2>/dev/null \
+      || echo "$current")"
+  else
+    new="$(printf '%s' "$current" | jq --arg t "$task_id" --arg b "$backend" \
+      --argjson k "${CB_K}" '
+      .[$t] //= {} |
+      .[$t][$b] //= {consecutive_failures: 0, state: "closed"} |
+      .[$t][$b].consecutive_failures += 1 |
+      if .[$t][$b].consecutive_failures >= $k then .[$t][$b].state = "open" else . end
+      ' 2>/dev/null || echo "$current")"
+  fi
+  local tmp
+  tmp="$(mktemp -t minsky-cb-XXXXXX.json)" || return 0
+  printf '%s\n' "$new" > "$tmp" && mv "$tmp" "$cb_file" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+}
+
 # --- 5. Per-host iteration --------------------------------------------------
 # Replaces novel/cross-repo-runner/src/host-loop.ts (the bulk of the LOC).
 # One iteration = (a) pick a task, (b) cut a branch, (c) spawn openhands,
@@ -964,6 +1039,47 @@ EOF
         fi
       fi
     fi
+  fi
+
+  # --- Circuit Breaker: redirect to next tier when current backend is open ---
+  # Read $host/.minsky/circuit-breaker.json; if the resolved backend's circuit
+  # is open for this task, select the next tier (cloud_agent→cloud_agent_premium
+  # →local_fallback→all-open). All-open appends a needs-human event to
+  # orchestrate.jsonl and skips this task for the current iteration.
+  local cb_file="$host/.minsky/circuit-breaker.json"
+  local cb_backend
+  if [[ "$local_llm_enabled" == "true" ]]; then
+    cb_backend="local_fallback"
+  else
+    cb_backend="cloud_agent"
+  fi
+  local cb_state
+  cb_state="$(cb_get_state "$cb_file" "$task_id" "$cb_backend")"
+  if [[ "$cb_state" == "open" ]]; then
+    local next_tier
+    next_tier="$(cb_next_tier "$cb_backend" "$cb_file" "$task_id")"
+    echo "host=$host cb: $cb_backend open for $task_id → $next_tier" >&2
+    case "$next_tier" in
+      local_fallback)
+        local_llm_enabled="true"
+        cb_backend="local_fallback"
+        ;;
+      cloud_agent_premium)
+        local_llm_enabled="false"
+        model="$(jq -r '.cloud_agent_premium // ""' "$CONFIG_FILE" 2>/dev/null || echo "")"
+        cb_backend="cloud_agent_premium"
+        ;;
+      all-open)
+        printf '{"event":"needs-human","task_id":"%s","reason":"all-backends-open","ts":"%s"}\n' \
+          "$task_id" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+          >> "$host/.minsky/orchestrate.jsonl" 2>/dev/null || true
+        echo "host=$host cb: all backends open for $task_id — needs human" >&2
+        rm -f "$brief_file" 2>/dev/null || true
+        record_iteration "$host" "$iter_n" "$task_id" "$branch" "no-progress" "" \
+          "circuit-breaker: all backends open for $task_id (needs human)" "$gh_host"
+        return 1
+        ;;
+    esac
   fi
 
   local extra_spawn_flags=""
@@ -1494,6 +1610,12 @@ print(load_host_config(Path('$host')).default_branch)
   local failure_log_path=""
   if [[ -f "$stdout_log" ]]; then
     failure_log_path="$(grep -o 'MINSKY_FAILURE_LOG_PATH=[^[:space:]]*' "$stdout_log" 2>/dev/null | tail -1 | cut -d= -f2-)" || true
+  fi
+  # Update circuit-breaker state with the spawn outcome (only when cb_file is
+  # set, i.e. we reached the spawn path rather than exiting early via drained/
+  # dry-run). Atomic write via cb_update (tmp+rename); graceful-degrade on I/O.
+  if [[ -n "${cb_file:-}" && -n "${cb_backend:-}" ]]; then
+    cb_update "$cb_file" "$task_id" "$cb_backend" "$verdict"
   fi
   rm -f "$brief_file" "$stdout_log"
   record_iteration "$host" "$iter_n" "$task_id" "$branch" "$verdict" "$pr_url" "$notes" "$gh_host" "$failure_log_path"
