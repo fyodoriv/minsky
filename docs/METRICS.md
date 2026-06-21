@@ -316,20 +316,6 @@ _Updated: 2026-06-21T00:00:00Z · Budget: 365d · Source: `.minsky/metric-snapsh
 
 **Anchor:** Beyer et al., _SRE_ 2016, Ch. 4 — continuity as an SLI.
 
-## heal-class-coverage-pct — Heal-class catalog coverage (% of observed spawn failure classes with a dispatch handler)
-
-_Updated: 2026-06-21T00:00:00Z · Budget: 7d · Source: `node scripts/generate-heal-coverage-matrix.mjs --json` · Milestone: M1.13_
-
-**Value:** `node scripts/generate-heal-coverage-matrix.mjs --json | jq '.coverage_pct'` — 0 (0 of 1 observed failure class has a dispatch handler; all 11 observed failures are class "unknown")
-
-**How to view:** `node scripts/generate-heal-coverage-matrix.mjs --json | jq '{coverage_pct, total_classified, uncovered_top3: [.uncovered_top3[].failure_class]}'`
-
-**Goal:** ≥0.70 (≥70% of observed failure classes covered by a dispatch handler, measured after new heal tasks filed by this matrix land)
-
-**Pivot:** <0.30 for ≥14 d after the top-3 heal tasks ship → the heal catalog's class-matching logic is wrong; audit `parseHealIds` vs classifier output and realign the IDs
-
-**Anchor:** Kephart & Chess, "The Vision of Autonomic Computing", _IEEE Computer_ 36(1) 2003, §3 "Self-healing" — the Analyze step of MAPE-K requires matching observed symptoms to known healing policies; an unmatched symptom means the loop has no policy to execute and falls through to operator escalation; the coverage matrix IS the explicit representation of the matching function.
-
 ## Metrics to add
 
 _9 metrics that should exist on the dashboard but don't yet. Each row names the milestone that introduces it, the task that lands the collector, and a sketch of the future formula. Operator directive 2026-05-21 — gap is surfaced explicitly so the 10-metric set above is understood as the current state, not the steady state._
@@ -373,6 +359,16 @@ _Milestone: M1.13_
 **Blocked by:** `promote-remaining-heal-recipes` in `TASKS.md`.
 
 **Future formula:** `node scripts/heal-mttr-report.mjs --window=30d --json ⟨TBD-AFTER: ≥1 heal fires in production⟩`
+
+### heal-class-coverage-pct — Heal-class catalog coverage — % of observed spawn-failure classes with a dispatch handler
+
+_Milestone: M1.13_
+
+**Why it belongs:** MAPE-K's Analyze step matches observed symptoms to known healing policies; an unmatched failure class has no policy and falls through to operator escalation. `scripts/generate-heal-coverage-matrix.mjs` ships the collector that joins observed classes against `parseHealIds`; this entry stays in PROPOSED until the daemon's daily snapshot ingests its output into `.minsky/metric-snapshots` so the dashboard tile renders a live observation.
+
+**Blocked by:** `heal-class-catalog-coverage-matrix` in `TASKS.md`.
+
+**Future formula:** `node scripts/generate-heal-coverage-matrix.mjs --json | jq '.coverage_pct' ⟨TBD-AFTER: daemon ingests the matrix output into .minsky/metric-snapshots⟩`
 
 ### swe-bench-resolve-rate — SWE-bench Verified resolve rate, Minsky vs. competitors
 
