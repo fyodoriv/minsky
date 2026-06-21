@@ -136,6 +136,23 @@ Still in flight (not part of the June 1 launch):
 | `cost-per-merged-pr`                | $0.30     | 2024-10-04 | All-Hands AI, *Evaluation of LLMs as Coding Agents on SWE-Bench (at 30x Speed!)*, openhands.dev/blog — Claude 3.5 Sonnet, prompt-caching enabled, SWE-bench Lite subset (`$0.3 per issue`). Used here as the cost-per-merged-pr proxy.                |
 | `mean-autonomous-merge-latency`     | 3600 s    | 2024-11-12 | `OpenHands/openhands-index-results/scores.json` — `average_runtime: 3600` for SWE-bench v1.8.3 with Claude Sonnet 4.5. Used here as the mean-autonomous-merge-latency proxy (per-instance wall-clock).                                                |
 
+### M1.14 live A/B benchmark — 2026-06-21
+
+| Field         | Value                          |
+| ------------- | ------------------------------ |
+| `date`        | 2026-06-21                     |
+| `backend`     | openhands                      |
+| `delta_pp`    | `null` — Blocked: env-gap      |
+| `corpus_size` | 0 (not run)                    |
+
+**Env-gap detail**: Task `openhands-vs-claude-m110-corpus-live-ab` attempted `bin/minsky competitive --backend openhands` on 2026-06-21. Two blockers discovered:
+
+1. **CLI removed**: `bin/minsky competitive --backend openhands` does not exist. The executable `bin/minsky competitive` CLI was deleted in the 2026-05-28 Path-A phase-10 cut (replaced by static `competitors/scorecard.md`). The task was written against the pre-cut CLI surface.
+
+2. **SDK not in system Python**: `python3 -c "import openhands"` exits non-zero on the system Python (`/usr/bin/python3` → `ModuleNotFoundError: No module named 'openhands'`). OpenHands SDK v1.7.0 IS installed in `~/.minsky/openhands-venv/` but is not on the default Python path. The pivot threshold in the task spec is met: `python3 -c "import openhands"` exits non-zero.
+
+**Follow-up**: `fix-openhands-sdk-env-import` filed as P0 in TASKS.md to resolve both blockers — restore a `--backend openhands` comparison path and expose the venv SDK via the system Python or a documented wrapper.
+
 ### OpenHands Index multi-task suite adopted (2026-06-02)
 
 `research-finding-multi-task-benchmark-suite` adopted the **shape** of the
