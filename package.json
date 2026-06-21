@@ -82,7 +82,7 @@
     "minsky:logs": "bin/minsky logs",
     "minsky:status": "bin/minsky status",
     "minsky:stop": "bin/minsky stop",
-    "minsky:metrics-refresh": "node scripts/generate-heal-coverage-matrix.mjs --write-md && node scripts/generate-heal-coverage-matrix.mjs --json"
+    "minsky:metrics-refresh": "bin/minsky metrics refresh"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.16",

@@ -21,4 +21,3 @@ _Generated 2026-06-21 · window 168h · 11 classified failures · status: ok_
 ## Dispatchable heal catalog
 
 _Source: `scripts/heal-dispatch.mjs` `buildPreWalkHeals` + `buildPreSpawnHeals`_
-

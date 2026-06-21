@@ -263,7 +263,7 @@ describe("CLI integration", () => {
     for (let i = 0; i < stderrContents.length; i++) {
       const entryDir = join(dir, `entry-${i}`);
       mkdirSync(entryDir, { recursive: true });
-      writeFileSync(join(entryDir, "stderr.txt"), stderrContents[i]);
+      writeFileSync(join(entryDir, "stderr.txt"), /** @type {string} */ (stderrContents[i]));
     }
     return dir;
   }

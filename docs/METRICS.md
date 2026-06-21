@@ -328,7 +328,7 @@ _Updated: 2026-06-21T00:00:00Z · Budget: 7d · Source: `node scripts/generate-h
 
 **Pivot:** <0.30 for ≥14 d after the top-3 heal tasks ship → the heal catalog's class-matching logic is wrong; audit `parseHealIds` vs classifier output and realign the IDs
 
-**Anchor:** Kephart & Chess, "The Vision of Autonomic Computing", *IEEE Computer* 36(1) 2003, §3 "Self-healing" — the Analyze step of MAPE-K requires matching observed symptoms to known healing policies; an unmatched symptom means the loop has no policy to execute and falls through to operator escalation; the coverage matrix IS the explicit representation of the matching function.
+**Anchor:** Kephart & Chess, "The Vision of Autonomic Computing", _IEEE Computer_ 36(1) 2003, §3 "Self-healing" — the Analyze step of MAPE-K requires matching observed symptoms to known healing policies; an unmatched symptom means the loop has no policy to execute and falls through to operator escalation; the coverage matrix IS the explicit representation of the matching function.
 
 ## Metrics to add
 

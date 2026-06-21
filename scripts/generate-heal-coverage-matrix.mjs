@@ -42,7 +42,7 @@ const DEFAULT_WINDOW = "7d";
  */
 export function parseHealIds(dispatchSrc) {
   const matches = dispatchSrc.matchAll(/\bid:\s*["']([^"']+)["']/g);
-  return [...new Set([...matches].map((m) => m[1]))];
+  return /** @type {string[]} */ ([...new Set([...matches].map((m) => m[1]))]);
 }
 
 /**
@@ -53,7 +53,7 @@ export function parseHealIds(dispatchSrc) {
  */
 export function parseKnownPatterns(classifierSrc) {
   const matches = classifierSrc.matchAll(/\(\s*["']([^"']+)["']\s*,\s*r["']/g);
-  return [...matches].map((m) => m[1]);
+  return /** @type {string[]} */ ([...matches].map((m) => m[1]));
 }
 
 /**
@@ -225,7 +225,11 @@ export function buildCoverageMatrix({
   const healIds = parseHealIds(dispatchSrc);
   const knownPatterns = parseKnownPatterns(classifierSrc);
 
-  const classified = runClassifier({ failuresDir, windowSpec, python3 });
+  const classified = runClassifier({
+    ...(failuresDir !== undefined ? { failuresDir } : {}),
+    windowSpec,
+    python3,
+  });
   const totalClassified = classified.total_classified ?? classified.total_failures ?? 0;
 
   if (totalClassified < PENDING_THRESHOLD) {
@@ -286,7 +290,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   try {
-    const result = buildCoverageMatrix({ failuresDir, windowSpec, python3 });
+    const result = buildCoverageMatrix({
+      ...(failuresDir !== undefined ? { failuresDir } : {}),
+      windowSpec,
+      python3,
+    });
 
     if (writeMd) {
       const md = renderMarkdown(result.top10_rows, {
