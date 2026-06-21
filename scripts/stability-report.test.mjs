@@ -56,6 +56,23 @@ function makeFixtureHost(records) {
   return dir;
 }
 
+/**
+ * Build a fixture host directory with the given iteration records
+ * written to `.minsky/session-ledger.jsonl` (primary source).
+ * @param {object[]} records
+ */
+function makeFixtureHostWithLedger(records) {
+  const dir = mkdtempSync(join(tmpdir(), "stability-ledger-"));
+  mkdirSync(join(dir, ".minsky"), { recursive: true });
+  if (records.length > 0) {
+    writeFileSync(
+      join(dir, ".minsky", "session-ledger.jsonl"),
+      `${records.map((r) => JSON.stringify(r)).join("\n")}\n`,
+    );
+  }
+  return dir;
+}
+
 const NOW = "2026-05-20T15:00:00Z";
 const NOW_MS = new Date(NOW).getTime();
 /** @param {number} hoursAgo */
@@ -263,5 +280,176 @@ describe("valid-event qualification — drained records are not iterations", () 
     expect(w.total).toBe(0);
     expect(w.ratio).toBeNull();
     expect(w.source).toBe("no-recent-data");
+  });
+});
+
+describe("session-ledger primary source (PR #1250 wire-in)", () => {
+  // Regression test for M1.1: session-ledger is now the primary data source.
+  // 10 entries: 7 success (validated/merged/shipped) + 3 spawn-failed → ratio=0.7.
+
+  test("10 entries (7 success, 3 spawn-failed) → ratio=0.7, source=session-ledger", () => {
+    const host = makeFixtureHostWithLedger([
+      {
+        session_id: "t1",
+        ts: isoMinusHours(1),
+        task_id: "t1",
+        verdict: "validated",
+        files_changed: 2,
+        loc_delta: 30,
+      },
+      {
+        session_id: "t2",
+        ts: isoMinusHours(2),
+        task_id: "t2",
+        verdict: "merged",
+        files_changed: 1,
+        loc_delta: 10,
+      },
+      {
+        session_id: "t3",
+        ts: isoMinusHours(3),
+        task_id: "t3",
+        verdict: "shipped",
+        files_changed: 3,
+        loc_delta: 50,
+      },
+      {
+        session_id: "t4",
+        ts: isoMinusHours(4),
+        task_id: "t4",
+        verdict: "validated",
+        files_changed: 1,
+        loc_delta: 5,
+      },
+      {
+        session_id: "t5",
+        ts: isoMinusHours(5),
+        task_id: "t5",
+        verdict: "validated",
+        files_changed: 2,
+        loc_delta: 15,
+      },
+      {
+        session_id: "t6",
+        ts: isoMinusHours(6),
+        task_id: "t6",
+        verdict: "validated",
+        files_changed: 1,
+        loc_delta: 8,
+      },
+      {
+        session_id: "t7",
+        ts: isoMinusHours(7),
+        task_id: "t7",
+        verdict: "validated",
+        files_changed: 4,
+        loc_delta: 60,
+      },
+      {
+        session_id: "t8",
+        ts: isoMinusHours(8),
+        task_id: "t8",
+        verdict: "spawn-failed",
+        files_changed: 0,
+        loc_delta: 0,
+      },
+      {
+        session_id: "t9",
+        ts: isoMinusHours(9),
+        task_id: "t9",
+        verdict: "spawn-failed",
+        files_changed: 0,
+        loc_delta: 0,
+      },
+      {
+        session_id: "t10",
+        ts: isoMinusHours(9),
+        task_id: "t10",
+        verdict: "spawn-failed",
+        files_changed: 0,
+        loc_delta: 0,
+      },
+    ]);
+    const { stdout, status } = run(
+      ["--window=24h", "--json", "--host-dir", host, "--now", NOW],
+      host,
+    );
+    expect(status).toBe(0);
+    const [w] = JSON.parse(stdout);
+    expect(w.total).toBe(10);
+    expect(w.successful).toBe(7);
+    expect(w.ratio).toBe(0.7);
+    expect(w.source).toBe("session-ledger");
+  });
+
+  test("session-ledger takes priority over experiment-store when both exist", () => {
+    const host = makeFixtureHostWithLedger([
+      {
+        session_id: "s1",
+        ts: isoMinusHours(1),
+        task_id: "s1",
+        verdict: "validated",
+        files_changed: 1,
+        loc_delta: 10,
+      },
+    ]);
+    // Also write an experiment-store entry — should be ignored since ledger has data.
+    mkdirSync(join(host, ".minsky", "experiment-store", "cross-repo"), { recursive: true });
+    writeFileSync(
+      join(host, ".minsky", "experiment-store", "cross-repo", "old.jsonl"),
+      `${JSON.stringify({ ts: isoMinusHours(2), verdict: "spawn-failed" })}\n`,
+    );
+    const { stdout } = run(["--window=24h", "--json", "--host-dir", host, "--now", NOW], host);
+    const [w] = JSON.parse(stdout);
+    expect(w.source).toBe("session-ledger");
+    expect(w.total).toBe(1);
+    expect(w.successful).toBe(1);
+  });
+
+  test("falls back to experiment-store when session-ledger is absent", () => {
+    const host = makeFixtureHost([
+      { ts: isoMinusHours(1), verdict: "validated" },
+      { ts: isoMinusHours(2), verdict: "spawn-failed" },
+    ]);
+    const { stdout } = run(["--window=24h", "--json", "--host-dir", host, "--now", NOW], host);
+    const [w] = JSON.parse(stdout);
+    expect(w.source).toBe("experiment-store");
+    expect(w.total).toBe(2);
+    expect(w.successful).toBe(1);
+  });
+
+  test("drained entries in session-ledger are excluded from total and successful", () => {
+    const host = makeFixtureHostWithLedger([
+      {
+        session_id: "s1",
+        ts: isoMinusHours(1),
+        task_id: "s1",
+        verdict: "validated",
+        files_changed: 1,
+        loc_delta: 5,
+      },
+      {
+        session_id: "s2",
+        ts: isoMinusHours(1),
+        task_id: "s2",
+        verdict: "drained",
+        files_changed: 0,
+        loc_delta: 0,
+      },
+      {
+        session_id: "s3",
+        ts: isoMinusHours(1),
+        task_id: "s3",
+        verdict: "drained",
+        files_changed: 0,
+        loc_delta: 0,
+      },
+    ]);
+    const { stdout } = run(["--window=24h", "--json", "--host-dir", host, "--now", NOW], host);
+    const [w] = JSON.parse(stdout);
+    expect(w.total).toBe(1);
+    expect(w.successful).toBe(1);
+    expect(w.ratio).toBe(1);
+    expect(w.source).toBe("session-ledger");
   });
 });
