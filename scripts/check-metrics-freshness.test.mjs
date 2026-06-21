@@ -7,20 +7,20 @@ import { findStaleRows, parsePrimaryMetrics, STALE_DAYS } from "./check-metrics-
 
 const TODAY = "2026-06-20";
 
-// Build a YYYY-MM-DD string N days before TODAY
+/** @param {number} n */
 function daysAgo(n) {
   const d = new Date(TODAY);
   d.setUTCDate(d.getUTCDate() - n);
   return d.toISOString().slice(0, 10);
 }
 
-// Build minimal markdown with a ## Primary metrics section and optional rows
+/** @param {{ name: string, value: string, date: string }[]} rows */
 function md(rows = []) {
   const header = "## Primary metrics\n\n";
   const body =
     rows.length === 0
       ? ""
-      : rows.map((r) => `| ${r.name} | ${r.value} | ${r.date} |`).join("\n") + "\n";
+      : `${rows.map((r) => `| ${r.name} | ${r.value} | ${r.date} |`).join("\n")}\n`;
   return `# METRICS.md\n\n${header}${body}\n`;
 }
 
@@ -48,8 +48,8 @@ describe("parsePrimaryMetrics", () => {
     ]);
     const rows = parsePrimaryMetrics(text);
     expect(rows).toHaveLength(2);
-    expect(rows[0].name).toBe("loop-uptime");
-    expect(rows[1].name).toBe("cross-repo-pr-rate");
+    expect(rows[0]?.name).toBe("loop-uptime");
+    expect(rows[1]?.name).toBe("cross-repo-pr-rate");
   });
 
   test("stops at the next ## section", () => {
@@ -64,7 +64,7 @@ describe("parsePrimaryMetrics", () => {
     ].join("\n");
     const rows = parsePrimaryMetrics(text);
     expect(rows).toHaveLength(1);
-    expect(rows[0].name).toBe("metric-a");
+    expect(rows[0]?.name).toBe("metric-a");
   });
 
   test("skips markdown table separator rows", () => {
