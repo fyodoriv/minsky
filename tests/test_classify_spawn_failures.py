@@ -130,6 +130,49 @@ class TestClassifyFailures:
         assert result["total_failures"] == 0
 
 
+class TestParseWindow:
+    def setup_method(self):
+        mod = _load_classify_module()
+        self._parse_window = mod._parse_window
+
+    def test_hours_format(self):
+        assert self._parse_window("48h") == 48 * 3600.0
+
+    def test_days_format(self):
+        assert self._parse_window("7d") == 7 * 86400.0
+
+    def test_days_format_single(self):
+        assert self._parse_window("1d") == 86400.0
+
+    def test_invalid_format_raises(self):
+        import pytest
+        with pytest.raises(ValueError):
+            self._parse_window("bad")
+
+    def test_invalid_format_no_unit_raises(self):
+        import pytest
+        with pytest.raises(ValueError):
+            self._parse_window("168")
+
+
+class TestTotalClassifiedField:
+    def setup_method(self):
+        mod = _load_classify_module()
+        self._classify_failures = mod.classify_failures
+
+    def test_total_classified_equals_total_failures(self, tmp_path: Path):
+        entry = tmp_path / "task-1"
+        entry.mkdir()
+        (entry / "stderr.txt").write_text("ENOENT: no such file")
+        result = self._classify_failures(tmp_path, 3600)
+        assert result["total_classified"] == result["total_failures"]
+        assert result["total_classified"] == 1
+
+    def test_total_classified_zero_when_empty(self, tmp_path: Path):
+        result = self._classify_failures(tmp_path, 3600)
+        assert result["total_classified"] == 0
+
+
 class TestCLI:
     def test_json_flag_emits_json(self, tmp_path: Path):
         result = subprocess.run(
@@ -140,8 +183,19 @@ class TestCLI:
         assert result.returncode == 0
         data = json.loads(result.stdout)
         assert "total_failures" in data
+        assert "total_classified" in data
         assert "top_class" in data
         assert data["window_hours"] == 1
+
+    def test_7d_window_flag(self, tmp_path: Path):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--failures-dir", str(tmp_path), "--window=7d", "--json"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["window_hours"] == 168
 
     def test_invalid_window_exits_1(self, tmp_path: Path):
         result = subprocess.run(
