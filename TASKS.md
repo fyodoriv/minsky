@@ -89,21 +89,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- fields update to cite novel/adapters/a2a.ts when their slices ship.   -->
 <!-- ===================================================================== -->
 
-- [ ] `tick-loop-openhands-preflight-gating` — the tick-loop worker crash-loops on an `openhands not importable` preflight even when `cloud_agent`/`local_agent` is `claude`
-  - **ID**: tick-loop-openhands-preflight-gating
-  - **Tags**: p0, stability, launchd, openhands, self-heal, deployment-infra
-  - **Milestone**: M1
-  - **Touches**: `bin/minsky-run.sh`, `novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py`
-  - **Competitive-goal**: `daemon-stability-pct` — a worker unit in a crash loop drags the run's uptime/throughput; the brain+workers moat needs the worker daemon to actually stay up.
-  - **Hypothesis**: `bin/minsky-run.sh`'s OpenHands importability preflight (the `INVARIANT FAIL: openhands not importable` path) runs even when the resolved agent is `claude`, so a claude/Sonnet-worker config still hard-requires `openhands` to import. Under launchd's stripped env the arm64 venv python fails `import openhands` (it succeeds in an interactive shell — an x64-Rosetta-node-under-launchd env gap), so the tick-loop exits 1 and KeepAlive restart-loops. Gating the preflight on `agent == openhands` lets claude-backed workers run without openhands, dropping tick-loop exit-1 to 0.
-  - **Success**: with `cloud_agent=claude` + `local_agent=claude`, `com.minsky.tick-loop` stays up (no `openhands not importable` in its err log, exit 0 across a 20-min window); the openhands preflight only fires when an openhands backend is actually selected.
-  - **Pivot**: if openhands must be a baseline capability regardless of backend, instead fix the launchd-env import (export the venv's required PATH/env in the unit per the `launchd-safe-paths` discipline) so the daemon's python imports openhands — but do NOT force claude-only operators to install openhands.
-  - **Measurement**: `launchctl print gui/$(id -u)/com.minsky.tick-loop | rg "last exit code"` is 0 after the fix; `rg -c 'openhands not importable' .minsky/tick-loop.err.log` is 0 on a fresh claude-config run (baseline today: every restart).
-  - **Anchor**: `launchd-safe-paths` skill (stripped-env binary resolution); rule #2 (the backend is a seam — selecting `claude` must not transitively require the `openhands` seam's deps).
-  - **Details**: Surfaced 2026-06-03 on the self-host run (Opus brain + Sonnet workers, `cloud_agent=claude`). `opus-sonnet-run` (the conductor's Sonnet worker) runs fine; only `tick-loop` crash-loops. Find the preflight caller in `bin/minsky-run.sh` and guard it behind the resolved-agent check that line ~1615 already computes (`jq -r '.cloud_agent // "openhands"'`).
-  - **Files**: `bin/minsky-run.sh` (+ a bats/test asserting the preflight is skipped for `cloud_agent=claude`)
-  - **Acceptance**: (a) preflight gated on agent==openhands; (b) tick-loop stays up under a claude config; (c) test pins the gating; (d) no regression for openhands operators.
-
 - [ ] `mcp-migration-to-2026-07-28-rc` — migrate Minsky's MCP adapter to the v2026-07-28 RC protocol revision before the breaking-change deadline. v2026-07-28 removes the `initialize` handshake and moves MCP to stateless semantics; without the migration, Minsky's MCP adapter breaks against any post-July-28 MCP server.
   - **ID**: mcp-migration-to-2026-07-28-rc
   - **Tags**: p1, milestone-m1, mcp, protocol-migration, time-bounded-deadline-2026-07-28, operator-directive-2026-05-28
