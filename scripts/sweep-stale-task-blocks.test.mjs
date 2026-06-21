@@ -6,7 +6,7 @@
 //   (c) block with DELIVERED but no freeform-cite → skipped (not included in results)
 //   (d) findCitingFiles returns [] when rg has no matches
 //
-// Source: TASKS.md `sweep-stale-blocks-script-only` (P0, M1).
+// Source: scripts/sweep-stale-task-blocks.mjs (the script under test).
 
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";

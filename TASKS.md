@@ -605,7 +605,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Touches**: scripts/stability-report.mjs, MILESTONES.md, tests/stability-report.test.mjs
   - **Acceptance**: (a) `node scripts/stability-report.mjs --window=7d --json | jq '.total > 0'` returns true after ≥1 daemon iteration post-#1250; (b) `--json` output includes `source: "session-ledger"`; (c) MILESTONES.md M1.1 is updated to 🟡 or ✅ with the `ratio` value as evidence; (d) test with 10-entry session-ledger fixture passes; (e) `pnpm pre-pr-lint --stage=fast` exits 0.
 
-
 - [ ] `picker-null-reason-structured-log` — add `--explain` flag to `scripts/pick_task.py` that emits a JSON reason when no task is chosen, and wire `bin/minsky-run.sh` to log that reason to `.minsky/picker-diagnostics.jsonl` on every `no-task` verdict
   - **ID**: picker-null-reason-structured-log
   - **Tags**: p0, milestone-m1, observability, task-queue, instrumentation, observed-2026-06-21
