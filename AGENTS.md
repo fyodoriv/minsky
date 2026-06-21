@@ -277,6 +277,10 @@ Tasks live in `TASKS.md` and follow the [tasks.md spec](https://github.com/tasks
 4. When the task is complete, **remove its entire block from `TASKS.md`** — history lives in git log per the tasks.md spec
 5. Commit and push
 
+### Task hygiene
+
+Do not set `**Blocked**: … DELIVERED; block retained` on a task that is already delivered; delete the block entirely. The `no-delivered-retained-blocks` CI gate (`scripts/check-no-delivered-retained-blocks.mjs`) rejects any `**Blocked**:` field containing that pattern — stale retained blocks permanently skip the task picker and must be swept by `sweep-stale-delivered-task-blocks` or removed manually.
+
 ### Tool-call discipline (load-bearing for non-Claude models)
 
 **EVERY reply you emit must include a tool call** — `terminal`, `file_editor`, `task_tracker`, or `finish`. The OpenHands SDK (and similar agent frameworks) treat a reply containing only prose with no tool call as the conversation-end signal and TERMINATE the conversation immediately, regardless of whether the work has shipped.
