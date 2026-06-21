@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// <!-- scope: human-approved heal-class-catalog-coverage-matrix — operator-approved delivery; task block swept post-delivery -->
 // generate-heal-coverage-matrix.mjs — produce a coverage matrix comparing
 // observed spawn failure classes (from classify-spawn-failures.py) against
 // the dispatchable heals in scripts/heal-dispatch.mjs.
