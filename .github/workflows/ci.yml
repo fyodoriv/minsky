@@ -1982,6 +1982,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Full history so the gate can resolve `origin/main` and compute the
+          # diff-scoped `origin/main...HEAD` base. Without this the shallow
+          # checkout has no `origin/main`, the diff fails, and the gate would
+          # (pre-fix) block every PR on pre-existing stale blocks.
+          fetch-depth: 0
+      - run: git fetch --no-tags origin main
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0

@@ -115,9 +115,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       content = added;
       modeLabel = `diff-scoped (added lines vs ${diffBase})`;
     } else {
-      // Not in a git repo — fall back to whole file
-      content = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
-      modeLabel = "whole-file fallback (no git)";
+      // Diff base unavailable (e.g. CI shallow checkout without `origin/main`,
+      // or not a git repo). A DIFF-SCOPED gate must NOT fall back to whole-file
+      // here: doing so blocks every PR on PRE-EXISTING stale blocks it never
+      // introduced (the fail-closed bug that deadlocked the PR pipeline). Fail
+      // OPEN — there are no determinable "added" lines, so there is nothing to
+      // reject. Whole-file enforcement remains available via the explicit-path
+      // arg (post-sweep verification) and the local pre-push hook (full clone).
+      content = "";
+      modeLabel = `diff-unavailable — fail-open (base ${diffBase} not reachable)`;
     }
   }
 
