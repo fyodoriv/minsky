@@ -591,7 +591,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `competitors/openhands.md` (add Scorecard row), `MILESTONES.md` (M1.14 → ✅ or 🔴), optional `docs/benchmarks/openhands-vs-claude-YYYY-MM-DD.json`
   - **Acceptance**: (a) `bin/minsky competitive --backend openhands --json | jq '.swe_bench_delta_pp'` is a number (not null), OR documented env-gap with follow-up filed; (b) `competitors/openhands.md` has a new Scorecard row with date and delta_pp; (c) MILESTONES.md M1.14 is updated; (d) PR passes `pnpm pre-pr-lint --stage=fast`.
 
-
 - [ ] `watchdog-invariant-config-not-valid-json-spam` — the watchdog's self-diagnose loop logs `INVARIANT FAIL: config not valid JSON` once per 60s tick even though `~/.minsky/config.json` parses cleanly with `python3 -c "json.load(...)"`; find which config path the invariant actually reads and make the failure message name the offending file
   - **ID**: watchdog-invariant-config-not-valid-json-spam
   - **Tags**: p1, stability, observability, watchdog, observed-2026-06-12

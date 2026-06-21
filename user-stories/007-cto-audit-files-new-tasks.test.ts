@@ -2,8 +2,8 @@
  * User-story 007 — "Minsky files new to-do tasks from what it noticed while working"
  * (`user-stories/007-cto-audit-files-new-tasks.md`).
  *
- * Tests for the pre-write rule-9 validator introduced by
- * `cto-audit-rule-9-field-quality` (TASKS.md). Exercises:
+ * Tests for the pre-write rule-9 validator (introduced for CTO-audit
+ * field-quality enforcement). Exercises:
  *   (b) malformed proposal → retry LLM → success on retry
  *   (c) malformed → 2 failures → skip + `.minsky/audit-log.jsonl` entry
  *

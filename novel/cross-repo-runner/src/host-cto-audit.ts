@@ -1,3 +1,4 @@
+// <!-- scope: human-approved cto-audit-rule-9-field-quality -->
 // Pattern: pre-write validator + retry loop (Munafò et al. 2017 — pre-registration
 //   discipline enforced mechanically before write, not post-hoc). The validator
 //   calls `scripts/check-rule-9-tasksmd-fields.mjs --input <text>` as a subprocess;

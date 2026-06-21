@@ -332,7 +332,7 @@ _Milestone: M1.5_
 
 **Pivot:** `rule_9_reject_rate ≥ 0.05` AND `rule_9_retry_success_count / rule_9_reject_count < 0.50` after 48h → replace retry with deterministic template filler (see TASKS.md `cto-audit-rule-9-field-quality` Pivot clause)
 
-**Anchor:** Munafò et al., "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017 — pre-registration requires the metric to be committed before observation; the validator enforces this mechanically before write.
+**Anchor:** Munafò et al., "A Manifesto for Reproducible Science", _Nature Human Behaviour_ 1, 0021, 2017 — pre-registration requires the metric to be committed before observation; the validator enforces this mechanically before write.
 
 **Blocked by:** `cto-audit-rule-9-field-quality` implementation (this PR).
 
