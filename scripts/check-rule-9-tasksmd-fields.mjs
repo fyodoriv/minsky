@@ -144,7 +144,40 @@ export function classifyRule9Blocks(blocks, grandfathered) {
 
 // --------------------------------------------------------------- CLI -------
 
+/** @param {string} taskText */
+function runInputMode(taskText) {
+  const blocks = parseRule9Blocks(taskText);
+  if (blocks.length === 0) {
+    process.stderr.write(
+      "rule-9-tasksmd-fields: no task block (missing **ID**: line) in --input text\n",
+    );
+    process.exit(1);
+    return;
+  }
+  const { blocking } = classifyRule9Blocks(blocks, RULE_9_GRANDFATHERED);
+  if (blocking.length === 0) {
+    process.exit(0);
+    return;
+  }
+  const first = blocking[0];
+  if (first === undefined) {
+    process.exit(0);
+    return;
+  }
+  process.stderr.write(
+    `rule-9-tasksmd-fields violation: ${first.id} missing ${first.missingFields.join(", ")}\n`,
+  );
+  process.exit(1);
+}
+
 function main() {
+  const argv = process.argv.slice(2);
+  const inputIdx = argv.indexOf("--input");
+  if (inputIdx !== -1) {
+    runInputMode(argv[inputIdx + 1] ?? "");
+    return;
+  }
+
   const tasksMd = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
   const blocks = parseRule9Blocks(tasksMd);
   const { blocking, grandfathered, clean } = classifyRule9Blocks(blocks, RULE_9_GRANDFATHERED);
