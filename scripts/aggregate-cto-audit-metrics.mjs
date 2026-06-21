@@ -339,7 +339,11 @@ export function computeMergeRate(filed, mergedMap, nowMs, rule9) {
   }
   const merge_rate =
     audit_filed_count === 0 ? 0 : roundTo(merged_within_30d_count / audit_filed_count, 4);
-  const r9 = rule9 ?? { rule_9_reject_count: 0, rule_9_retry_success_count: 0, rule_9_reject_rate: 0 };
+  const r9 = rule9 ?? {
+    rule_9_reject_count: 0,
+    rule_9_retry_success_count: 0,
+    rule_9_reject_rate: 0,
+  };
   return {
     ts: new Date(nowMs).toISOString(),
     audit_filed_count,
