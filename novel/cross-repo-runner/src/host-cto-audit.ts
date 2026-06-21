@@ -98,6 +98,7 @@ export interface AuditLogEntry {
  * @param taskText the proposed task block markdown text
  * @param repoRoot absolute repo root (resolved for the script path)
  * @returns validation result (pure in tests via runValidator DI)
+ * @otel-exempt synchronous local lint subprocess; covered by the writeProposedTask span
  */
 export function validateProposedTask(taskText: string, repoRoot: string): ValidationResult {
   const scriptPath = resolve(repoRoot, "scripts", "check-rule-9-tasksmd-fields.mjs");
