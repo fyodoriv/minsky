@@ -361,6 +361,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
       "vision-rule-13-task-id-citations",
+      "no-delivered-retained-blocks",
     ]),
   ),
   supervisorSkippable: Object.freeze(
@@ -598,6 +599,22 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-metrics-freshness.mjs"],
+  },
+  {
+    // Prevents re-accumulation of the stale delivered-retained-block pattern
+    // (36 accumulated 2026-05-01→2026-06-20, swept by
+    // `sweep-stale-delivered-task-blocks`). Rejects any `**Blocked**:` field
+    // in TASKS.md containing `DELIVERED.*block retained` — a task whose only
+    // blocker is a freeform test-file citation update is not genuinely blocked
+    // and should be swept or deleted. Pure grep — <100ms wall-clock.
+    // Source: task `stale-delivered-block-ci-gate` (P0, M1); vision.md rule
+    // #10 (deterministic enforcement); Hunt & Thomas, *The Pragmatic
+    // Programmer* 1999 Ch. 8 ("Don't Live with Broken Windows").
+    name: "no-delivered-retained-blocks",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-delivered-retained-blocks.mjs"],
+    env: { NO_DELIVERED_BLOCKS_DIFF_BASE: "origin/main" },
   },
   // ---- full stage ----------------------------------------------------------
   {
