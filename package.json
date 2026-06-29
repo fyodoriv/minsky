@@ -85,7 +85,7 @@
     "minsky:metrics-refresh": "bin/minsky metrics refresh"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.0",
+    "@biomejs/biome": "2.5.1",
     "@minsky/experiment-record": "workspace:*",
     "@minsky/tick-loop": "workspace:*",
     "@minsky/token-monitor": "workspace:*",
@@ -100,7 +100,7 @@
     "conventional-changelog-conventionalcommits": "9.3.1",
     "dependency-cruiser": "17.4.3",
     "js-yaml": "4.2.0",
-    "knip": "6.17.1",
+    "knip": "6.23.0",
     "lefthook": "2.1.9",
     "markdownlint-cli2": "0.22.1",
     "semantic-release": "25.0.5",
