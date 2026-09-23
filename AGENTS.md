@@ -1,6 +1,9 @@
 # AGENTS.md
 
 > The agent runbook for the Minsky repo — setup, running, claiming tasks, and the constitutional rules every commit must honour.
+> **Repository status — deprecated (2026-09-21):** Do not claim or implement
+> new feature tasks here. Work is limited to migration, security, and critical
+> repairs. Use AgentBrew and mirror-setup for new tooling automation.
 
 ## What this file is
 
