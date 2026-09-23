@@ -4,6 +4,9 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
+> **Deprecated (2026-09-21).** No new features or deployments. Migration,
+> security, and critical repair only — see [docs/DEPRECATED.md](docs/DEPRECATED.md).
+
 ## What this is
 
 Minsky is a background program that does coding work. You point it at a git repo (a **host**) with a plain-text to-do list (`TASKS.md`); Minsky picks the most important unfinished task and asks a coding **agent** — Claude Code, Devin, Aider, or a local model — to do it.
