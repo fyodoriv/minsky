@@ -8,6 +8,13 @@ The canonical do-not-invest list for the minsky repo. Every entry below names a 
 
 The list is consulted by `AGENTS.md` (which tells every agent to read this file before implementing a feature) and is the ratchet that prevents two parallel implementations from co-existing past their migration window.
 
+## Repository status
+
+Minsky is deprecated as of 2026-09-21. Do not add new features or deployments.
+Keep existing installs, branches, and worktrees only for migration, security,
+or critical repair. New tooling automation belongs in AgentBrew and
+mirror-setup.
+
 ## What this file is not
 
 - **Not a roadmap** — see `MILESTONES.md` for what's being built.

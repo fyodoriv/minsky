@@ -47,9 +47,19 @@ export const README_BYTE_BUDGET_TARGET = 3072;
  * deterministic enforcer of the <5-min-read goal. To raise it, edit this
  * constant with a documented reason (rule #10).
  *
+ * Raised 3072 -> 3232 on 2026-09-21 for the repository deprecation banner.
+ * Documented reason: the README sat at 3048 bytes, 24 under the ceiling, so
+ * no deprecation notice of any useful length fit — even a bare
+ * `**Deprecated (date)** — [details](...)` line landed 42 bytes over. The
+ * banner is the one piece of README text a reader of a closed project needs
+ * first, so it outranks the <5-min-read goal it marginally exceeds. The
+ * TARGET stays 3072: this raises the enforced ceiling, it does not move the
+ * goal. Minsky is deprecated, so the README will not grow again — when the
+ * repo is archived this constant should go back to the target.
+ *
  * @type {number}
  */
-export const README_BYTE_BUDGET_HARD_LIMIT = 3072;
+export const README_BYTE_BUDGET_HARD_LIMIT = 3232;
 
 /**
  * @typedef {object} CheckResult
