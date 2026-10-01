@@ -39,7 +39,7 @@ function runGuard(env) {
   const home = scratch();
   return spawnSync(process.execPath, [GUARD], {
     encoding: "utf-8",
-    env: { PATH: process.env.PATH ?? "", HOME: home, ...env },
+    env: { PATH: process.env["PATH"] ?? "", HOME: home, ...env },
   });
 }
 
