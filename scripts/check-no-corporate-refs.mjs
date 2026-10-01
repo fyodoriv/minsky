@@ -85,11 +85,11 @@ function patternFromEnvFile(file) {
 export function loadInternalPattern(opts = {}) {
   const env = opts.env ?? process.env;
   const home = opts.home ?? homedir();
-  const direct = env.OSS_READINESS_INTERNAL_PATTERN;
+  const direct = env["OSS_READINESS_INTERNAL_PATTERN"];
   if (direct) return new RegExp(direct, "i");
-  const xdg = env.XDG_CONFIG_HOME || join(home, ".config");
+  const xdg = env["XDG_CONFIG_HOME"] || join(home, ".config");
   const candidates = [
-    env.OSS_READINESS_ENV_FILE,
+    env["OSS_READINESS_ENV_FILE"],
     join(xdg, "oss-readiness", "oss-readiness.env"),
   ].filter((f) => Boolean(f));
   for (const file of candidates) {
@@ -103,12 +103,12 @@ export function loadInternalPattern(opts = {}) {
 
 // Permanent allowlist — files that may carry private tokens forever. Empty:
 // the pattern is loaded at runtime, so the guard's own files carry no tokens.
-export const PERMANENT_ALLOWLIST = new Set([]);
+export const PERMANENT_ALLOWLIST = /** @type {Set<string>} */ (new Set());
 
 // Temporary allowlist — migration backlog. Each entry must be cleared by
 // removing the tokens (or moving them to a private overlay) and tracked in
 // TASKS.md. Empty on a scrubbed tree.
-export const TEMPORARY_ALLOWLIST = new Set([]);
+export const TEMPORARY_ALLOWLIST = /** @type {Set<string>} */ (new Set());
 
 const SCAN_EXTENSIONS = new Set([
   ".md",
