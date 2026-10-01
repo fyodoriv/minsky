@@ -1,0 +1,10 @@
+{
+  "now": "2026-05-04T12:00:00.000Z",
+  "plan": "max5",
+  "tokensUsedInActiveBlock": 3000,
+  "tokensRemainingInWindow": 85000,
+  "windowSizeTokens": 88000,
+  "secondsUntilWindowReset": 18000,
+  "maciekRealtimeReportedRemaining": 85000,
+  "note": "1 malformed JSON line silently skipped per rule #7 graceful-degrade"
+}

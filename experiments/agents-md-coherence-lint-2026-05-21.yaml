@@ -1,0 +1,75 @@
+id: agents-md-coherence-lint-2026-05-21
+hypothesis: |
+  AGENTS.md is the agent runbook every agent reads first. Currently nothing
+  pins its cross-references against the actual repo state — broken relative
+  links to renamed docs, `vision.md § N` citations pointing to non-existent
+  rules, and missing load-bearing section anchors that other scripts cite
+  can all drift silently. The semantic-release rollout (PR #686) closed
+  this same class of bug for `CHANGELOG.md`; the operator directive
+  2026-05-21 "Let's ensure agents.md is always updated too" applies the
+  same shape to AGENTS.md.
+
+  Pre-registered effect: the new `agents-md-coherence` CI gate fails any
+  PR that introduces a broken relative link in AGENTS.md, cites a
+  non-existent `vision.md § N` rule, or removes one of the three
+  load-bearing section anchors (`## Constitutional rules`,
+  `## Orchestrator discipline`, `### 15. Milestone alignment gate`).
+  Over 90 days, the count of merged PRs whose AGENTS.md changes contain
+  a broken cross-reference drops from "unknown" (currently unmeasured,
+  but ≥0 — drift detected during 2026-05-21 doc-unification sweep) to
+  exactly 0.
+success: |
+  At PR-merge time (the v0 structural measurement):
+    (1) `scripts/check-agents-md-coherence.mjs` exists and exits 0 against
+        the current AGENTS.md (no false positives — the lint passes on the
+        repo as-shipped).
+    (2) `scripts/check-agents-md-coherence.test.mjs` has ≥15 paired test
+        cases covering each error class (`missing-section`, `broken-link`,
+        `stale-vision-rule-ref`), all green.
+    (3) `agents-md-coherence` appears in `CI_BASH_GATE_BUCKETS.mustSucceed`
+        in `scripts/run-pre-pr-lint-stack.mjs` AND as a job in
+        `.github/workflows/ci.yml` AND in the `ci` aggregator's `needs:`
+        list (the three-place manifest contract enforced by
+        `scripts/run-pre-pr-lint-stack.test.mjs:836`).
+    (4) The `agents-md-coherence` lint fires on every PR that touches
+        AGENTS.md (verified by the next PR after this one that edits
+        AGENTS.md showing the check in `gh pr checks`).
+  Over 90 days post-merge:
+    (5) The count of merged PRs whose AGENTS.md changes contain a broken
+        cross-reference drops to 0 (measured by re-running the lint
+        against `main` after every merge; if the lint ever fails on
+        `main`, that's a measurement gap, not an accepted false negative).
+pivot: |
+  If this gate produces ≥3 false positives in 30 days (e.g., a PR
+  intentionally renames a load-bearing section as part of a constitutional
+  refactor, or moves a doc to a new path with all references updated but
+  the lint's relative-link resolver fails on a transient state during a
+  multi-commit PR), pivot to a narrower required-section list (just
+  `## Orchestrator discipline`) and move the relative-link resolution to
+  a separate paired markdown-link-checker so the two failure modes can
+  be approved independently.
+
+  If the gate produces ≥1 false negative (a PR with broken AGENTS.md
+  cross-references still merges to main), tighten the resolver to also
+  check anchor-fragments (`#section-id`) and add CLI-subcommand
+  resolution (verify every `pnpm minsky <X>` in AGENTS.md is a real
+  subcommand in `bin/minsky`).
+measurement: |
+  node scripts/check-agents-md-coherence.mjs && pnpm exec vitest run scripts/check-agents-md-coherence.test.mjs --reporter=json | jq -e '.numPassedTests >= 15 and .numFailedTests == 0' && grep -q "agents-md-coherence" scripts/run-pre-pr-lint-stack.mjs && grep -q "agents-md-coherence:" .github/workflows/ci.yml && grep -q "scripts/check-agents-md-coherence.mjs" vision.md
+anchor: |
+  rule #10 (vision.md § 10 — deterministic enforcement; the lint is a
+  pure function over `{ agentsMd, visionMd, fileExists }` with no LLM
+  in the chain); rule #17 (vision.md § 17 — proactive healing; the
+  AGENTS.md drift risk was observed during the 2026-05-21 doc-unification
+  sweep and is closed in the same session); rule #1 (vision.md § 1 —
+  don't reinvent: the markdown-link-checker pattern is canonical from
+  `remark-validate-links`, this lint is the minimal Minsky-specific
+  shape that also covers `vision.md § N` citations + required-section
+  anchors); rule #3 (vision.md § 3 — test-first: 18 paired tests
+  ship in the same PR as the lint); operator directive 2026-05-21
+  verbatim: "Let's ensure agents.md is always updated too" (after
+  PR #686 semantic-release closed the same class of drift for
+  CHANGELOG.md); `scripts/run-pre-pr-lint-stack.test.mjs:836` (the
+  meta-test enforcing manifest contract — CI_BASH_GATE_BUCKETS, the
+  STACK_MANIFEST row, and the ci.yml job + aggregator must all be in
+  sync); Meszaros 2007 (paired-fixture pattern for parametric cases).

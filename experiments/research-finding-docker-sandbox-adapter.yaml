@@ -1,0 +1,68 @@
+id: research-finding-docker-sandbox-adapter
+hypothesis: |
+  Minsky's untrusted-task path relies on the detective scope-leak detector,
+  which inspects the git tree AFTER an iteration — the leak has already
+  happened and, for an untrusted task, the host filesystem was reachable
+  during the run. OpenHands ships a PREVENTIVE pluggable sandbox service
+  (`openhands/app_server/sandbox/`): the agent runs inside a container it
+  cannot escape, so the host FS is never reachable.
+
+  Pre-registered effect: a `SandboxAdapter` interface (Adapter + Strategy)
+  with a `DockerSandbox` Strategy and a `StubSandbox` test fake — adopting
+  OpenHands' shape (rule #1) — confines every filesystem effect to the
+  workspace dir. For a deliberately-escaping write sequence (absolute path,
+  `..` traversal), the adapter denies the write BEFORE any host I/O, so the
+  per-iteration scope-leak rate for tasks marked `untrusted: true` drops by
+  ≥80 % versus the bash-runner. The package files are
+  `novel/adapters/sandbox/src/index.ts`,
+  `novel/adapters/sandbox/src/sandbox.docker.ts`,
+  `novel/adapters/sandbox/package.json`,
+  `novel/adapters/sandbox/tsconfig.json`,
+  `novel/adapters/sandbox/README.md`, and the end-to-end proof lives in
+  `test/integration/sandbox-docker.test.ts`.
+success: |
+  At PR-merge time (the v0 hermetic measurement, no live daemon required):
+    (1) `@minsky/sandbox` builds under `tsc -b` and the paired unit suite
+        `novel/adapters/sandbox/src/sandbox.docker.test.ts` is green (≥13
+        cases: the four verbs, the escape-denial contract on both
+        `StubSandbox` and `DockerSandbox`, and the yellow self-test verdict
+        when the docker binary is absent).
+    (2) The hermetic integration test in
+        `test/integration/sandbox-docker.test.ts` proves a
+        deliberately-escaping write sequence denies all three escape
+        attempts and leaves zero host-FS writes outside the workspace dir.
+    (3) The adapter is documented in the ARCHITECTURE.md dependency table
+        (rule #2 row) and the vision.md Pattern conformance index (rule #8
+        row), and `selfTest()` reports `yellow` (never a false `green`) when
+        the Docker daemon is unavailable, so the host falls back to the
+        bash-runner default.
+  Over 60 days post-merge (the live-daemon measurement):
+    (4) For at least one host-repo operator running with `untrusted: true`,
+        the per-iteration count of writes outside the workspace dir is 0,
+        a ≥80 % reduction versus the bash-runner baseline, at a
+        per-iteration wall-clock overhead of ≤20 %.
+pivot: |
+  Abandon the preventive-sandbox approach (move OpenHands' sandbox to the
+  "What we steal from each" inspiration row in `competitors/openhands.md`
+  and retire the `@minsky/sandbox` package) if EITHER the live-daemon
+  per-iteration wall-clock overhead exceeds 50 % (≥2.5x the 20 % success
+  threshold — a wide, informative margin per Ries 2011), OR no host-repo
+  operator opts into `untrusted: true` within 60 days of shipping. The
+  detective scope-leak detector remains the default in that case.
+measurement: |
+  pnpm exec vitest run novel/adapters/sandbox/src/sandbox.docker.test.ts test/integration/sandbox-docker.test.ts --reporter=json | jq -e '.numFailedTests == 0 and .numPassedTests >= 15' && grep -q "novel/adapters/sandbox/" docs/ARCHITECTURE.md && grep -q "novel/adapters/sandbox/" vision.md
+anchor: |
+  rule #1 (vision.md § 1 — don't reinvent: OpenHands has shipped the
+  pluggable-sandbox-service pattern in `openhands/app_server/sandbox/`;
+  adopt the shape, don't redesign); rule #2 (vision.md § 2 — every
+  dependency through an interface: the Docker CLI is reached only through
+  `SandboxAdapter`); rule #7 (vision.md § 7 — chaos: preventive isolation
+  is the higher-bar failure-mode containment); Gamma, Helm, Johnson,
+  Vlissides, *Design Patterns*, Addison-Wesley, 1994 (Adapter + Strategy);
+  Meszaros, *xUnit Test Patterns*, Addison-Wesley, 2007, Ch. 23 (the
+  `StubSandbox` recording fake); Martin, *Clean Architecture*, Pearson,
+  2017 (acyclic dependency principle — `@minsky/adapter-types` is the
+  leaf); Helland, "Building on Quicksand", *CIDR 2009* (visible-not-silent
+  — a missing daemon reports `yellow`, never a false `green`); OWASP,
+  *Top 10 for LLM Applications*, LLM02 (untrusted-input handling);
+  competitors/openhands.md § "Pluggable sandbox layer".

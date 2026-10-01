@@ -1,0 +1,79 @@
+id: rule-11-flake-detection-ci-wire-2026-05-04
+hypothesis: |
+  Sub-task 4 of 4 in `rule-11-flake-detection-lint`. The final
+  sub-task wires the lint into `.github/workflows/ci.yml` as the
+  `rule-11-flake-detection` job, adds a vision.md pattern-conformance
+  index row per rule #8, and ships
+  `docs/rule-11-flake-detection.md` documenting the lighthouse-mobile
+  downgrade (#125) as the canonical "what the lint emits" example
+  so operators know what success looks like.
+
+  CI job design:
+    - Runs on `pull_request` only — `gh run list` requires auth and
+      the per-workflow window query is heavy; on push to main it
+      would double-burn API quota.
+    - `continue-on-error: true` — paradox-aware. A detector that
+      fails the build on every detection becomes itself a
+      flaky-feeling gate; per the parent task's pre-registered Pivot
+      ("the lint is detection + scaffolding, not decision-making"),
+      the human-in-the-loop reviews the artefact and merges the
+      patch.
+    - Shells out via the runner's `GITHUB_TOKEN` (read access to the
+      same repo's Actions; no extra secret).
+    - Uploads `tmp/rule-11/*-task-block.md` + `*-workflow.patch`
+      via `actions/upload-artifact@v4` with
+      `if-no-files-found: ignore` so the green path stays quiet.
+
+  After this sub-task ships, rule #11 step 5 (auto-detect) is
+  satisfied: detect → emit → review → merge becomes a mechanical
+  loop instead of operator-discipline-only.
+success: |
+  - The new `rule-11-flake-detection` job appears in `ci.yml`'s
+    PR run (per the post-merge measurement).
+  - `pnpm vitest run scripts/check-rule-11-no-flaky-gates.test.mjs
+    --reporter=json | jq -e '.numPassedTests >= 22 and
+    .numFailedTests == 0'` exits 0 (the existing 26 cases stay
+    green; this PR adds no new tests because the wiring is
+    workflow-yaml + docs).
+  - `pnpm typecheck` and `pnpm exec biome check` clean.
+  - The vision.md pattern-conformance index gains row 78 referencing
+    the rule-11 artefacts; `node scripts/check-pattern-index.mjs`
+    exits 0.
+  - `docs/rule-11-flake-detection.md` is non-empty and references
+    the lighthouse-mobile downgrade in #125 as the canonical
+    example.
+  - The parent task block `rule-11-flake-detection-lint` is removed
+    in the same PR (all 4 sub-tasks shipped → tracker closes per
+    its own Acceptance).
+pivot: |
+  Two pivot paths pre-registered:
+    1. If the upload step proves noisy (every PR shows "no flakes"
+       empty artifacts), gate the upload on `tmp/rule-11/` being
+       non-empty — a one-line conditional. The
+       `if-no-files-found: ignore` parameter already carries most
+       of the weight; the gate is a refinement.
+    2. If `gh run list` rate-limits the per-PR ingestion across
+       N workflows, pivot to a cached ingestion model — a separate
+       `flake-stats-collector.yml` runs nightly and writes to
+       `flake-stats/<workflow>-30d.json`; the CI job reads from
+       disk via `--fixture` instead of `--workflows`. The fixture
+       path through the CLI is already supported (sub-task 2).
+measurement: |
+  pnpm vitest run scripts/check-rule-11-no-flaky-gates.test.mjs --reporter=json 2>/dev/null | node -e 'let d=""; process.stdin.on("data", c=>d+=c); process.stdin.on("end", ()=>{ const j=JSON.parse(d); const a=require("assert"); a.ok(j.numFailedTests === 0, "no failed tests"); a.ok(j.numPassedTests >= 22, "at least 22 paired tests, got " + j.numPassedTests); });'
+anchor: |
+  rule #11 (vision.md § 11 — no flaky metric is a load-bearing
+  claim; this sub-task closes step 5 of rule #11's structural
+  response — auto-detection becomes mechanical).
+  rule #8 (vision.md § 8 — pattern-conformance index; every novel
+  top-level artefact gets a row; this PR adds row 78).
+  Beck, K., *Extreme Programming Explained*, Addison-Wesley, 1999,
+  Ch. 17 (CI as the constraint enforcer — wiring the lint into
+  the ci.yml workflow is the move that makes the rule mechanical).
+  Memon, A., et al., "Taming Google-Scale Continuous Testing",
+  *ICSE-SEIP* 2017 (the per-job same-SHA pair primitive lands
+  inside a CI workflow exactly the way DETECTOR runs at Google
+  scale).
+  Forsgren, N., Humble, J., Kim, G., *Accelerate*, IT Revolution
+  Press, 2018, Ch. 3 (DORA test-reliability — the auto-detection
+  loop is the precondition for the team's trust in CI).
+timeout_seconds: 60

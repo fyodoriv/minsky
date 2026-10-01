@@ -1,0 +1,8 @@
+# Advisory output directory for the `spec-monitor` Claude Skill (`novel/spec-monitor/`).
+#
+# Files written here are named `<YYYY-MM-DD>.md` and contain advisory
+# tables (rule_id / evidence / severity / suggested_repair). They are
+# never load-bearing for CI — per rule #10, advisory output cannot gate
+# a merge. The Skill writes; reviewers read.
+#
+# Empty file kept so the directory is tracked.

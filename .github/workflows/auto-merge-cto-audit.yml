@@ -1,0 +1,109 @@
+name: auto-merge-cto-audit
+# <!-- scope: human-approved cto-audit-pr-auto-merge (TASKS.md Files list) -->
+# <!-- pattern: not-applicable — operator-babysitting-removal gate; closes the build–measure–learn loop (Ries 2011) by landing audit PRs on main without manual merge; same CI-gate structural pattern as ci.yml -->
+
+# Auto-merges `minsky:cto-audit` PRs once they are MERGEABLE and every CI
+# check has concluded SUCCESS. Every post-task CTO audit opens a PR that
+# appends one task block to TASKS.md; until that PR lands on `main`, its
+# tasks are invisible to the daemon (which picks from TASKS.md on `main`).
+# A MERGEABLE+all-green audit PR sitting open is WIP that blocks the `learn`
+# step (Ries 2011) and inflates merge lead time (DORA — Accelerate 2018).
+# This workflow removes the operator from that merge loop.
+#
+# Triggers:
+#   - check_suite.completed  — re-evaluate labeled PRs when a run finishes
+#   - pull_request.labeled   — re-evaluate the moment the label is added
+#
+# Safety:
+#   (b) every statusCheckRollup entry must conclude SUCCESS — one pending
+#       or failing check blocks the merge. A PR with zero checks is also
+#       blocked (vacuous-truth guard: "all checks pass" requires checks).
+#   (c) scope guard: `gh pr diff --name-only` must return only audit-scope
+#       files (TASKS.md, tasks/*.md, AGENTS.md, CHANGELOG.md, distribution/,
+#       docs/). Out-of-scope files → skip + warning comment, no merge.
+#   (d) set MINSKY_NO_CTO_AUDIT_AUTO_MERGE=1 below to disable temporarily
+#       without deleting this file.
+#
+# Pre-registered: TASKS.md `cto-audit-pr-auto-merge` § Measurement —
+#   gh pr list --label minsky:cto-audit --state open --json number,createdAt
+#     --jq '[.[] | select(now - (.createdAt|fromdateiso8601) > 3600)] | length'
+#   baseline 3; success 0 over rolling 7d; pivot ≥1 open >1h in 7d.
+
+on:
+  check_suite:
+    types: [completed]
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: write       # required: squash-merge the PR into main
+  pull-requests: write  # required: enable auto-merge + post skip comment
+
+concurrency:
+  # Serialise candidate evaluation so two near-simultaneous check_suite
+  # completions don't race on the same PR's merge.
+  group: auto-merge-cto-audit
+  cancel-in-progress: false
+
+env:
+  # Operator escape hatch (TASKS.md § Details (d)): flip to "1" and commit
+  # to disable auto-merge without removing this workflow.
+  MINSKY_NO_CTO_AUDIT_AUTO_MERGE: "0"
+  # In-scope file allow-list (TASKS.md § Details (c)). Anchored ERE; any
+  # changed path not matching the full pattern fails the scope guard.
+  AUDIT_SCOPE_RE: '^(TASKS\.md|tasks/.*\.md|AGENTS\.md|CHANGELOG\.md|distribution/.*|docs/.*)$'
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Find MERGEABLE all-green audit candidates and merge
+        if: ${{ env.MINSKY_NO_CTO_AUDIT_AUTO_MERGE != '1' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Single server-side query: number + mergeable + statusCheckRollup,
+          # filtered to candidates by one jq. `length > 0` rejects the
+          # vacuous-truth case (no checks => not "all checks passed").
+          CANDIDATES="$(gh pr list \
+            --label minsky:cto-audit \
+            --state open \
+            --json number,mergeable,statusCheckRollup \
+            --jq '[.[] | select(.mergeable == "MERGEABLE" and ((.statusCheckRollup | length) > 0) and ([.statusCheckRollup[].conclusion] | all(. == "SUCCESS")))]')"
+
+          COUNT="$(echo "$CANDIDATES" | jq 'length')"
+          echo "auto-merge-cto-audit: $COUNT MERGEABLE all-green candidate(s)."
+
+          # skip-earlier gate: bail before any per-PR `gh pr diff` round-trip
+          # when there is nothing to merge — the common case (most
+          # check_suite.completed events are for non-audit PRs).
+          if [ "$COUNT" -eq 0 ]; then
+            echo "Nothing to merge; exiting."
+            exit 0
+          fi
+
+          for N in $(echo "$CANDIDATES" | jq -r '.[].number'); do
+            echo "::group::PR #$N"
+
+            # Scope guard (c): every changed path must match the audit
+            # allow-list, else skip + warn (no merge).
+            OUT_OF_SCOPE="$(gh pr diff --name-only "$N" \
+              | grep -Ev "$AUDIT_SCOPE_RE" || true)"
+
+            if [ -n "$OUT_OF_SCOPE" ]; then
+              echo "PR #$N modifies out-of-scope files:"
+              echo "$OUT_OF_SCOPE"
+              gh pr comment "$N" --body \
+                "⚠️ auto-merge skipped: PR modifies files outside audit scope; operator review required"
+              echo "::endgroup::"
+              continue
+            fi
+
+            echo "PR #$N passed scope guard; enabling squash auto-merge."
+            gh pr merge --squash --auto "$N"
+            echo "::endgroup::"
+          done

@@ -1,0 +1,25 @@
+{
+  "name": "@minsky/competitive-benchmark",
+  "version": "0.0.0",
+  "private": true,
+  "description": "M1.10 substrate — pure metric catalogue + competitor corpus + ledger reducer + scorecard builder that join into the load-bearing `competitive-scorecard.json` artefact (task self-metrics-competitive-benchmark, slices a+b+c).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root ../.. novel/competitive-benchmark/src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

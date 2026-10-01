@@ -1,0 +1,614 @@
+// Tests for daemon-pr-lint-metrics.mjs. Pattern: paired positive/negative
+// fixtures over pure transforms (Meszaros 2007); the I/O seam (`runGh`) is
+// stubbed so the orchestrator runs end-to-end without touching `gh`.
+
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { describe, expect, test } from "vitest";
+
+import {
+  buildRecentPrListGhArgs,
+  CANONICAL_REPO,
+  computeStats,
+  daysAgoUtc,
+  formatDateUtcYmd,
+  formatReport,
+  GH_PR_LIST_LIMIT,
+  parsePrList,
+  parsePrListEntries,
+  RED_CHECK_OUTCOMES,
+  ROLLING_30D_MIN_N,
+  ROLLING_30D_MIN_PASS_RATE,
+  ROLLING_WINDOW_DAYS,
+  runDaemonPrLintMetrics,
+} from "./daemon-pr-lint-metrics.mjs";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+describe("pre-registered constants", () => {
+  test("ROLLING_30D_MIN_PASS_RATE matches the TASKS.md threshold (0.80)", () => {
+    expect(ROLLING_30D_MIN_PASS_RATE).toBeCloseTo(0.8, 5);
+  });
+
+  test("ROLLING_30D_MIN_N matches the self-diagnose windowMinPrs default (10)", () => {
+    // Drift on this constant silently lets the verdict flip OK below
+    // statistical significance. Pinned at this single source —
+    // scripts/self-diagnose.mjs daemonPrLintPassRateInvariant imports
+    // ROLLING_30D_MIN_N from this file rather than re-declaring it.
+    expect(ROLLING_30D_MIN_N).toBe(10);
+  });
+
+  test("ROLLING_WINDOW_DAYS matches the brief's 30d window", () => {
+    expect(ROLLING_WINDOW_DAYS).toBe(30);
+  });
+
+  test("CANONICAL_REPO matches the daemon's PR target — owner/name shape", () => {
+    // Slice 14: pinned so `gh`'s origin-inference can't silently zero the
+    // metric. The exact value is the only repo this daemon ever ships PRs
+    // against; if that ever changes, both the metric script and the
+    // self-diagnose invariant flip together (single-source).
+    expect(CANONICAL_REPO).toBe("fyodoriv/minsky");
+    expect(CANONICAL_REPO).toMatch(/^[\w.-]+\/[\w.-]+$/);
+  });
+
+  test("RED_CHECK_OUTCOMES enumerates every red terminal state and is frozen (slice 38/N)", () => {
+    // The pre-registered observable is "PRs that open with zero red CI
+    // checks". Before this slice the predicate only matched `FAILURE`, so a
+    // timed-out / errored / never-started run scored as clean and inflated
+    // the rolling pass-rate (rule #9 flattering-observable). Pin the exact
+    // set so a future relaxation that drops a red state can't pass silently.
+    expect([...RED_CHECK_OUTCOMES].sort()).toEqual(
+      ["ACTION_REQUIRED", "ERROR", "FAILURE", "STARTUP_FAILURE", "TIMED_OUT"].sort(),
+    );
+    // Frozen: data-not-code single source shared with the report formatter
+    // and scripts/self-diagnose.mjs via parsePrListEntries.
+    expect(Object.isFrozen(RED_CHECK_OUTCOMES)).toBe(true);
+    // Ambiguous / superseded outcomes stay OUT — including them would
+    // distort the ratio the other way (over-counting re-run-green PRs).
+    for (const nonRed of ["SUCCESS", "NEUTRAL", "SKIPPED", "STALE", "CANCELLED", "PENDING"]) {
+      expect(RED_CHECK_OUTCOMES.has(nonRed)).toBe(false);
+    }
+  });
+});
+
+describe("formatDateUtcYmd", () => {
+  test("formats a known UTC instant as YYYY-MM-DD", () => {
+    expect(formatDateUtcYmd(new Date("2026-05-06T18:30:00Z"))).toBe("2026-05-06");
+  });
+
+  test("rolls over the date boundary at UTC midnight, not local midnight", () => {
+    expect(formatDateUtcYmd(new Date("2026-05-06T23:59:59Z"))).toBe("2026-05-06");
+    expect(formatDateUtcYmd(new Date("2026-05-07T00:00:01Z"))).toBe("2026-05-07");
+  });
+});
+
+describe("daysAgoUtc", () => {
+  test("subtracts whole-day windows correctly across month boundaries", () => {
+    const now = new Date("2026-05-06T12:00:00Z");
+    expect(formatDateUtcYmd(daysAgoUtc(now, 30))).toBe("2026-04-06");
+  });
+
+  test("days=0 returns the same instant", () => {
+    const now = new Date("2026-05-06T12:00:00Z");
+    expect(daysAgoUtc(now, 0).getTime()).toBe(now.getTime());
+  });
+
+  test("rejects negative or non-integer days", () => {
+    const now = new Date("2026-05-06T12:00:00Z");
+    expect(() => daysAgoUtc(now, -1)).toThrow(/non-negative integer/);
+    expect(() => daysAgoUtc(now, 1.5)).toThrow(/non-negative integer/);
+  });
+});
+
+describe("parsePrList", () => {
+  test("empty array → []", () => {
+    expect(parsePrList("[]")).toEqual([]);
+  });
+
+  test("PR with no statusCheckRollup → hasFailure false", () => {
+    const out = parsePrList(JSON.stringify([{ number: 7 }]));
+    expect(out).toEqual([{ number: 7, hasFailure: false }]);
+  });
+
+  test('check entry with neither conclusion nor state → hasFailure false (the `?? ""` undefined path)', () => {
+    // Regression guard: slice 38's first cut passed `string | undefined`
+    // straight into `Set<string>.has`, which `tsc --noEmit -p tsconfig.json`
+    // missed but the gate's `tsc -b` (strict `scripts` project) caught. The
+    // `?? ""` coalesce makes a field-less entry simply "not red".
+    const out = parsePrList(JSON.stringify([{ number: 7, statusCheckRollup: [{}, {}] }]));
+    expect(out[0]?.hasFailure).toBe(false);
+  });
+
+  test("PR with all SUCCESS checks → hasFailure false", () => {
+    const out = parsePrList(
+      JSON.stringify([
+        {
+          number: 7,
+          statusCheckRollup: [
+            { conclusion: "SUCCESS", state: "SUCCESS" },
+            { conclusion: "SUCCESS", state: "SUCCESS" },
+          ],
+        },
+      ]),
+    );
+    expect(out[0]?.hasFailure).toBe(false);
+  });
+
+  test("PR with one FAILURE check → hasFailure true (conclusion field)", () => {
+    const out = parsePrList(
+      JSON.stringify([
+        {
+          number: 7,
+          statusCheckRollup: [
+            { conclusion: "SUCCESS" },
+            { conclusion: "FAILURE", name: "rule-7-chaos-coverage" },
+          ],
+        },
+      ]),
+    );
+    expect(out[0]?.hasFailure).toBe(true);
+  });
+
+  test("PR with state=FAILURE (older gh schema) is also caught", () => {
+    // Mirrors scripts/self-diagnose.mjs's check — both fields are
+    // recognised so the metric stays correct across gh CLI upgrades.
+    const out = parsePrList(
+      JSON.stringify([{ number: 7, statusCheckRollup: [{ state: "FAILURE" }] }]),
+    );
+    expect(out[0]?.hasFailure).toBe(true);
+  });
+
+  // Slice 38/N — the pre-registered observable is "zero RED CI checks", not
+  // "zero FAILURE checks". A timed-out / errored / never-started / action-
+  // required run is just as red as FAILURE; counting only FAILURE scored
+  // those PRs clean and inflated the rolling pass-rate (rule #9 flattering
+  // observable). One paired case per non-FAILURE red terminal state.
+  test.each([
+    ["TIMED_OUT", "conclusion"],
+    ["STARTUP_FAILURE", "conclusion"],
+    ["ACTION_REQUIRED", "conclusion"],
+    ["ERROR", "state"],
+  ])("PR with a %s check (%s field) → hasFailure true", (outcome, field) => {
+    const out = parsePrList(
+      JSON.stringify([
+        { number: 7, statusCheckRollup: [{ conclusion: "SUCCESS" }, { [field]: outcome }] },
+      ]),
+    );
+    expect(out[0]?.hasFailure).toBe(true);
+  });
+
+  test("PR whose only non-green check is CANCELLED/STALE → hasFailure false (no over-count)", () => {
+    // These are usually superseded re-runs; treating them as red would
+    // distort the ratio the opposite way. The paired negative for the
+    // red-state cases above.
+    const out = parsePrList(
+      JSON.stringify([
+        {
+          number: 7,
+          statusCheckRollup: [
+            { conclusion: "SUCCESS" },
+            { conclusion: "CANCELLED" },
+            { conclusion: "STALE" },
+            { conclusion: "NEUTRAL" },
+          ],
+        },
+      ]),
+    );
+    expect(out[0]?.hasFailure).toBe(false);
+  });
+
+  test("malformed JSON throws", () => {
+    expect(() => parsePrList("{not json")).toThrow();
+  });
+
+  test("non-array JSON throws with explanatory message", () => {
+    expect(() => parsePrList(JSON.stringify({ number: 1 }))).toThrow(/array/);
+  });
+});
+
+describe("parsePrListEntries (already-decoded array path)", () => {
+  // Slice 12: self-diagnose.mjs reaches `gh` via `ghJson` which JSON-parses
+  // before handing back, so the invariant cannot share `parsePrList`'s
+  // string entrypoint. `parsePrListEntries` is the post-JSON.parse seam
+  // both surfaces share — drift on the per-PR FAILURE rule is now a
+  // single-line edit, not two.
+  test("idempotent against the same data parsePrList sees", () => {
+    const fixture = [
+      { number: 1, statusCheckRollup: [{ conclusion: "SUCCESS" }] },
+      { number: 2, statusCheckRollup: [{ state: "FAILURE" }] },
+    ];
+    expect(parsePrListEntries(fixture)).toEqual(parsePrList(JSON.stringify(fixture)));
+  });
+
+  test("rejects non-array (matches parsePrList semantics)", () => {
+    expect(() => parsePrListEntries({ number: 1 })).toThrow(/array/);
+    expect(() => parsePrListEntries(null)).toThrow(/array/);
+  });
+});
+
+describe("buildRecentPrListGhArgs (canonical query — slice 12)", () => {
+  // The args used to live inline in two places: `runDaemonPrLintMetrics`
+  // here, and `recentDaemonPrs` in scripts/self-diagnose.mjs. Both used
+  // `--author @me`, `--state all`, `created:>=YYYY-MM-DD`, but if either
+  // drifted (e.g., one added `--state open`) the metric and the invariant
+  // would silently report on different PR sets. This helper is the seam.
+  test("threads the date into the search predicate", () => {
+    const args = buildRecentPrListGhArgs("2026-04-06");
+    expect(args).toContain("--search");
+    expect(args).toContain("created:>=2026-04-06");
+  });
+
+  test("pins the canonical selector + json shape (drift guard)", () => {
+    const args = buildRecentPrListGhArgs("2026-04-06");
+    expect(args[0]).toBe("pr");
+    expect(args[1]).toBe("list");
+    expect(args).toContain("--author");
+    expect(args).toContain("@me");
+    expect(args).toContain("--state");
+    expect(args).toContain("all");
+    expect(args).toContain("--json");
+    expect(args).toContain("number,statusCheckRollup");
+    expect(args).toContain("--limit");
+    expect(args).toContain(String(GH_PR_LIST_LIMIT));
+  });
+
+  test("GH_PR_LIST_LIMIT is high enough to satisfy the n≥10 threshold", () => {
+    // The threshold is the data-not-code source of "verdict can fire";
+    // shrinking the limit below it would silently leave the verdict
+    // INSUFFICIENT-DATA forever even when the gate is failing.
+    expect(GH_PR_LIST_LIMIT).toBeGreaterThanOrEqual(ROLLING_30D_MIN_N);
+  });
+
+  test("threads -R CANONICAL_REPO so the query is immune to origin pollution (slice 14)", () => {
+    // Without `-R`, gh infers the repo from the working dir's `origin`
+    // remote. The cross-repo-runner integration tests have been observed
+    // mutating that URL to a fake test-org/test-example-capabilities path,
+    // which silently zeroes the PR set. Pin -R + CANONICAL_REPO so the
+    // query never depends on local remote state.
+    const args = buildRecentPrListGhArgs("2026-04-06");
+    const rIdx = args.indexOf("-R");
+    expect(rIdx).toBeGreaterThanOrEqual(0);
+    expect(args[rIdx + 1]).toBe(CANONICAL_REPO);
+  });
+
+  test("output is shaped like a flat string[] — no nesting, no undefined entries", () => {
+    const args = buildRecentPrListGhArgs("2026-04-06");
+    expect(Array.isArray(args)).toBe(true);
+    for (const a of args) expect(typeof a).toBe("string");
+  });
+});
+
+describe("computeStats", () => {
+  test("zero PRs → passRate null", () => {
+    expect(computeStats([])).toEqual({ total: 0, clean: 0, dirtyNumbers: [], passRate: null });
+  });
+
+  test("all clean → passRate 1.0", () => {
+    const stats = computeStats([
+      { number: 1, hasFailure: false },
+      { number: 2, hasFailure: false },
+    ]);
+    expect(stats).toEqual({ total: 2, clean: 2, dirtyNumbers: [], passRate: 1 });
+  });
+
+  test("all dirty → passRate 0", () => {
+    const stats = computeStats([
+      { number: 1, hasFailure: true },
+      { number: 2, hasFailure: true },
+    ]);
+    expect(stats.passRate).toBe(0);
+    expect(stats.dirtyNumbers).toEqual([1, 2]);
+  });
+
+  test("mixed → fraction matches", () => {
+    const stats = computeStats([
+      { number: 1, hasFailure: false },
+      { number: 2, hasFailure: true },
+      { number: 3, hasFailure: false },
+      { number: 4, hasFailure: false },
+    ]);
+    expect(stats.total).toBe(4);
+    expect(stats.clean).toBe(3);
+    expect(stats.dirtyNumbers).toEqual([2]);
+    expect(stats.passRate).toBeCloseTo(0.75, 5);
+  });
+});
+
+describe("formatReport", () => {
+  const baseDates = { dateNow: "2026-05-06", date30dAgo: "2026-04-06" };
+
+  test("zero-data → INSUFFICIENT-DATA verdict, no NaN, no /0 in the value cell", () => {
+    const report = formatReport({
+      ...baseDates,
+      stats: { total: 0, clean: 0, dirtyNumbers: [], passRate: null },
+    });
+    expect(report).toMatch(/Verdict: +INSUFFICIENT-DATA/);
+    expect(report).not.toMatch(/NaN/);
+    expect(report).toMatch(/no PRs in window/);
+    expect(report).toMatch(/Failed: +none/);
+  });
+
+  test("below-min-N (n=9, all clean) → INSUFFICIENT-DATA, not OK — pinned threshold ≥10", () => {
+    const report = formatReport({
+      ...baseDates,
+      stats: { total: 9, clean: 9, dirtyNumbers: [], passRate: 1 },
+    });
+    expect(report).toMatch(/Verdict: +INSUFFICIENT-DATA/);
+  });
+
+  test("at-min-N (n=10, all clean) → OK", () => {
+    const report = formatReport({
+      ...baseDates,
+      stats: { total: 10, clean: 10, dirtyNumbers: [], passRate: 1 },
+    });
+    expect(report).toMatch(/Verdict: +OK/);
+  });
+
+  test("at the 0.80 boundary (passRate exactly 0.8) → OK (boundary is ≥)", () => {
+    const report = formatReport({
+      ...baseDates,
+      stats: { total: 10, clean: 8, dirtyNumbers: [101, 102], passRate: 0.8 },
+    });
+    expect(report).toMatch(/Verdict: +OK/);
+    expect(report).toMatch(/#101, #102/);
+  });
+
+  test("just below the 0.80 boundary (passRate 0.7) → BELOW", () => {
+    const report = formatReport({
+      ...baseDates,
+      stats: { total: 10, clean: 7, dirtyNumbers: [201, 202, 203], passRate: 0.7 },
+    });
+    expect(report).toMatch(/Verdict: +BELOW/);
+    // And the value cell shows the actual ratio so the operator sees the gap.
+    expect(report).toMatch(/7\/10 \(0\.700\)/);
+  });
+
+  test("includes the canonical selector + window so the report is self-describing", () => {
+    const report = formatReport({
+      ...baseDates,
+      stats: { total: 10, clean: 10, dirtyNumbers: [], passRate: 1 },
+    });
+    expect(report).toContain("--author @me");
+    expect(report).toContain(`-R ${CANONICAL_REPO}`);
+    expect(report).toContain(">= 2026-04-06");
+    expect(report).toContain("docs/daemon-pre-pr-gate.md");
+  });
+});
+
+describe("runDaemonPrLintMetrics", () => {
+  test("fires one gh call with the canonical selector + 30d window", async () => {
+    /** @type {string[][]} */
+    const ghCalls = [];
+    const runGh = async (/** @type {ReadonlyArray<string>} */ args) => {
+      ghCalls.push([...args]);
+      return "[]";
+    };
+    await runDaemonPrLintMetrics({
+      clock: () => new Date("2026-05-06T12:00:00Z"),
+      runGh,
+    });
+    expect(ghCalls).toHaveLength(1);
+    const [call] = ghCalls;
+    expect(call).toContain("-R");
+    expect(call).toContain(CANONICAL_REPO);
+    expect(call).toContain("--author");
+    expect(call).toContain("@me");
+    expect(call).toContain("--state");
+    expect(call).toContain("all");
+    expect(call).toContain("--search");
+    expect(call).toContain("created:>=2026-04-06");
+    expect(call).toContain("--json");
+    expect(call).toContain("number,statusCheckRollup");
+    expect(call).toContain("--limit");
+    expect(call).toContain(String(GH_PR_LIST_LIMIT));
+  });
+
+  test("threads parsed stats back into the result + report", async () => {
+    const runGh = async () =>
+      JSON.stringify([
+        // 1 dirty (FAILURE)
+        { number: 100, statusCheckRollup: [{ conclusion: "FAILURE" }] },
+        // 9 clean
+        ...Array.from({ length: 9 }, (_, i) => ({
+          number: 101 + i,
+          statusCheckRollup: [{ conclusion: "SUCCESS" }],
+        })),
+      ]);
+    const result = await runDaemonPrLintMetrics({
+      clock: () => new Date("2026-05-06T12:00:00Z"),
+      runGh,
+    });
+    expect(result.stats.total).toBe(10);
+    expect(result.stats.clean).toBe(9);
+    expect(result.stats.dirtyNumbers).toEqual([100]);
+    expect(result.stats.passRate).toBeCloseTo(0.9, 5);
+    expect(result.report).toMatch(/Verdict: +OK/);
+    expect(result.report).toMatch(/9\/10 \(0\.900\)/);
+  });
+
+  test("propagates a runGh rejection (no graceful-degrade — operator must see the gh outage)", async () => {
+    const runGh = async () => {
+      throw new Error("gh: not authenticated");
+    };
+    await expect(
+      runDaemonPrLintMetrics({
+        clock: () => new Date("2026-05-06T12:00:00Z"),
+        runGh,
+      }),
+    ).rejects.toThrow(/not authenticated/);
+  });
+});
+
+// 2026-05-28 (daemon-gate-docs-citation-migration): the
+// extractDaemonPrePrLintGateBlock helper was removed alongside the
+// TASKS.md-citation tests. docs/daemon-pre-pr-gate.md is now the
+// single source of truth for the threshold prose; a follow-up
+// (daemon-pre-pr-gate-fixture-fixture-citation-cleanup, P3) handles the
+// remaining fixture-string references so the parent task block can
+// also be removed eventually.
+
+describe("ROLLING_30D_MIN_PASS_RATE prose ↔ canonical constant parity", () => {
+  // Slice 26/N: the rolling-window pass-rate threshold (0.8) lives canonically
+  // as `ROLLING_30D_MIN_PASS_RATE` in this module; `scripts/self-diagnose.mjs`
+  // and `formatReport` import it directly, so the in-code dependency stays
+  // tight (the `pre-registered constants` block above pins the constant's
+  // value). Three operator-facing surfaces still cite the threshold inline as
+  // prose:
+  //
+  //   - `docs/daemon-pre-pr-gate.md` (the gate's explanation page —
+  //     "≥80%" / "Below 0.8").
+  //   - `TASKS.md` `daemon-pre-pr-gate-fixture` block (the task's pre-registered
+  //     metric — Hypothesis "≥80%", Details "below 80%", Measurement "≥0.80").
+  //   - `novel/tick-loop/src/daemon.ts` § buildDaemonBrief (the daemon's
+  //     iteration prompt — "≥80% of daemon-authored PRs ...").
+  //
+  // A future PR tightening the threshold to 0.85 would update the constant +
+  // its in-code imports without tripping any test, while the prose silently
+  // continued to claim "≥80%" / "below 0.8". Operators reading any surface
+  // would see a stale number; the daemon's prompt would announce a different
+  // threshold than the one its self-diagnose actually applies.
+  //
+  // Slice 26/N closes the surface: derive the percent and decimal forms from
+  // the canonical constant, then assert each surface contains both shapes
+  // verbatim. Same pattern as slices 24/N (noop-exit token brief↔invariant↔docs)
+  // and 25/N (invariant-id ↔ docs/TASKS.md jq-selector) — single source of
+  // truth in code, prose surfaces pinned to it.
+
+  /**
+   * Render the canonical fraction in the two textual shapes that appear in
+   * prose: "0.8" decimal and "80%" percent. Both are the natural `String(...)`
+   * form a writer would type, so both must update in lockstep when the
+   * constant moves.
+   *
+   * @param {number} fraction
+   * @returns {{ percent: string, decimal: string }}
+   */
+  function thresholdProseShapes(fraction) {
+    return {
+      percent: `${Math.round(fraction * 100)}%`,
+      decimal: String(fraction),
+    };
+  }
+
+  test("docs/daemon-pre-pr-gate.md cites the threshold in both percent and decimal forms", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    const { percent, decimal } = thresholdProseShapes(ROLLING_30D_MIN_PASS_RATE);
+    expect(doc).toContain(percent);
+    expect(doc).toContain(decimal);
+  });
+
+  // 2026-05-28 (daemon-gate-docs-citation-migration):
+  // the task block in TASKS.md has been removed (it was blocked-on-
+  // substrate-port AND its substrate has shipped per PR #863); the
+  // threshold citations migrated to docs/daemon-pre-pr-gate.md (which
+  // already cited both forms on lines 7 + 183). The first test above
+  // ("docs/daemon-pre-pr-gate.md cites the threshold ...") is the
+  // load-bearing parity check; this test's TASKS.md half is retired.
+  // extractDaemonPrePrLintGateBlock is kept exported in case a future
+  // session reintroduces the task block for some other reason.
+
+  // Removed in PR #888 (phase-11b step 6/7/8): the original test
+  // pinned the threshold percent in `novel/tick-loop/src/daemon.ts`'s
+  // buildDaemonBrief. After the TS daemon is deleted, the canonical
+  // brief lives at `scripts/build_brief.py` (the bash skeleton's
+  // brief builder). A follow-up P3 (`daemon-brief-threshold-pin-in-
+  // build_brief-py`) restores the pin against build_brief.py if the
+  // threshold ever moves.
+
+  // 2026-05-28 (daemon-gate-docs-citation-migration):
+  // parser sanity test retired alongside the task block removal.
+  // extractDaemonPrePrLintGateBlock is still exported (defensive — if a
+  // future session reintroduces the block, the parser still works), but
+  // the test that asserted the block exists in TASKS.md is dropped.
+});
+
+describe("ROLLING_30D_MIN_N prose ↔ canonical constant parity", () => {
+  // Slice 27/N: extends slice 26/N's drift-gate family to the second
+  // load-bearing number in this module — the minimum-sample-size threshold
+  // (n=10) below which the verdict is INSUFFICIENT-DATA, not OK/BELOW.
+  // `scripts/self-diagnose.mjs` imports `ROLLING_30D_MIN_N` directly, so the
+  // in-code dependency is tight; two operator-facing surfaces still cite the
+  // value as inline prose:
+  //
+  //   - `docs/daemon-pre-pr-gate.md` (Operator commands § self-diagnose
+  //     example — "fires only with ≥10 daemon PRs in the rolling window").
+  //   - `TASKS.md` `daemon-pre-pr-gate-fixture` block — Measurement line
+  //     ("rolling 30d window holds ≥10 PRs" + "minimum sample size ≥10 in
+  //     `ROLLING_30D_MIN_N`").
+  //
+  // A future PR tightening n from 10 to 20 would update the constant and its
+  // self-diagnose import without tripping any existing test, while the prose
+  // silently kept claiming "≥10". Operators reading either surface would see
+  // a stale number; the doc's example invariant query and the task block's
+  // pre-registered minimum would announce a smaller window than the verdict
+  // actually requires. Same shape as slice 26/N — the daemon brief is not
+  // covered because n=10 isn't cited there (only the percent threshold is).
+
+  /**
+   * Render the canonical sample-size threshold in the prose form both
+   * surfaces use: "≥10". The "≥" + integer shape is the natural way a
+   * writer cites a non-strict lower bound; pinning that exact byte sequence
+   * forces a prose update in lockstep with the constant.
+   *
+   * @param {number} n
+   * @returns {string}
+   */
+  function minNProseShape(n) {
+    return `≥${n}`;
+  }
+
+  test("docs/daemon-pre-pr-gate.md cites the n threshold in ≥N form", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    expect(doc).toContain(minNProseShape(ROLLING_30D_MIN_N));
+  });
+
+  // 2026-05-28 (daemon-gate-docs-citation-migration):
+  // the TASKS.md half of this parity check is retired alongside the
+  // task block removal. docs/ is the single source of truth now.
+});
+
+describe("ROLLING_WINDOW_DAYS prose ↔ canonical constant parity", () => {
+  // Slice 28/N: extends slices 26/N + 27/N to the third load-bearing number
+  // exported from this module — the rolling-window width
+  // (`ROLLING_WINDOW_DAYS = 30`). `scripts/self-diagnose.mjs` imports the
+  // constant directly (`since = Date.now() - ROLLING_WINDOW_DAYS * 86_400_000`),
+  // so the in-code dependency stays tight; two operator-facing surfaces still
+  // cite the window inline as prose:
+  //
+  //   - `docs/daemon-pre-pr-gate.md` — "rolling 30d daemon-PR clean-CI
+  //     fraction" (the gate's overview line).
+  //   - `TASKS.md` `daemon-pre-pr-gate-fixture` block — Details "rolling 30d
+  //     pass-rate" + Measurement "rolling 30d window holds ≥10 PRs".
+  //
+  // A future PR widening the window to 60d (e.g., to dampen short-term noise
+  // in the verdict) would update the constant + its self-diagnose import
+  // without tripping any test, while the prose silently kept claiming "30d".
+  // Operators reading either surface would see a stale number; the metric's
+  // observed-vs-expected mismatch would surface only via an alert chain none
+  // of these surfaces own. Same single-shape pattern as slice 27/N — the
+  // daemon brief is not covered because the window width is not cited there.
+
+  /**
+   * Render the canonical window width in the prose form both surfaces use:
+   * `${n}d` (e.g., "30d"). This is the natural compact shape a writer types
+   * for a day-count window; pinning that exact byte sequence forces a prose
+   * update in lockstep with the constant.
+   *
+   * @param {number} days
+   * @returns {string}
+   */
+  function windowDaysProseShape(days) {
+    return `${days}d`;
+  }
+
+  test("docs/daemon-pre-pr-gate.md cites the window width in Nd form", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    expect(doc).toContain(windowDaysProseShape(ROLLING_WINDOW_DAYS));
+  });
+
+  // 2026-05-28 (daemon-gate-docs-citation-migration):
+  // the TASKS.md half of this parity check is retired alongside the
+  // task block removal. docs/ is the single source of truth now.
+});

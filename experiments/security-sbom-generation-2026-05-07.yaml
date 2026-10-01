@@ -1,0 +1,70 @@
+id: security-sbom-generation-2026-05-07
+hypothesis: |
+  TASKS.md `supply-chain-hardening-lockfile-sbom-slsa` § Details (b)
+  specifies `.github/workflows/sbom.yml` — a GitHub Actions workflow
+  that generates a CycloneDX 1.5/1.6 SBOM on every GitHub release and
+  attaches `sbom.cdx.json` to the release artefacts.
+
+  Today (2026-05-07) the supply-chain task has shipped lockfile-
+  integrity gates (PRs #263-#265), SBOM-shape gates (PRs #269-#270,
+  #285-#286, #290), Dependabot config (PR #291), and SLSA Build Level
+  3 provenance (PR #da1d9be), but the SBOM generation workflow is
+  absent. Without it, the `sbom-shape` CI gate passes vacuously (the
+  fail-safe-defaults exit-0 path fires on ENOENT) and consumers have
+  no SBOM to download from any release.
+
+  The workflow: on `release` creation, install pnpm dependencies, run
+  `@cyclonedx/cyclonedx-npm` to emit `sbom.cdx.json` (CycloneDX 1.5
+  or 1.6), validate the shape with `node scripts/check-sbom-shape.mjs`,
+  and attach the file to the GitHub release via `gh release upload`.
+  The shape validator guarantees the consumer's structural guarantee —
+  that `bomFormat`, `specVersion`, `components[]`, and per-component
+  `type`/`name`/`version`/`purl` fields match the subset downstream
+  tooling expects — is checked before the artefact lands in the
+  consumer's hands (rule #10 deterministic enforcement).
+
+  Pre-registration (Munafò et al. 2017): the prediction is committed
+  BEFORE any code is written — `.github/workflows/sbom.yml` does not
+  exist on `main` at experiment-creation time.
+success: |
+  - `.github/workflows/sbom.yml` exists and triggers on `release: created`.
+  - The workflow YAML is syntactically valid:
+    `node -e "require('js-yaml').load(require('fs').readFileSync('.github/workflows/sbom.yml','utf8'))"` exits 0.
+  - The workflow references `@cyclonedx/cyclonedx-npm` (the CycloneDX
+    reference implementation for Node.js) and validates with
+    `scripts/check-sbom-shape.mjs` before attaching the artefact.
+  - Vision.md pattern conformance index carries a row mentioning
+    `.github/workflows/sbom.yml` (`grep -q "sbom.yml" vision.md`
+    exits 0).
+  - `docs/security/supply-chain.md` no longer lists SBOM generation
+    as a "Future layer" — it is now documented as shipped.
+pivot: |
+  If `@cyclonedx/cyclonedx-npm` emits a CycloneDX specVersion outside
+  the `{1.5, 1.6}` allowlist (i.e., `check-sbom-shape.mjs` rejects
+  the generated artefact), pivot to `@cyclonedx/cdxgen`, which is
+  toolkit-agnostic and supports multiple output versions. The pivot
+  preserves the security guarantee; only the generator changes.
+
+  Pivot trigger: ≥2 consecutive release runs produce an SBOM that
+  fails the shape validator with `unsupported-specVersion` AND the
+  upstream `@cyclonedx/cyclonedx-npm` has an open issue or release
+  note explaining the format change. Do NOT widen the
+  `ALLOWED_SPEC_VERSIONS` set unless CycloneDX has published the new
+  version and the downstream tooling supports it.
+measurement: |
+  grep -q "sbom.yml" vision.md && grep -q "@cyclonedx/cyclonedx-npm" .github/workflows/sbom.yml && node -e "require('js-yaml').load(require('fs').readFileSync('.github/workflows/sbom.yml','utf8'))" && echo "ok"
+anchor: |
+  TASKS.md `supply-chain-hardening-lockfile-sbom-slsa` § Details (b)
+  — the pre-registered scope: `.github/workflows/sbom.yml`; vision.md
+  § 13.5 (supply-chain hardening — SBOM per release is the consumer's
+  structural guarantee); CycloneDX Specification 1.5/1.6
+  (cyclonedx.org) — the SBOM standard; CNCF Security TAG SBOM working
+  group 2024 — every release should ship a machine-verified SBOM;
+  rule #1 (vision.md § 1 — adopt industry-standard; `@cyclonedx/
+  cyclonedx-npm` is the reference implementation, not a novel tool);
+  rule #10 (vision.md § 10 — deterministic enforcement; the shape
+  validator is the gate, not prose); rule #13 (vision.md § 13 —
+  security & privacy second priority; SBOM is item 5 of the 8-item
+  minimum bar); Munafò, Nosek, Bishop et al., "A Manifesto for
+  Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017
+  (pre-registration — prediction committed before code is written).

@@ -1,0 +1,2590 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  markdownlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Invoke the same `pnpm lint:md` script local pre-pr-lint runs.
+      # The version of `markdownlint-cli2` is pinned in `package.json`'s
+      # devDependencies (currently 0.22.1) + locked in `pnpm-lock.yaml`,
+      # so CI and local now resolve to byte-identical binaries. Closes
+      # TASKS.md `align-markdownlint-cli2-local-vs-ci` (P1, observed
+      # 2026-05-22): the prior CI line was `npx -y markdownlint-cli2@0.15.0`
+      # — an out-of-band version, drift-prone, and missing the local
+      # exclude list (`.claire`, `opencode.notes.md`, `.aider*`).
+      # Single source of truth for the invocation now is `package.json`.
+      - run: pnpm lint:md
+
+  tasks-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+      # Pinned to the 0.7.x minor (matches the version validated locally as of
+      # 2026-05-03). Rule #7 (chaos engineering — trust no unverified
+      # dependency); ARCHITECTURE.md § "Versioning & dependency evolution".
+      - run: npx -y @tasks-md/lint@^0.7.0 TASKS.md
+
+  glossary-discipline:
+    # vision.md § rule #5: every Minsky-coined term in vision.md resolves
+    # to a Glossary entry. Implements rule #10 (deterministic enforcement)
+    # for rule #5 — replaces the earlier section-header-only check.
+    # Source: scripts/check-rule-5-glossary-discipline.mjs +
+    #   scripts/glossary-allowlist.txt; paired tests under
+    #   scripts/check-rule-5-glossary-discipline.test.mjs.
+    # Ratchet (rule #10 § 5): the prior section-header grep is removed
+    # in this job — never run two enforcement mechanisms competing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+      - run: node scripts/check-rule-5-glossary-discipline.mjs
+
+  biome:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm biome ci .
+
+  knip:
+    # Dead-code + unused-exports + unused-dependencies detector. Config at
+    # `knip.json` declares the workspace shape (entry points = bin scripts
+    # + scripts/*.mjs + workspace package src/index.ts + paired *.test.*
+    # vitest entries). All rules currently at WARN — knip surfaces findings
+    # but doesn't block CI. Once each rule family's violation count
+    # converges to ≤5 with documented exemptions, it graduates to ERROR
+    # per the rule-#10 ratchet.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec knip --no-progress --reporter compact
+
+  check-cross-repo-pr-rate:
+    # Cross-repo runner iteration→PR ship-rate gate (M1 P0
+    # `cross-repo-iteration-ship-rate-ci-gate`). Reads
+    # `.minsky/experiment-store/cross-repo/*.jsonl` and exits 1 when the
+    # rolling-30d ratio is below the pre-registered FLOOR (0.10). Pure
+    # threshold constants pinned in
+    # `novel/cross-repo-runner/src/iteration-ship-rate.ts` (rule #9 +
+    # Munafò 2017). One source of truth shared by the .mjs CLI + the
+    # `scripts/collect-metrics.mjs` collector + the runtime invariant.
+    # On the daemon's fresh worktree the experiment-store is empty so the
+    # verdict is INSUFFICIENT-DATA (exit 0); this gate only fires when
+    # actual iteration history accumulates and degrades.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @minsky/cross-repo-runner build
+      - run: node scripts/check-cross-repo-pr-rate.mjs --window=30d
+
+  depcruise:
+    # Circular-dep + orphan-file detector via dependency-cruiser. Config at
+    # `.dependency-cruiser.cjs`. Like knip, the rules are currently at WARN
+    # so the step exits 0 when the only violations are cycles or orphans;
+    # ERROR-level rules (`no-dep-on-test`, `no-non-package-json`) trip the
+    # exit code immediately.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec depcruise novel scripts --output-type err
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:coverage
+        env:
+          CI: "true"
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Integration + M1 TDD tests (120s timeout per test)
+        run: pnpm test:integration
+        env:
+          CI: "true"
+          MINSKY_NON_INTERACTIVE: "1"
+      - name: M1 metrics dashboard
+        run: node scripts/m1-metrics-dashboard.mjs --json > /tmp/m1-metrics.json || true
+      - name: Upload M1 metrics
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m1-metrics
+          path: /tmp/m1-metrics.json
+
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level=high
+
+  bash-tests:
+    # Phase 7 bash-side parity tests for `bin/minsky-run.sh` +
+    # `scripts/spawn_with_watchdog.py`. Filed as
+    # `add-bats-ci-gate-for-tests-minsky-run-bats` (P2) after PR #797
+    # noted the bats suite was dev-only with no enforcement.
+    # Anchor: rule #11 (deterministic enforcement — every test is a
+    # gate); rule #1 (bats + jq + GNU timeout are existing tools).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install bats + jq + shellcheck (apt)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats jq shellcheck
+      - name: shellcheck bin/minsky-run.sh
+        run: shellcheck bin/minsky-run.sh
+      - name: shellcheck bin/minsky (Phase 7c dispatch)
+        # Pre-existing info-level warnings in bin/minsky are tolerated;
+        # we only fail on warning-and-above. The Phase 7c --bash-runner
+        # dispatch hunk must stay shellcheck-clean.
+        run: shellcheck --severity=warning bin/minsky
+      - name: shellcheck distribution/systemd/run-daemon.sh (Phase 7b'-prep)
+        # Pinned warning-level so the MINSKY_BASH_RUNNER opt-in branch
+        # added in Phase 7b'-prep stays clean.
+        run: shellcheck distribution/systemd/run-daemon.sh
+      - name: Run bats suite
+        run: bats tests/minsky-run.bats
+
+  rule-2-dep-coverage:
+    # rule #2 enforcement: every external dep is reached only through
+    # `novel/adapters/`. The script extracts vendor names from
+    # ARCHITECTURE.md's dependency table and fails the build if any
+    # non-adapter file under `novel/` directly imports one.
+    # Anchor: rule #10 (every constitutional rule has a deterministic CI
+    # lint); Martin, *Clean Architecture*, 2017 (dependency rule).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+      - run: node scripts/check-rule-2-dep-coverage.mjs
+
+  rule-7-chaos-coverage:
+    # Rule #7 (chaos engineering) deterministic enforcement, per rule #10.
+    # Verifies that every `novel/**/README.md`'s failure-mode table row has a
+    # chaos-test reference that resolves to either a real `*.test.ts` path or
+    # the literal `(deferred — covered when <task-id> ships)` form whose
+    # task-id exists in TASKS.md or the git log.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history so the linter can resolve `closes <task-id>` task
+          # references from past commits.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: lint chaos-test coverage
+        run: node scripts/check-rule-7-chaos-coverage.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-7-chaos-coverage.test.mjs
+
+  maciek-smoke:
+    # rule #9 preparation-PR: pins Maciek's `claude-monitor` Python tool at a
+    # known-good version so the future `budget-guard-maciek-impl` adapter test
+    # has a reproducible upstream. Smoke = install + version invocation.
+    # Anchor: rule #9 (preparation-PR pattern); rule #7 (pin versions, no floating tags).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install claude-monitor (pinned)
+        run: pipx install claude-monitor==3.1.0
+      - name: verify version
+        run: |
+          version=$(claude-monitor --version 2>&1)
+          echo "$version"
+          # Fail loudly if the binary isn't on PATH or returns nothing.
+          test -n "$version"
+          # Fail loudly if the pinned version drifted (e.g., pipx resolved a
+          # newer minor due to a yanked release). 3.1.0 is the pin until the
+          # quarterly review explicitly bumps it.
+          echo "$version" | grep -q "3.1.0"
+
+  rule-1-novel-justification:
+    # rule #10: deterministic enforcement of rule #1 (don't reinvent the wheel).
+    # Fails when a PR adds `novel/<pkg>/` (excluding `novel/adapters/`) without
+    # either a `research.md` entry under a "When the existing tools didn't fit"
+    # heading mentioning <pkg>, or an opt-out comment in the package README.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Need the merge-base with main reachable for `git diff main...HEAD`.
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: rule-1 lint
+        run: node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main
+
+  rule-4-otel-coverage:
+    # rule #4 (everything measurable, everything visible) deterministic
+    # enforcement, per rule #10. Diff-based: walks `novel/**/*.ts` files
+    # newly added or modified relative to `origin/main` on the PR branch
+    # and requires every exported function / method / arrow / default
+    # export to carry a leading JSDoc `@otel <span-name>` or
+    # `@otel-exempt <reason>` (≥3 chars). Existing un-annotated code is
+    # grandfathered until each file is touched again — same precedent as
+    # rule-1 and rule-3.
+    # Anchor: rule #10 (deterministic enforcement); OpenTelemetry
+    # specification (CNCF 2020+); Gregg, *Systems Performance*, 2014
+    # (USE method — instrumentation as a structural property).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: rule-4 lint
+        run: node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-4-otel-coverage.test.mjs
+
+  rule-3-doc-first:
+    # rule #3 (doc-first): every PR adding/modifying `novel/**/*.ts`
+    # (non-test) must touch a `user-stories/*.md` OR the affected
+    # package's README.md, OR include a deferral / refactor-exemption
+    # marker in the PR description.
+    # Anchor: rule #10 (deterministic enforcement); Knuth 1984
+    # (literate programming); Beck 1999 (CI as constraint enforcer).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: fetch PR body
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json body --jq .body > /tmp/rule-3-pr-body.md
+      - name: rule-3 lint
+        env:
+          RULE_3_DIFF_BASE: origin/main
+          RULE_3_PR_BODY_PATH: /tmp/rule-3-pr-body.md
+        run: node scripts/check-rule-3-doc-first.mjs
+
+  rule-12-scope-discipline:
+    # rule #12 (vision.md § "Scope discipline" — iron rule): every
+    # newly-added (status A) public artefact under `novel/**`,
+    # `scripts/*.{mjs,sh,ts,js}`, `.github/workflows/*.yml`, or
+    # `distribution/**` must resolve to either (a) a TASKS.md task
+    # block whose body mentions the path, (b) an
+    # `experiments/<id>.yaml` whose body mentions the path, OR (c) a
+    # `<!-- scope: human-approved <reason> -->` comment in the new
+    # file's first 20 lines OR the PR description. Modifications +
+    # renames are grandfathered (rule-1 / rule-3 / rule-4 precedent).
+    # Anchor: rule #10 (deterministic enforcement); rule #12 itself;
+    # Ries 2011 (validated learning); Munafò 2017 (pre-registration).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: fetch PR body
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json body --jq .body > /tmp/rule-12-pr-body.md
+      - name: rule-12 lint
+        env:
+          RULE_12_DIFF_BASE: origin/main
+          RULE_12_PR_BODY_PATH: /tmp/rule-12-pr-body.md
+        run: node scripts/check-rule-12-scope-discipline.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-12-scope-discipline.test.mjs
+
+  rule-17-proactive-heal:
+    # rule #17 (vision.md § "Proactive healing — observation IS the fix"
+    # — iron rule): a PR description that surfaces observed-error tokens
+    # (`spawn-failed`, `scope-leak`, `ETIMEDOUT`, `GraphQL 401`, stack
+    # traces, etc.) MUST also carry healing evidence — a `fix(...)` /
+    # `patch:` commit subject, a `**Blocked**: <code>` task block, or a
+    # non-empty diff that lands the fix. Pure "I observed X" PR bodies
+    # are rejected as the "watcher who narrates" anti-pattern.
+    # Anchor: rule #10 (deterministic enforcement); rule #17 itself;
+    # Forsgren/Humble/Kim, *Accelerate*, 2018 (DORA — change-fail rate
+    # falls when fixes prevent classes, not instances); operator
+    # directive 2026-05-19 ("why aren't they being fixed by you right
+    # away?").
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: fetch PR body
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json body --jq .body > /tmp/rule-17-pr-body.md
+      - name: rule-17 lint
+        env:
+          RULE_17_DIFF_BASE: origin/main
+          RULE_17_PR_BODY_PATH: /tmp/rule-17-pr-body.md
+        run: node scripts/check-rule-17-proactive-heal.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-17-proactive-heal.test.mjs
+
+  no-hardcoded-user-paths:
+    # rule-#1 + rule-#17 deterministic gate against hardcoded user paths.
+    # `MINSKY_HOME ?? "/Users/cbrwizard/…"` fallbacks broke the script for
+    # every operator who isn't `cbrwizard` and were healed twice in PRs
+    # #651 and #654. Without this lint, the same class returns the next
+    # time someone hardcodes their own `$HOME` in a script. Comments are
+    # exempt (audit trail); current-user, `ubuntu`, and `runner` are
+    # exempt (CI / local-machine self-references).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-hardcoded-user-paths lint
+        run: node scripts/check-no-hardcoded-user-paths.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-no-hardcoded-user-paths.test.mjs
+
+  no-personal-paths-in-docs:
+    # Markdown sibling of `no-hardcoded-user-paths`. The pure-prose lint blocks
+    # personal-path leaks (`/Users/<other-user>`, `~/apps/<repo-on-fyodor's-mac>`,
+    # `MINSKY_HOME=~/apps/tooling/minsky` defaults) from sneaking into READMEs
+    # / docs / user-stories / changelogs / TASKS.md. Same enforcement shape as
+    # the code-path version: comments exempt, current-user exempt, runs across
+    # every tracked `*.md` and `*.markdown` file under the repo root.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-personal-paths-in-docs lint
+        run: node scripts/check-no-personal-paths-in-docs.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-no-personal-paths-in-docs.test.mjs
+
+  agents-md-coherence:
+    # AGENTS.md is the agent runbook every agent reads first. When it drifts
+    # from the actual repo state (broken relative links to renamed docs,
+    # `vision.md § N` citations pointing to non-existent rules, missing
+    # load-bearing section anchors that other scripts cite), agents follow
+    # stale instructions. This gate pins three drift classes: required
+    # sections, relative-link resolution, and `vision.md § N` citation
+    # resolution. Same shape as `no-personal-paths-in-docs` — pure decision
+    # function with the I/O at the edge.
+    #
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # rule #17 (vision.md § 17 — proactive healing); operator directive
+    # 2026-05-21 "Let's ensure agents.md is always updated too".
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: agents-md-coherence lint
+        run: node scripts/check-agents-md-coherence.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-agents-md-coherence.test.mjs
+
+  rule-9-tasksmd-fields:
+    # Rule #9 (vision.md § "Pre-registered hypothesis-driven development
+    # — iron rule"): every task block in TASKS.md must carry Hypothesis,
+    # Success (or Acceptance), Pivot, Measurement, and Anchor. Without
+    # all five the rule degrades to a wish-list. The 2026-05-19 audit
+    # found 32 of 152 task blocks violating; those are grandfathered in
+    # the lint's allowlist with a backfill task to drain the list. NEW
+    # tasks added after 2026-05-19 are never grandfathered.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: rule-9-tasksmd-fields lint
+        run: node scripts/check-rule-9-tasksmd-fields.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-9-tasksmd-fields.test.mjs
+
+  competitive-goal:
+    # Slice (d) of `self-metrics-competitive-benchmark`: every P0/P1
+    # task block must carry a `**Competitive-goal**:` field naming
+    # which scorecard metric the task moves. Same rule-#10 ratchet
+    # pattern as rule-9-tasksmd-fields above — 81 grandfathered task
+    # ids at lint-introduction, NEW tasks must carry the field.
+    # Source: operator directive 2026-05-16 (TASKS.md `self-metrics-
+    # competitive-benchmark` block slice d).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: competitive-goal lint
+        run: node scripts/check-competitive-goal.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-competitive-goal.test.mjs
+
+  rule-6-let-it-crash:
+    # rule #10: deterministic enforcement of rule #6 (let-it-crash). Walks
+    # every novel/**/*.ts file added/modified in the PR; flags try/catch
+    # blocks nested deeper than 1 level (`nested-try`) or catch clauses
+    # whose body neither re-throws nor calls `supervise(...)`
+    # (`swallowing-catch`). Per-catch opt-out: the line immediately above
+    # the `catch` keyword is `// rule-6: handled-locally — <reason>`.
+    # Anchor: rule #10; Armstrong, *Programming Erlang*, 2007 (let it
+    # crash); Lampson 1983 (use exceptions only for exceptional conditions).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: rule-6 lint
+        env:
+          RULE_6_DIFF_BASE: origin/main
+        run: node scripts/check-rule-6-let-it-crash.mjs
+
+  pattern-index:
+    # rule #10: deterministic enforcement of rule #8 (pattern conformance —
+    # every artefact maps to a published pattern). Diff-based: every newly-
+    # added top-level artefact (`novel/**`, root `*.md`, `setup.sh`,
+    # `distribution/**`, `.github/workflows/**`) on the PR must be mentioned
+    # by `vision.md` § "Pattern conformance index", unless the file carries
+    # `<!-- pattern: not-applicable — <reason> -->` in its first ~20 lines.
+    # Existing files are grandfathered until the file is renamed (same
+    # precedent as rule-1 / rule-3 / rule-4).
+    # Anchor: rule #10; rule #8 (pattern conformance); Beck 1999 (CI as
+    # constraint enforcer); Alexander et al. 1977 (pattern catalogue).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: pattern-index lint
+        run: node scripts/check-pattern-index.mjs --diff-base=origin/main
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-pattern-index.test.mjs
+
+  pr-self-grade:
+    # AGENTS.md § "Orchestrator discipline" rule (2): every PR's description
+    # carries a `Hypothesis self-grade` block (Predicted / Observed / Match /
+    # Lesson). Closes the loop on rule #9 — pre-registration without
+    # observation-vs-prediction is half a rule. Runs on pull_request events
+    # only; on push-to-main this job is skipped (no PR to inspect).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+      - name: fetch PR body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json body --jq .body > /tmp/pr-body.md
+          test -s /tmp/pr-body.md
+      - name: lint self-grade block
+        run: node scripts/check-pr-self-grade.mjs /tmp/pr-body.md
+        # Unit tests for this script run in the broader `test` job (root
+        # vitest config includes `scripts/**/*.test.mjs`). Keep this gate
+        # narrow: read the PR body, lint the block, exit.
+
+  secret-scan:
+    # vision.md § 13.1 / TASKS.md `secret-scanning-precommit-and-ci` §
+    # Measurement: full-scan of every tracked file rejects PR-introduced
+    # credential shapes (`ghp_…`, `sk-…`, `xoxb-…`, `AKIA…`, `AIza…`, PEM
+    # private-key headers). Slices 1-3 (PRs #258, #259, #261) shipped the
+    # pure classifier, the multi-file walker, and the
+    # `@scan-secrets-allowed: <reason>` annotation seam in
+    # `scripts/scan-secrets.mjs`. This slice (4) wires the CLI into the
+    # gate. Push + PR; security gates are NOT PR-only because a leak that
+    # lands via direct push must still surface (and rotate).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: secret-scan lint
+        run: node scripts/scan-secrets.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/scan-secrets.test.mjs
+
+  sbom-shape:
+    # vision.md § 13.5 / TASKS.md `supply-chain-hardening-lockfile-sbom-slsa` §
+    # Measurement: every release-candidate's CycloneDX SBOM matches the 1.5/1.6
+    # subset the consumer's gates depend on. Slices 1-4 (PRs #269, #270, #285,
+    # #286) shipped the pure classifier, the aggregating walker, the JSON-text
+    # parser, and the CLI driver in `scripts/check-sbom-shape.mjs`. This slice
+    # (5) wires the CLI into the CI gate so a regression in `cyclonedx-cli`
+    # output (missed `purl`, duplicated `bom-ref`, unsupported spec version)
+    # surfaces in CI rather than silently shipping with the release.
+    #
+    # Fail-safe-defaults (Saltzer & Schroeder 1975): the CLI exits 0 when no
+    # SBOM is on disk (`sbom.cdx.json` absent — the typical state until a
+    # generation step is wired into the release workflow). The gate therefore
+    # passes today and catches shape regressions the moment the SBOM file
+    # appears, without blocking the build on a missing artefact.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: sbom-shape lint
+        run: node scripts/check-sbom-shape.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-sbom-shape.test.mjs
+
+  lockfile-integrity:
+    # vision.md § 13.5 / TASKS.md `supply-chain-hardening-lockfile-sbom-slsa` §
+    # Measurement: every PR's `pnpm-lock.yaml` is diffed against `origin/main`
+    # and every same-`name@version` entry whose integrity hash changed is
+    # rejected — the empirical fingerprint of the 2025 chalk/debug supply-chain
+    # incident. Slices 1-3 (PRs #263, #264, #265) shipped the pure classifier,
+    # the diff walker, and the pnpm-lock.yaml parser in
+    # `scripts/check-lockfile-integrity.mjs`. This slice (4) wires the CLI into
+    # the gate. Push event runs the lint too — security gates are NOT PR-only,
+    # because a hijack landed via direct push must still surface and rotate.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # diff against origin/main needs the merge base.
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: lockfile-integrity lint
+        run: node scripts/check-lockfile-integrity.mjs --diff-base=origin/main
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-lockfile-integrity.test.mjs
+      # Public-registry guard: pnpm-lock.yaml must resolve only from public
+      # registries. Catches a lockfile generated behind a corporate package
+      # mirror (the 2026-06-01 Artifactory leak class) that both leaks the
+      # internal host and breaks `pnpm install` off-network.
+      - name: lockfile-registry lint
+        run: node scripts/check-lockfile-registry.mjs
+      - name: unit tests for the registry linter
+        run: pnpm exec vitest run scripts/check-lockfile-registry.test.mjs
+
+  user-story-security-section:
+    # vision.md § 13 / TASKS.md `security-privacy-priority-substrate`
+    # acceptance criterion #2: every user story (001–006) carries a
+    # `## Security & privacy` section that cites `rule #13` and has ≥5
+    # non-empty content lines. Pins the substrate-slice's user-story
+    # surface so a future rewrite cannot silently drop the
+    # constitutional-anchor link. Push event runs too — the gate is on
+    # the file shape, not on PR body context, so direct-push edits must
+    # surface as well.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: user-story-security-section lint
+        run: node scripts/check-user-story-security-section.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-user-story-security-section.test.mjs
+
+  rule-13-sibling-anchors:
+    # vision.md § 13 / TASKS.md `security-privacy-priority-substrate`
+    # acceptance criterion #3: each of the 6 sibling security P0s
+    # (`secret-scanning-precommit-and-ci`, `supervisor-sandbox-syscall-restriction`,
+    # `dashboard-localhost-only-by-default`, `otel-no-pii-in-spans-lint`,
+    # `supply-chain-hardening-lockfile-sbom-slsa`,
+    # `cloud-tier-external-security-audit-gate`) cites `rule #13` in its
+    # Anchor line. The pure classifier shipped in
+    # `scripts/check-rule-13-sibling-anchors.mjs`. This gate wires it into
+    # CI so a future TASKS.md rewrite that drops the anchor on a sibling
+    # surfaces here rather than silently breaking the substrate-cohesion
+    # invariant.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: rule-13-sibling-anchors lint
+        run: node scripts/check-rule-13-sibling-anchors.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-13-sibling-anchors.test.mjs
+
+  dashboard-localhost-bind:
+    # vision.md rule #13 minimum-bar item #4 / TASKS.md
+    # `dashboard-localhost-only-by-default` P0: pins the substrate-cohesion
+    # contract that `novel/dashboard-web/src/bind.ts` (pure resolver — default
+    # `127.0.0.1`) and `novel/dashboard-web/src/start.ts` (I/O boundary —
+    # `serve({ hostname })`) implement together. Without this gate, a future
+    # edit could silently re-expose the dashboard to LAN by removing the
+    # `resolveBindHostname` call or omitting the `hostname` field from
+    # `serve(...)` (whereupon @hono/node-server falls back to `0.0.0.0`).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: dashboard-localhost-bind lint
+        run: node scripts/check-dashboard-localhost-bind.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-dashboard-localhost-bind.test.mjs
+
+  vision-rule-13-task-id-citations:
+    # vision.md § 13 / TASKS.md `security-privacy-priority-substrate`
+    # acceptance criterion #3 (inverse direction): vision.md § 13's
+    # minimum-bar items 1–6 each cite the canonical sibling P0 ID
+    # verbatim as backticked text. The pure classifier shipped in
+    # `scripts/check-vision-rule-13-task-id-citations.mjs`. This gate
+    # wires it into CI so a future vision.md rewrite that drops one of
+    # the sibling IDs (or replaces it with prose) surfaces here rather
+    # than silently desynchronising the rule from its enforcement substrate.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: vision-rule-13-task-id-citations lint
+        run: node scripts/check-vision-rule-13-task-id-citations.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-vision-rule-13-task-id-citations.test.mjs
+
+  cloud-audit-gate:
+    # vision.md § 13 minimum-bar item 6 / TASKS.md
+    # `cloud-tier-external-security-audit-gate` § Files: blocks any PR
+    # touching cloud-tier package paths (`novel/cloud-supervisor/`,
+    # `novel/cross-repo-benchmark/`, `novel/shared-invariant-catalog/`)
+    # while the task block's `**Blocked**:` line still contains
+    # `needs-user-approval`. The gate is dormant today (no cloud-tier
+    # packages exist in `main`); shipping it ahead of the cloud tier ensures
+    # cloud-tier code cannot accrue silently before the audit clears. Pure
+    # classifier + paired tests ship in `scripts/check-cloud-audit-gate.mjs`;
+    # operator-facing prose lives in `docs/security/audit-gate.md` § Layer 1.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: cloud-audit-gate lint
+        env:
+          CLOUD_AUDIT_GATE_DIFF_BASE: origin/main
+        run: node scripts/check-cloud-audit-gate.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-cloud-audit-gate.test.mjs
+
+  vision-rule-13-non-task-anchors:
+    # vision.md § 13 / rule #13 minimum-bar items 7 (Privacy by default) and
+    # 8 (Threat model per novel/* package): the two items that have no
+    # sibling P0 task ID — their load-bearing citation is the named
+    # industry-standard ("GDPR Article 25", "OWASP Privacy Top 10",
+    # "STRIDE"). Companion gate to `vision-rule-13-task-id-citations` (which
+    # pins items 1-6); together the two close the inverse substrate-cohesion
+    # direction for *every* numbered minimum-bar item.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: vision-rule-13-non-task-anchors lint
+        run: node scripts/check-vision-rule-13-non-task-anchors.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-vision-rule-13-non-task-anchors.test.mjs
+
+  measure-agent-install:
+    # P1 sub-task `measure-agent-install-harness` (slice 3 of parent P0
+    # `agent-mediated-install`): the harness machinery for the 9-run
+    # cross-provider install-latency measurement. Runs in mock mode so
+    # CI has a deterministic regression gate without spending API budget.
+    # Live mode is the P2 follow-up `measure-agent-install-live-mode`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: measure-agent-install harness (mock mode)
+        run: node scripts/measure-agent-install.mjs --providers=mock --runs-per-provider=3 --threshold-seconds=90 --threshold-prompts=1 --quiet
+      - name: unit tests for the harness
+        run: pnpm exec vitest run scripts/measure-agent-install.test.mjs
+
+  otel-no-pii:
+    # vision.md § 13.2 / TASKS.md `otel-no-pii-in-spans-lint` § Measurement:
+    # full-scan of `novel/**/*.ts` rejects PR-introduced span attributes
+    # whose names look like credentials (`apiKey`, `password`, `bearerToken`,
+    # …) or whose string-literal values match a known credential prefix
+    # (`sk-…`, `ghp_…`, `xoxb-…`). Slices 1–3 (PRs #252, #255, #256) shipped
+    # the pure classifier, the AST walker, and the
+    # `// @otel-pii-allowed: <reason>` annotation seam in
+    # `scripts/check-otel-no-pii.mjs`. This slice (4) wires the CLI into the
+    # gate. Push event runs the lint too — security gates are NOT PR-only,
+    # because a leak landed via direct push must still surface.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: otel-no-pii lint
+        run: node scripts/check-otel-no-pii.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-otel-no-pii.test.mjs
+
+  privacy-data-egress:
+    # vision.md § 13.7 / TASKS.md `security-privacy-priority-substrate` slice
+    # (e): `docs/security/privacy-data-egress.md` is the single-page operator
+    # answer to "where does my data go?". Slice 1 (PR #310) shipped the doc;
+    # slice 2 (PR #311) shipped the pure classifier in
+    # `scripts/check-privacy-data-egress.mjs` pinning the six required H2
+    # sections, the five enumerated egress destinations, the STRIDE
+    # methodology engagement, and the GDPR Article 25 anchor. This slice
+    # wires the CLI into the gate so a future doc rewrite cannot silently
+    # drop the allow-list rows or strip the methodological grounding.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: privacy-data-egress lint
+        run: node scripts/check-privacy-data-egress.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-privacy-data-egress.test.mjs
+
+  threat-model-section:
+    # vision.md § 13.8 / TASKS.md `security-privacy-priority-substrate` §
+    # Acceptance #5: every constitutional `novel/**/README.md` carries a
+    # STRIDE-shaped `## Threat model` section with ≥5 non-empty content lines.
+    # The pure classifier + 17 hardcoded README paths shipped in
+    # `scripts/check-threat-model-section.mjs` (substrate slice 7.2). This
+    # slice wires the CLI into the gate so a future README rewrite that drops
+    # / shrinks a threat-model section, or a new `novel/<pkg>/` that lands
+    # without one, surfaces in CI rather than silently slipping in.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: threat-model-section lint
+        run: node scripts/check-threat-model-section.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-threat-model-section.test.mjs
+
+  cloud-agent-config-audit-matrix:
+    # `add-openhands-as-pluggable-backend` § Measurement: the 4-agent
+    # cloud-agent contract lint. Asserts AGENT_MATRIX has exactly 4 rows
+    # (openhands / claude / devin / aider) in that order, every row has
+    # a valid briefDeliveryShape + modelFlag, and post-integration steady
+    # state — pendingExternalDep === null for all rows. As of PR #879
+    # (phase-7b step 3) the source-of-truth and lint live in
+    # `scripts/lib/cloud-agent-config.mjs` +
+    # `scripts/cloud-agent-config-audit-matrix-lint.mjs` (ported from
+    # the deleted `novel/cross-repo-runner/src/agent-config.ts`). No
+    # pre-build step needed — the source module is plain .mjs with
+    # JSDoc types; the lint imports it directly.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: cloud-agent-config-audit-matrix lint
+        run: node scripts/cloud-agent-config-audit-matrix-lint.mjs
+      - name: vitest for the underlying cloud-agent-config module
+        run: pnpm exec vitest run scripts/lib/cloud-agent-config.test.mjs
+
+  security-docs-cohesion:
+    # vision.md § 13 / TASKS.md `security-privacy-priority-substrate`:
+    # every `docs/security/*.md` operator-readable doc cites `rule #13` AND
+    # carries a STRIDE-shaped `Threat model` section. Companion to
+    # `threat-model-section` (covers `novel/<pkg>/README.md`),
+    # `rule-13-sibling-anchors` (covers TASKS.md sibling P0s), and
+    # `vision-rule-13-task-id-citations` (covers vision.md § 13). Where those
+    # three pin the task / spec / package surfaces, this gate pins the
+    # operator-doc surface — the fourth and last surface where rule #13's
+    # substrate cohesion can drift silently. Pure classifier + paired tests
+    # ship in `scripts/check-security-docs-cohesion.mjs`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: security-docs-cohesion lint
+        run: node scripts/check-security-docs-cohesion.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-security-docs-cohesion.test.mjs
+
+  # `sandbox-env-declared` CI job deleted in PR #888 (phase-11b step 8).
+  # The lint pinned `novel/tick-loop/src/sandbox-mode.ts`'s
+  # SANDBOX_MODE_ENV constant against the supervisor unit-files. The TS
+  # file is gone with the rest of `novel/tick-loop/`; the bash skeleton
+  # doesn't yet wire MINSKY_SANDBOX. Restore as P3 follow-up when bash
+  # wiring lands.
+
+  pr-security-review:
+    # vision.md § 13 / TASKS.md `security-privacy-priority-substrate` §
+    # Measurement: every PR body carries either a `## Security & privacy`
+    # section OR a typed `<!-- security: not-applicable — <reason> -->`
+    # opt-out. Slice 2 of `pr-security-review` (slice 1 shipped the pure
+    # classifier in `scripts/check-pr-security-review.mjs` as PR #253) wires
+    # the classifier into the gate. PR-event only, like `pr-self-grade`.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+      - name: fetch PR body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json body --jq .body > /tmp/pr-body.md
+          test -s /tmp/pr-body.md
+      - name: lint security-review marker
+        run: node scripts/check-pr-security-review.mjs /tmp/pr-body.md
+
+  cto-audit-pr-conventions:
+    # TASKS.md `post-task-cto-audit` sub-step (e/f): audit PRs land on
+    # `audit/<UTC-date>-<task-id>` branches AND carry the
+    # `minsky:cto-audit` label. The pre-registered measurement query
+    # (`gh pr list --label minsky:cto-audit ...`) keys on the label;
+    # without this gate the metric silently undercounts when an audit
+    # PR is missing the label or uses the wrong branch (Munafò et al.
+    # 2017's pre-registration only works when the post-hoc query can
+    # actually see the artefacts it was committed to count).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+      - name: fetch PR shape
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json headRefName,labels > /tmp/pr-shape.json
+          test -s /tmp/pr-shape.json
+      - name: lint audit-branch ↔ label biconditional
+        run: node scripts/check-cto-audit-pr-conventions.mjs /tmp/pr-shape.json
+
+  linux-supervisor-integration:
+    # supervisor-integration-tests (TASKS.md): empirically exercise rows
+    # 1–4 of `distribution/README.md` § "Failure modes & chaos verification"
+    # against systemd's user-mode supervisor. The driver SIGKILLs the
+    # tick-loop and asserts respawn within 10 s; rows 2 / 3 / 4 are also
+    # exercised. Anchors: Forsgren-Humble-Kim 2018 (Accelerate — test
+    # reliability as DORA prerequisite); Armstrong 2007 (OTP supervision).
+    #
+    # Caveat (per TASKS.md "Risk" line): GitHub Actions Ubuntu runners run
+    # as a non-login user, and `systemctl --user` requires either a
+    # lingering session OR a wrapping `dbus-run-session`. The driver tries
+    # both fallbacks; if neither produces a usable user-bus, it exits 77
+    # (skipped). The job below installs `dbus-user-session` to maximise
+    # the chance the driver finds one.
+    #
+    # Escape hatch: if the user-systemd plumbing in CI sandboxes proves
+    # unfixable (>2 unrecoverable issues per the task brief), follow up
+    # with `supervisor-integration-self-hosted-runner` and gate this job
+    # behind `if: false` here. v0 ships with the gate ON to surface the
+    # signal — drift to OFF is a deliberate Pivot, not a default.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: install dbus-user-session + gettext (for envsubst)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            dbus-user-session gettext-base
+      - name: enable user lingering (best-effort)
+        run: |
+          # Linger lets systemd --user run without an active login session.
+          # On GH-hosted runners this usually succeeds via passwordless sudo.
+          sudo loginctl enable-linger "$USER" || true
+      - name: run supervisor integration test (linux)
+        # The driver itself decides whether to use dbus-run-session as the
+        # final fallback; see distribution/test-supervisor.sh.
+        run: bash distribution/test-supervisor.sh linux
+
+  macos-supervisor-integration:
+    # supervisor-integration-tests (TASKS.md): launchd half of the matrix.
+    # macOS GH-hosted runners boot a per-user launchd LaunchAgent domain by
+    # default (the runner's session has a usable `gui/$(id -u)` bootstrap),
+    # so unlike Linux this side does not need a workaround.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: run supervisor integration test (macos)
+        run: bash distribution/test-supervisor.sh macos
+
+  measurement-inspects-output:
+    # rule #10 ratchet applied to spec-monitor advisory rule A4 ("measurement
+    # runs but doesn't actually inspect output"): the deterministic gate
+    # promotes the allowlist (`test`, `[`, `[[`, `jq -e`, `grep -q`/`-c`,
+    # `assert`, `vitest`, `pnpm test`/`typecheck`/`lint`, `@tasks-md/lint`,
+    # `markdownlint-cli2`, `gh run list ... --jq`, `node scripts/check-*.mjs`)
+    # and blacklist (`echo`, bare `true`, bare `curl`, bare `node`) from
+    # SKILL.md into a CI lint over EXPERIMENT.yaml's `measurement` field.
+    # Three-way verdict — pass / fail / advisory-warn. The matching
+    # advisory rule (A4) is removed from `novel/spec-monitor/SKILL.md`
+    # in the same PR.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # Havelund & Goldberg, "Verify Your Runs", *VSTTE* 2008 (runtime
+    # verification — the inspect-output check is the deterministic-monitor
+    # layer); Beck 1999 (CI as the constraint enforcer).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: build @minsky/experiment-record
+        run: pnpm --filter @minsky/experiment-record build
+      - name: measurement-inspects-output lint
+        # No path arg: walks experiments/*.yaml per
+        # experiments-directory-migration. Backward-compat: passing an
+        # explicit path (file) still works for explicit single-file lint.
+        run: node scripts/check-measurement-inspects-output.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-measurement-inspects-output.test.mjs
+
+  orphan-tests:
+    # rule #10 ratchet applied to the test/ vs src/ API drift class
+    # observed 2026-05-21 (PR #639 -> #705 chain): when a parallel
+    # `<pkg>/test/*.test.{ts,mjs,js}` file imports a named symbol from
+    # `../src/...` that doesn't actually exist as a named export of the
+    # resolved source, the test file is "orphan" and crashes at runtime
+    # only — never at typecheck (per-package tsconfigs `include` only
+    # `src`). The lint runs ~200ms and catches the class deterministically.
+    # Class boundary: cross-directory imports from `../src/` or
+    # `../../src/` only — local imports and between-package boundaries
+    # are tsc's job.
+    # Anchor: rule #10 (deterministic enforcement); Aho-Sethi-Ullman
+    #   1986 *Compilers: Principles, Techniques, and Tools*, Ch. 3
+    #   (lexer shape — regex over ESM tokens is sufficient); Beck 2002
+    #   *Test-Driven Development*, Ch. 26 (one bug, one test).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: orphan-tests lint
+        run: node scripts/check-orphan-tests.mjs
+      - name: orphan-tests pivot tracker
+        # rule #9 pivot threshold made mechanical: reads the embedded
+        # false-positive ledger and fails (PIVOT) once >2 false positives
+        # accumulate in a rolling 5-PR window — the regex→tsc abandon
+        # line for task `tui-src-vs-test-api-drift-pivot-tracker`. Green
+        # ("PERSEVERE") while the ledger stays at-or-below the threshold.
+        run: node scripts/check-orphan-tests.mjs --check-pivot
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-orphan-tests.test.mjs
+
+  no-singleton-experiment:
+    # rule #10 ratchet applied to experiments-directory-migration: the
+    # singleton EXPERIMENT.yaml at the repo root was retired in favour
+    # of plural `experiments/<id>.yaml` so concurrent experiments (cross-
+    # repo runs, multi-PR work) don't collide. This job is the structural
+    # one-way guarantee: it fails if the singleton reappears at the root.
+    # Anchor: rule #10 (deterministic enforcement); rule #1 (don't reinvent
+    # — the data layer at experiment-store/<id>.jsonl is plural; the
+    # migration matches the pre-registration layer to it); Munafò 2017
+    # (one record per pre-registration).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - name: no-singleton-experiment lint
+        run: node scripts/check-no-singleton-experiment.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-no-singleton-experiment.test.mjs
+
+  gate-scratch-resolvable:
+    # rule #10 ratchet (`gate-scratch-resolvable-ratchet`): the local
+    # merge-gate's scratch clone must yield a module-resolvable workspace.
+    # The zero-merge regression — `prepareScratchClone` symlinked only the
+    # ROOT node_modules, but pnpm scatters a per-package symlink-farm across
+    # the workspace, so every `novel/*` import was unresolvable in the scratch
+    # and tsc/vitest failed `Cannot find module` for EVERY PR. The bug was
+    # silent because an infra-broken vet was misattributed as a per-PR
+    # gate-red. This structural check fails if the scratch-prep ever drops the
+    # real `pnpm install` (or reverts to a root-only symlink). Anchor: rule #10
+    # (deterministic enforcement / ratchet); Nygard 2018 Release It! (Stability
+    # pattern regression guard); global "every bug becomes a rule".
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - name: gate-scratch-resolvable lint
+        run: node scripts/check-gate-scratch-resolvable.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-gate-scratch-resolvable.test.mjs
+
+  brief-pr-instructions:
+    # rule #10 deterministic enforcement of the `devin-spawn-no-pr-opened`
+    # fix (commit 085fdd7, 2026-05-18). The spawn brief in
+    # `novel/cross-repo-runner/src/spawn-plan.ts` must keep the three
+    # literal substrings (`FINAL STEP`, `git push`, `gh pr create`) that
+    # convert the agent's analysis-mode tail into action-mode and prevent
+    # the "validated but no PR opened" failure class from regressing.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # AGENTS.md § "Runtime invariants" (the runtime counterpart is
+    # `briefIncludesPrInstructions` in runtime-invariants.ts).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - name: brief-pr-instructions lint
+        run: node scripts/check-brief-pr-instructions.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-brief-pr-instructions.test.mjs
+
+  check-task-block-citations:
+    # Refuses to remove a TASKS.md task block when the ID is still
+    # referenced by any test file. Closes the PR #864 failure mode
+    # where removing `daemon-pre-pr-lint-gate` broke 5 parity tests
+    # that grep'd TASKS.md for the block's threshold + selector prose.
+    # Anchor: TASKS.md `orphan-cleanup-task-block-citation-lint`
+    # (P1, M1); rule #10 (deterministic enforcement); rule #17
+    # (proactive heal — every bug becomes a rule); Hyrum's Law (the
+    # TEXT of a task block becomes load-bearing for tests that pin
+    # its claims).
+    #
+    # Pure regex over a `git diff` text + the test corpus, no LLM in
+    # the chain. Mirrors `pnpm pre-pr-lint --stage=fast` so any
+    # failure surfaces locally before push.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # need history to diff against origin/main
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - name: ensure origin/main is fetched
+        run: git fetch --no-tags --depth=1 origin main
+      - name: check-task-block-citations lint
+        env:
+          TASK_CITATION_DIFF_BASE: origin/main
+        run: node scripts/check-task-block-citations.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-task-block-citations.test.mjs
+
+  skill-rule-cap:
+    # rule #10 ratchet applied to the spec-monitor advisory Skill itself:
+    # `novel/spec-monitor/SKILL.md` declares a hard cap of ≤5 advisory
+    # rules (`### A<N>.` headings). Without a deterministic gate, a future
+    # PR could silently grow the Skill back into a primary enforcement
+    # mechanism. This job counts the headings and fails if the count
+    # exceeds 5. Runs on pull_request only — push-to-main is skipped
+    # (matching pr-self-grade / pattern-index precedent).
+    # Anchor: rule #10 (deterministic enforcement); rule #6 (failure-mode
+    # discipline — close "did anyone notice?" mechanically); Beck 1999
+    # (CI as the constraint enforcer).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: skill-rule-cap lint
+        run: node scripts/check-skill-rule-cap.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-skill-rule-cap.test.mjs
+
+  watch-surface-cap:
+    # rule #10 enforcement of the calm-tech 3-value Watch invariant:
+    # user-story 005 + vision.md success #6 (wrist dwell) fix the Watch
+    # surface at exactly three readings, but the cap lived only as prose
+    # plus the `WATCH_METRIC_IDS` literal in the live `watch.ts` TUI
+    # surface. Without a deterministic gate, a
+    # future PR could add a fourth key and silently bloat the glanceable
+    # surface back into a notification-heavy dashboard. This job parses the
+    # literal and fails if the key count exceeds 3. Runs on pull_request
+    # only — push-to-main is skipped (matching pr-self-grade / pattern-index
+    # / skill-rule-cap precedent). Anchor: rule #10 (deterministic
+    # enforcement); rule #6 (failure-mode discipline — close "did anyone
+    # notice?" mechanically); Card, Mackinlay, Shneiderman 1999 (glanceable
+    # 3-number display).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: watch-surface-cap lint
+        run: node scripts/check-watch-surface-cap.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-watch-surface-cap.test.mjs
+
+  pivot-success-margin:
+    # rule #10 ratchet applied to spec-monitor advisory rule A2: a pivot
+    # threshold that equals (or sits within <1 % of) the success threshold
+    # is theatre per Ries 2011 (pivot-or-persevere). The lint reads
+    # `success` and `pivot` from EXPERIMENT.yaml via the
+    # `@minsky/experiment-record` parser, regex-extracts the leading signed
+    # numeric token from each, and fails on zero-margin / sub-1 % margin /
+    # binary-equal prose. Promotion decision recorded in
+    # `spec-advisories/2026-05-03-quarterly-audit.md`. Runs on every event
+    # (push and pull_request) — the EXPERIMENT.yaml is checked-in state,
+    # not a PR-relative diff, so the gate is universally applicable.
+    # Anchor: rule #10 (deterministic enforcement); Ries, *The Lean
+    # Startup*, 2011 (build-measure-learn / pivot-or-persevere); Beck 1999
+    # (CI as the constraint enforcer).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: build @minsky/experiment-record
+        # The lint imports the parser from @minsky/experiment-record's
+        # built `dist/` (workspace-resolved). vitest reads the source
+        # directly via vitest.config.ts, but the CLI import does not.
+        run: pnpm --filter @minsky/experiment-record build
+      - name: pivot-success-margin lint
+        # No path arg: walks experiments/*.yaml per
+        # experiments-directory-migration.
+        run: node scripts/check-pivot-success-margin.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-pivot-success-margin.test.mjs
+
+  mape-k-budget-cap:
+    # rule #10 ratchet applied to ARCHITECTURE.md § "MAPE-K cadence" — the
+    # ≤5.7 % weekly Max5 budget cap on the autonomic-manager loop. Reads
+    # `config/mape-k.json` (the future machine-readable artefact) and
+    # asserts `weeklyProjectedTokens / weeklyBudgetTokens ≤ 0.057`. If the
+    # config is not yet present (v0 ships dormant — TASKS.md
+    # `ci-lint-mape-k-token-budget-cap` "Risk" line), the lint exits 0
+    # with a stderr advisory and re-arms the moment the config lands.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # ARCHITECTURE.md § "MAPE-K cadence"; research.md § "MAPE-K cadence";
+    # Beyer, Jones, Petoff, Murphy (eds.), *Site Reliability Engineering*,
+    # O'Reilly 2016, Ch. 3 (error-budget enforcement).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: mape-k-budget-cap lint
+        run: node scripts/check-mape-k-budget-cap.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-mape-k-budget-cap.test.mjs
+
+  mape-k-constraints-md-size:
+    # rule #10 ratchet applied to `novel/mape-k-loop/constraints.md` — the
+    # 200-entry archive cap on the autonomic-manager's append-only Knowledge
+    # log. The README declares the cap in prose ("the supervisor's
+    # `constraints-md-size-cap` check fires when this file grows past 200
+    # entries") so an unattended loop could grow the live log unbounded
+    # without any CI signal. Counts `^## <YYYY-MM-DD>` heading lines and
+    # fails when the count exceeds 200; missing file is dormant (rule #7
+    # graceful degrade — same precedent as `mape-k-budget-cap`).
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # Helland, "Life beyond Distributed Transactions", *CIDR* 2007
+    # (immutable log — archive-by-reissue rather than mutate); Beck,
+    # *Extreme Programming Explained*, 1999, Ch. 17 (CI as the constraint
+    # enforcer).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: mape-k-constraints-md-size lint
+        run: node scripts/check-mape-k-constraints-md-size.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-mape-k-constraints-md-size.test.mjs
+
+  tick-loop-backoff-schedule:
+    # rule #10 ratchet applied to ARCHITECTURE.md L215 — the
+    # `5s → 30s → 5min` tick-loop restart-backoff ladder. Reads the
+    # future `config/tick-loop.json` artefact and asserts its
+    # `backoff_schedule` (or `backoff_schedule_seconds`) equals
+    # `[5, 30, 300]`. Dormant until the config artefact lands (same
+    # precedent as `mape-k-budget-cap`).
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # ARCHITECTURE.md L215; Armstrong, *Programming Erlang*, Pragmatic
+    # Bookshelf 2007 (let-it-crash + supervised restart with backoff);
+    # Beyer et al., *Site Reliability Engineering*, O'Reilly 2016, Ch. 3.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: tick-loop-backoff-schedule lint
+        run: node scripts/check-tick-loop-backoff-schedule.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-tick-loop-backoff-schedule.test.mjs
+
+  claude-hooks-installed:
+    # Tier 1 hook substrate must remain installed. Per
+    # `det-tier1-hook-infrastructure-claude-code-stop-and-posttooluse` (vision
+    # rule #10 ratchet) — once Tier 1 lands, any PR that removes
+    # `.claude/settings.json` or any required `.claude/hooks/*.sh` fails this
+    # gate. The script is pure-ish; tests use injected FS seams.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement); Sitnik
+    # 2026 (Evil Martians "Stop writing rules in AGENTS.md"); Anthropic 2026
+    # (Claude Code hooks reference, code.claude.com/docs/en/hooks).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: claude-hooks-installed lint
+        run: node scripts/check-claude-hooks-installed.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-claude-hooks-installed.test.mjs
+
+  tool-call-discipline-smoke:
+    # Pinned smoke test for the tool-call-discipline transcript walker.
+    # The live invocation is the Stop-hook in `.claude/hooks/stop-gate.sh`;
+    # CI here runs the unit suite + a CLI smoke against the healthy fixture
+    # to catch regressions in the parser.
+    # Anchor: det-tool-call-discipline-prose-without-tool-call (PR #911
+    # cohort task); AGENTS.md §"Tool-call discipline (load-bearing for
+    # non-Claude models)"; OpenHands #12462.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: tool-call-discipline smoke (healthy fixture must exit 0)
+        run: node scripts/check-tool-call-discipline.mjs --transcript=test/fixtures/tool-call-discipline/healthy-with-tool-use.jsonl
+      - name: tool-call-discipline smoke (prose-only fixture must exit 2)
+        run: |
+          set +e
+          node scripts/check-tool-call-discipline.mjs --transcript=test/fixtures/tool-call-discipline/qwen3-coder-prose-only.jsonl
+          if [ $? -ne 2 ]; then
+            echo "expected exit 2 on prose-only fixture; the lint regressed" >&2
+            exit 1
+          fi
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-tool-call-discipline.test.mjs
+
+  rule-10-no-llm-in-load-bearing-gates:
+    # Self-referential rule-#10 enforcement: no load-bearing gate script
+    # in STACK_MANIFEST may import an LLM SDK or fetch an LLM API. Anchor:
+    # det-no-llm-sdk-in-ci-gate-scripts-meta-lint (PR #911 cohort); vision
+    # rule #10 (deterministic enforcement); Javierlozo/llm-audit prior art.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: rule-10-no-llm-in-load-bearing-gates lint
+        run: node scripts/check-rule-10-no-llm-in-load-bearing-gates.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-10-no-llm-in-load-bearing-gates.test.mjs
+
+  filename-casing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: filename-casing lint
+        run: node scripts/check-filename-casing.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-filename-casing.test.mjs
+
+  doc-why-first-paragraph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: doc-why-first-paragraph lint
+        run: node scripts/check-doc-why-first-paragraph.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-doc-why-first-paragraph.test.mjs
+
+  ui-tasks-priority:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: ui-tasks-priority lint
+        run: node scripts/check-ui-tasks-priority.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-ui-tasks-priority.test.mjs
+
+  changelog-md-update:
+    # Diff-relative: code changes require a CHANGELOG.md entry. Per
+    # det-changelog-md-update (PR #911 cohort).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: changelog-md-update lint
+        run: node scripts/check-changelog-md-update.mjs
+        env:
+          CHANGELOG_DIFF_BASE: origin/main
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-changelog-md-update.test.mjs
+
+  research-md-update:
+    # Diff-relative: dep changes require a research.md entry. Per
+    # det-research-md-update (PR #911 cohort).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: research-md-update lint
+        run: node scripts/check-research-md-update.mjs
+        env:
+          RESEARCH_DIFF_BASE: origin/main
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-research-md-update.test.mjs
+
+  test-file-colocation:
+    # Every novel/*/src/**/*.ts source file has a sibling .test.ts. Per
+    # AGENTS.md §"Test conventions"; det-test-file-colocation (PR #911 cohort).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: test-file-colocation lint
+        run: node scripts/check-test-file-colocation.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-test-file-colocation.test.mjs
+
+  skill-allowlist-coverage:
+    # Every `.claude/skills/<name>/SKILL.md` (and `.devin/skills/<name>/`)
+    # directory name must appear on scripts/glossary-allowlist.txt, so a
+    # forgotten allowlist entry fails in the same PR that adds the skill.
+    # Per AGENTS.md rule #5 + rule #10; glossary-allowlist-update-discipline.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: skill-allowlist-coverage lint
+        run: node scripts/check-skill-allowlist-coverage.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-skill-allowlist-coverage.test.mjs
+
+  deprecated-md-respect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: deprecated-md-respect lint
+        run: node scripts/check-deprecated-md-respect.mjs
+        env:
+          DEPRECATED_DIFF_BASE: origin/main
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-deprecated-md-respect.test.mjs
+
+  cli-integration-test-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: cli-integration-test-coverage lint
+        run: node scripts/check-cli-integration-test-coverage.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-cli-integration-test-coverage.test.mjs
+
+  omc-mode-persona-gating:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: omc-mode-persona-gating lint
+        run: node scripts/check-omc-mode-persona-gating.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-omc-mode-persona-gating.test.mjs
+
+  adapter-conventions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: adapter-conventions lint
+        run: node scripts/check-adapter-conventions.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-adapter-conventions.test.mjs
+
+  touches-field:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: touches-field lint
+        run: node scripts/check-touches-field.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-touches-field.test.mjs
+
+  pnpm-minsky-aliases:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: pnpm-minsky-aliases lint
+        run: node scripts/check-pnpm-minsky-aliases.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-pnpm-minsky-aliases.test.mjs
+
+  readme-byte-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: readme-byte-budget lint
+        run: node scripts/check-readme-byte-budget.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-readme-byte-budget.test.mjs
+
+  docs-frame-coherence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: docs-frame-coherence lint
+        run: node scripts/check-docs-frame-coherence.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-docs-frame-coherence.test.mjs
+
+  no-hardcoded-timeouts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-hardcoded-timeouts lint
+        run: node scripts/check-no-hardcoded-timeouts.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-no-hardcoded-timeouts.test.mjs
+
+  no-no-verify-bypass:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-no-verify-bypass lint
+        run: node scripts/check-no-no-verify-bypass.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-no-no-verify-bypass.test.mjs
+
+  bot-commit-hook-bypass:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: bot-commit-hook-bypass lint
+        run: node scripts/check-bot-commit-hook-bypass.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-bot-commit-hook-bypass.test.mjs
+
+  no-delivered-retained-blocks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history so the gate can resolve `origin/main` and compute the
+          # diff-scoped `origin/main...HEAD` base. Without this the shallow
+          # checkout has no `origin/main`, the diff fails, and the gate would
+          # (pre-fix) block every PR on pre-existing stale blocks.
+          fetch-depth: 0
+      - run: git fetch --no-tags origin main
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-delivered-retained-blocks lint
+        run: node scripts/check-no-delivered-retained-blocks.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-no-delivered-retained-blocks.test.mjs
+
+  pre-push-hook-stays-fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: pre-push-hook-stays-fast lint
+        run: node scripts/check-pre-push-hook-fast.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-pre-push-hook-fast.test.mjs
+
+  launchd-safe-paths:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: launchd-safe-paths lint
+        run: node scripts/check-launchd-safe-paths.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-launchd-safe-paths.test.mjs
+
+  machine-budget:
+    # rule #10 ratchet applied to vision.md rule #15 / operator directive
+    # 2026-05-17 — the operator machine-utilisation budget contract. Asserts
+    # the budget controller exports + policy constants stay pinned
+    # (defaultBudgetPct=70, swarmMaxBudgetPct=80), that no minsky
+    # worker/tick-loop launchd template sets `ProcessType=Background` while
+    # the budget is non-trivial (the QoS class throttles the very CPU/IO the
+    # budget allocates — the empirically-confirmed unreachable-budget
+    # regression), and that the controller test file keeps the three rule-#9
+    # pre-registered behaviour suites. Dormant until the controller artefact
+    # lands (same precedent as `mape-k-budget-cap`).
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # vision.md rule #15; operator directive 2026-05-17; Apple
+    # `launchd.plist(5)` (`ProcessType` QoS); Beyer et al., *Site
+    # Reliability Engineering*, O'Reilly 2016, Ch. 3 (error-budget
+    # enforcement — a contradicting throttle trips a mechanical response).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: machine-budget lint
+        run: node scripts/check-machine-budget.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-machine-budget.test.mjs
+
+  supervisor-sandbox-hardening:
+    # rule #10 ratchet applied to vision.md rule #13 item 3 (supervisor
+    # sandbox) — pins the safe set of systemd hardening directives across
+    # all three supervisor unit files. Stage 0 of the
+    # `supervisor-sandbox-syscall-restriction` task: directives that have
+    # no effect on a normal long-lived Node.js process but raise the
+    # `systemd-analyze security` exposure score. Filesystem/network
+    # restrictions ship in stage 1+ behind the dry-run + warn-only ramp.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # vision.md rule #13 item 3 (supervisor sandbox minimum bar);
+    # systemd.exec(5) "Sandboxing" stanza; Saltzer & Schroeder 1975
+    # (principle of least privilege).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: supervisor-sandbox-hardening lint
+        run: node scripts/check-supervisor-sandbox-hardening.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-supervisor-sandbox-hardening.test.mjs
+
+  mape-k-tick-iteration-backstop:
+    # rule #10 ratchet applied to ARCHITECTURE.md L218 — the 1000-tick
+    # tick-iteration backstop on the MAPE-K cadence. Reads the future
+    # `config/mape-k.json` artefact and asserts its
+    # `tick_iteration_backstop` equals 1000. Dormant until the config
+    # artefact lands.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # ARCHITECTURE.md L218; Liu, *Real-Time Systems*, Prentice Hall
+    # 2000, § 6.4 (activity-coupled sampling bound); Beyer et al.,
+    # *Site Reliability Engineering*, O'Reilly 2016, Ch. 3.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: mape-k-tick-iteration-backstop lint
+        run: node scripts/check-mape-k-tick-iteration-backstop.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-mape-k-tick-iteration-backstop.test.mjs
+
+  mape-k-watchdog-cadence:
+    # rule #10 ratchet applied to ARCHITECTURE.md L218 — the 12 h
+    # time-based watchdog cadence on the MAPE-K loop. Reads the future
+    # `config/mape-k.json` artefact and asserts its `watchdog_hours`
+    # equals 12. Dormant until the config artefact lands.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # ARCHITECTURE.md L218; Liu, *Real-Time Systems*, Prentice Hall 2000
+    # (sampling-period selection); Beyer et al., *Site Reliability
+    # Engineering*, O'Reilly 2016, Ch. 3.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: mape-k-watchdog-cadence lint
+        run: node scripts/check-mape-k-watchdog-cadence.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-mape-k-watchdog-cadence.test.mjs
+
+  cadence-pivot-threshold:
+    # rule #10 ratchet applied to research.md L92 — the 8 % MAPE-K
+    # cadence-pivot threshold ("If measured spend exceeds 8 % for 4
+    # weeks, the pivot in `mape-k-cadence`'s rule-#9 block fires").
+    # Reads the future `config/mape-k.json` artefact and asserts its
+    # `cadence_pivot_threshold_pct` (or `cadence_pivot_spend_fraction`)
+    # equals 8 % == 0.08. Dormant until the config artefact lands.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # research.md L92; Beyer et al., *Site Reliability Engineering*,
+    # O'Reilly 2016, Ch. 3 (error-budget enforcement); Ries, *The Lean
+    # Startup*, Crown Business 2011 (pivot-or-persevere).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: cadence-pivot-threshold lint
+        run: node scripts/check-cadence-pivot-threshold.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-cadence-pivot-threshold.test.mjs
+
+  anchor-primary-source:
+    # rule #10 ratchet applied to spec-monitor advisory rule A3 ("anchor
+    # citation is not a primary source"): the deterministic gate promotes
+    # the deny-list (`medium.com`, `*.substack.com`, `wikipedia.org`,
+    # `twitter.com`, `x.com`, `reddit.com`, `stackoverflow.com`,
+    # `chatgpt.com`, `claude.ai`, "ChatGPT said", "tweet by", "blog post")
+    # and allowlist (italicised title `*…*`, `Ch. <n>`, `pp. <n>`, ISBN,
+    # DOI, `<VENUE> <YEAR>`, internal cross-ref `vision.md §` / `rule
+    # #<n>` / `spec-advisories/<date>.md`) from SKILL.md into a CI lint
+    # over EXPERIMENT.yaml's `anchor` field. Three-way verdict — pass /
+    # fail / advisory-warn. The matching advisory rule (A3) is removed
+    # from `novel/spec-monitor/SKILL.md` in the same PR.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # rule #5 / rule #8 (named, decades-tested pattern; constitution must
+    # outlive any single source); Beck 1999 (CI as the constraint enforcer).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: build @minsky/experiment-record
+        run: pnpm --filter @minsky/experiment-record build
+      - name: anchor-primary-source lint
+        # No path arg: walks experiments/*.yaml per
+        # experiments-directory-migration.
+        run: node scripts/check-anchor-primary-source.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-anchor-primary-source.test.mjs
+
+  rule-11-flake-detection:
+    # rule #11's auto-detect ratchet (vision.md § 11). The lint reads
+    # the trailing 100 runs of `ci.yml` via `gh run list`, looks for
+    # same-SHA failure→success pairs (Memon 2017 § 3, DETECTOR), and
+    # surfaces any job whose pair-rate clears 10% over ≥5 same-SHA
+    # pairs. When one surfaces, it auto-emits a TASKS.md task-block
+    # draft + a workflow-patch instruction file to `tmp/rule-11/`,
+    # uploaded as a workflow artifact for the operator to review.
+    #
+    # `continue-on-error: true` keeps the rule-#11 detector itself
+    # informational — paradox-aware: an enforcement-coupling chain
+    # where the detector fails the build on every detection would
+    # itself become a flaky-feeling gate. Per the parent task's Pivot
+    # ("the lint is detection + scaffolding, not decision-making"),
+    # the human-in-the-loop reviews the artifact and merges the patch.
+    #
+    # Runs on pull_request only — `gh run list` requires auth and the
+    # 30-day window per workflow is heavy; on push to main it would
+    # double-burn API quota.
+    #
+    # Anchor: rule #11 (vision.md § 11); Memon, A., et al., "Taming
+    # Google-Scale Continuous Testing", *ICSE-SEIP* 2017 (the per-job
+    # same-SHA pair primitive); Forsgren, Humble, Kim, *Accelerate*,
+    # 2018 Ch. 3 (DORA test-reliability — flaky gates teach the team
+    # to ignore failure); Beck, *Extreme Programming Explained*, 1999
+    # Ch. 17 (CI as the constraint enforcer).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-11-no-flaky-gates.test.mjs
+      - name: rule-11 flake-detection (auto-emit on flake)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p tmp/rule-11
+          # `--workflows ci` reads the trailing 100 ci.yml runs in this
+          # repo; `--emit tmp/rule-11/` writes per-flake artefacts.
+          # Exit code 1 (flakes surfaced) is allowed by
+          # continue-on-error: true above; the artifact upload step
+          # below carries the signal.
+          node scripts/check-rule-11-no-flaky-gates.mjs --workflows ci --emit tmp/rule-11/ || true
+      - name: upload rule-11 patches
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rule-11-flake-patches
+          path: tmp/rule-11/*-task-block.md tmp/rule-11/*-workflow.patch
+          if-no-files-found: ignore
+
+  milestone-alignment:
+    # Slice (c) of `milestone-alignment-gate-enforcement` — every PR
+    # re-runs the alignment gate (rule #10, vision.md § 15). Reads only
+    # static files (MILESTONES.md, docs/METRICS.md, user-stories/*.md,
+    # README.md) — no install needed, same shape as `tasks-lint`. The
+    # `--min-aligned=10` floor matches the parent task's Success
+    # threshold (≥10/14 M1 criteria aligned, audited 2026-05-24); the
+    # `--strict` flag turns the informational mode into an exit-1 gate
+    # so criterion drift is a CI failure, not a silent log line.
+    # Anchor: AGENTS.md § 15 (milestone alignment gate); operator
+    # directive 2026-05-18; rule #10 (deterministic enforcement);
+    # Forsgren/Humble/Kim 2018 (the gate humans pass through must gate
+    # the bot too).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+      - run: node scripts/check-milestone-alignment.mjs --strict --min-aligned=10
+
+  metrics-freshness:
+    # metrics-freshness-ci-gate: parses the `## Primary metrics` table in
+    # docs/METRICS.md and fails when any row's date column is >7 days old
+    # AND .minsky/orchestrate.jsonl exists (active daemon). On CI (no daemon
+    # history) and fresh clones the check always skips (exit 0). Vision rule
+    # #4 (visible-not-silent); Forsgren/Humble/Kim Accelerate 2018 Ch.2.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: metrics-freshness lint
+        run: node scripts/check-metrics-freshness.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-metrics-freshness.test.mjs
+
+  metric-freshness:
+    # Substrate slice 2/N of `canonical-metric-list-per-repo` — gates the
+    # canonical `METRICS.md` artefact (vision.md row 82) against drift.
+    # Every section is either a fresh observation within its
+    # per-metric `freshnessBudgetMs` OR an explicit `(stub) — …`
+    # follow-up pointer (visible-not-silent, Helland 2007). The
+    # `--expected` flag enables drift detection against the 10
+    # `SUCCESS_METRICS` ids; the lint fails when an id is missing,
+    # rendered twice, or rendered without `_Updated:` past its budget.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # Munafò et al. 2017 (pre-registered staleness threshold);
+    # Ries 2011 (vanity-metric anti-pattern; `_monotonic: ok_` opt-in).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: build dashboard-web dist (needed by --expected-from-success-metrics)
+        run: pnpm --filter @minsky/dashboard-web tsc -b
+      - name: metric-freshness lint
+        # Reads SUCCESS_METRICS directly from the compiled
+        # novel/dashboard-web/dist/metrics.js — single source of truth.
+        # Pre-2026-05-27 this used a hardcoded --expected list that
+        # drifted independently from the local pre-pr-lint stack.
+        run: node scripts/check-metric-freshness.mjs --expected-from-success-metrics
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-metric-freshness.test.mjs
+
+  rule-19-supervisor-explicit-start:
+    # rule #19 (vision.md § "Operator-explicit-start" — iron): no
+    # `launchctl bootstrap` / `systemctl --user enable --now` may run
+    # outside the lint's ALLOWED_PATHS allowlist, so Minsky's supervisor
+    # never auto-starts at login without an explicit operator flag. The
+    # lint scans the whole repo and fails on any new unprovenanced
+    # bootstrap call (the regression that re-launched 7 com.minsky.*
+    # plists after a machine reload, 2026-05-29).
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # rule #19 itself; Beyer SRE 2016 Ch. 17 (operator intent is
+    # first-class — never auto-launch heavy work).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: rule-19 lint
+        run: node scripts/check-supervisor-explicit-start.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-supervisor-explicit-start.test.mjs
+
+  ci:
+    needs:
+      - agents-md-coherence
+      - anchor-primary-source
+      - biome
+      - brief-pr-instructions
+      - cadence-pivot-threshold
+      - check-cross-repo-pr-rate
+      - check-task-block-citations
+      - cloud-audit-gate
+      - competitive-goal
+      - dashboard-localhost-bind
+      - depcruise
+      - glossary-discipline
+      - hygiene
+      - knip
+      - linux-supervisor-integration
+      - lockfile-integrity
+      - machine-budget
+      - macos-supervisor-integration
+      - maciek-smoke
+      - mape-k-budget-cap
+      - mape-k-constraints-md-size
+      - mape-k-tick-iteration-backstop
+      - mape-k-watchdog-cadence
+      - markdownlint
+      - measure-agent-install
+      - measurement-inspects-output
+      - metric-freshness
+      - metrics-freshness
+      - milestone-alignment
+      - no-singleton-experiment
+      - gate-scratch-resolvable
+      - orphan-tests
+      - otel-no-pii
+      - secret-scan
+      - security-docs-cohesion
+      - pattern-index
+      - pivot-success-margin
+      - pr-self-grade
+      - pr-security-review
+      - privacy-data-egress
+      - skill-rule-cap
+      - watch-surface-cap
+      - rule-1-novel-justification
+      - rule-2-dep-coverage
+      - rule-3-doc-first
+      - rule-4-otel-coverage
+      - rule-6-let-it-crash
+      - rule-7-chaos-coverage
+      - rule-12-scope-discipline
+      - rule-13-sibling-anchors
+      - rule-17-proactive-heal
+      - rule-19-supervisor-explicit-start
+      - no-hardcoded-user-paths
+      - no-personal-paths-in-docs
+      - rule-9-tasksmd-fields
+      - sbom-shape
+      - supervisor-sandbox-hardening
+      - tasks-lint
+      - test
+      - threat-model-section
+      - cloud-agent-config-audit-matrix
+      - tick-loop-backoff-schedule
+      - claude-hooks-installed
+      - tool-call-discipline-smoke
+      - rule-10-no-llm-in-load-bearing-gates
+      - filename-casing
+      - doc-why-first-paragraph
+      - ui-tasks-priority
+      - changelog-md-update
+      - research-md-update
+      - test-file-colocation
+      - skill-allowlist-coverage
+      - deprecated-md-respect
+      - cli-integration-test-coverage
+      - omc-mode-persona-gating
+      - adapter-conventions
+      - touches-field
+      - pnpm-minsky-aliases
+      - readme-byte-budget
+      - docs-frame-coherence
+      - no-hardcoded-timeouts
+      - no-no-verify-bypass
+      - bot-commit-hook-bypass
+      - no-delivered-retained-blocks
+      - pre-push-hook-stays-fast
+      - launchd-safe-paths
+      - typecheck
+      - user-story-security-section
+      - vision-rule-13-non-task-anchors
+      - vision-rule-13-task-id-citations
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: gate
+        run: |
+          # `pr-self-grade` and `pattern-index` run on pull_request events
+          # only; on push they are `skipped` — accept that, fail on
+          # `failure`/`cancelled`. All other jobs must be `success`.
+          fail=0
+          for r in "${{ needs.agents-md-coherence.result }}" \
+                   "${{ needs.anchor-primary-source.result }}" \
+                   "${{ needs.biome.result }}" \
+                   "${{ needs.brief-pr-instructions.result }}" \
+                   "${{ needs.cadence-pivot-threshold.result }}" \
+                   "${{ needs.check-cross-repo-pr-rate.result }}" \
+                   "${{ needs.check-task-block-citations.result }}" \
+                   "${{ needs.cloud-audit-gate.result }}" \
+                   "${{ needs.dashboard-localhost-bind.result }}" \
+                   "${{ needs.depcruise.result }}" \
+                   "${{ needs.glossary-discipline.result }}" \
+                   "${{ needs.hygiene.result }}" \
+                   "${{ needs.knip.result }}" \
+                   "${{ needs.lockfile-integrity.result }}" \
+                   "${{ needs.machine-budget.result }}" \
+                   "${{ needs.maciek-smoke.result }}" \
+                   "${{ needs.mape-k-budget-cap.result }}" \
+                   "${{ needs.mape-k-constraints-md-size.result }}" \
+                   "${{ needs.mape-k-tick-iteration-backstop.result }}" \
+                   "${{ needs.mape-k-watchdog-cadence.result }}" \
+                   "${{ needs.markdownlint.result }}" \
+                   "${{ needs.measure-agent-install.result }}" \
+                   "${{ needs.measurement-inspects-output.result }}" \
+                   "${{ needs.metric-freshness.result }}" \
+                   "${{ needs.metrics-freshness.result }}" \
+                   "${{ needs.milestone-alignment.result }}" \
+                   "${{ needs.no-singleton-experiment.result }}" \
+                   "${{ needs.gate-scratch-resolvable.result }}" \
+                   "${{ needs.orphan-tests.result }}" \
+                   "${{ needs.otel-no-pii.result }}" \
+                   "${{ needs.secret-scan.result }}" \
+                   "${{ needs.security-docs-cohesion.result }}" \
+                   "${{ needs.pivot-success-margin.result }}" \
+                   "${{ needs.privacy-data-egress.result }}" \
+                   "${{ needs.rule-1-novel-justification.result }}" \
+                   "${{ needs.rule-2-dep-coverage.result }}" \
+                   "${{ needs.rule-3-doc-first.result }}" \
+                   "${{ needs.rule-4-otel-coverage.result }}" \
+                   "${{ needs.rule-6-let-it-crash.result }}" \
+                   "${{ needs.rule-7-chaos-coverage.result }}" \
+                   "${{ needs.rule-12-scope-discipline.result }}" \
+                   "${{ needs.rule-13-sibling-anchors.result }}" \
+                   "${{ needs.rule-17-proactive-heal.result }}" \
+                   "${{ needs.rule-19-supervisor-explicit-start.result }}" \
+                   "${{ needs.no-hardcoded-user-paths.result }}" \
+                   "${{ needs.no-personal-paths-in-docs.result }}" \
+                   "${{ needs.rule-9-tasksmd-fields.result }}" \
+                   "${{ needs.competitive-goal.result }}" \
+                   "${{ needs.sbom-shape.result }}" \
+                   "${{ needs.supervisor-sandbox-hardening.result }}" \
+                   "${{ needs.tasks-lint.result }}" \
+                   "${{ needs.test.result }}" \
+                   "${{ needs.threat-model-section.result }}" \
+                   "${{ needs.cloud-agent-config-audit-matrix.result }}" \
+                   "${{ needs.tick-loop-backoff-schedule.result }}" \
+                   "${{ needs.claude-hooks-installed.result }}" \
+                   "${{ needs.tool-call-discipline-smoke.result }}" \
+                   "${{ needs.rule-10-no-llm-in-load-bearing-gates.result }}" \
+                   "${{ needs.filename-casing.result }}" \
+                   "${{ needs.doc-why-first-paragraph.result }}" \
+                   "${{ needs.ui-tasks-priority.result }}" \
+                   "${{ needs.changelog-md-update.result }}" \
+                   "${{ needs.research-md-update.result }}" \
+                   "${{ needs.test-file-colocation.result }}" \
+                   "${{ needs.skill-allowlist-coverage.result }}" \
+                   "${{ needs.deprecated-md-respect.result }}" \
+                   "${{ needs.cli-integration-test-coverage.result }}" \
+                   "${{ needs.omc-mode-persona-gating.result }}" \
+                   "${{ needs.adapter-conventions.result }}" \
+                   "${{ needs.touches-field.result }}" \
+                   "${{ needs.pnpm-minsky-aliases.result }}" \
+                   "${{ needs.readme-byte-budget.result }}" \
+                   "${{ needs.docs-frame-coherence.result }}" \
+                   "${{ needs.no-hardcoded-timeouts.result }}" \
+                   "${{ needs.no-no-verify-bypass.result }}" \
+                   "${{ needs.bot-commit-hook-bypass.result }}" \
+                   "${{ needs.no-delivered-retained-blocks.result }}" \
+                   "${{ needs.pre-push-hook-stays-fast.result }}" \
+                   "${{ needs.launchd-safe-paths.result }}" \
+                   "${{ needs.typecheck.result }}" \
+                   "${{ needs.user-story-security-section.result }}" \
+                   "${{ needs.vision-rule-13-non-task-anchors.result }}" \
+                   "${{ needs.vision-rule-13-task-id-citations.result }}"; do
+            [ "$r" = "success" ] || fail=1
+          done
+          # Supervisor-integration jobs may legitimately exit 77 (skipped)
+          # if the runner's user-bus / launchd plumbing isn't usable. We
+          # accept `success` and `skipped` (the GH Actions exit-77 maps to
+          # skipped); only `failure` / `cancelled` should fail the gate.
+          for r in "${{ needs.linux-supervisor-integration.result }}" \
+                   "${{ needs.macos-supervisor-integration.result }}"; do
+            case "$r" in
+              success|skipped) ;;
+              *) fail=1 ;;
+            esac
+          done
+          # pr-self-grade, pr-security-review, pattern-index, skill-rule-cap,
+          # and watch-surface-cap may be `skipped` (push event) OR `success`
+          # (PR); only `failure` / `cancelled` should fail.
+          for r in "${{ needs.pr-self-grade.result }}" \
+                   "${{ needs.pr-security-review.result }}" \
+                   "${{ needs.pattern-index.result }}" \
+                   "${{ needs.skill-rule-cap.result }}" \
+                   "${{ needs.watch-surface-cap.result }}"; do
+            case "$r" in
+              success|skipped) ;;
+              *) fail=1 ;;
+            esac
+          done
+          if [ "$fail" = "1" ]; then
+            echo "one or more required checks failed" >&2
+            exit 1
+          fi
+          echo "all required checks green"

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- scope: human-approved 2026-06-11 operator task "daily METRICS.md regen lands on main" — daily docs/METRICS.md regen + PR; mirrors com.minsky.weekly-competitive.plist's StartCalendarInterval shape. -->
+<!--
+Minsky daily metrics regen — launchd LaunchAgent for macOS.
+
+Pattern: "periodic task" supervisor pattern (Borg/Bashir/Burns/Hightower
+_Designing Distributed Systems_ 2017). launchd fires
+`run-daily-metrics.sh`, which runs `scripts/daily-metrics-regen.mjs`:
+collect-metrics + metrics-render against a tempfile, then a plumbing
+commit + push + `gh pr create` for `chore/metrics-daily-regen-<date>` —
+ONLY when main's docs/METRICS.md is stale for today's UTC date.
+
+Why this exists: the `cross-repo-pr-rate` row in docs/METRICS.md
+carries a 1-day freshness budget and `check-metric-freshness` is a
+whole-tree gate on every PR. Without a regen that LANDS ON MAIN, main
+goes red every midnight UTC (observed 2026-06-11T00:00Z, hand-unwedged
+by PR #1208). This plist closes that gap.
+
+Cadence: hourly at minute 10. launchd's StartCalendarInterval speaks
+LOCAL time only, but the freshness budget rolls at midnight UTC — a
+fixed local hour would leave main red for hours on UTC-offset machines
+(and drift across DST). Firing hourly at :10 guarantees the regen runs
+within 10–70 minutes of UTC midnight in EVERY timezone; the script's
+one-PR-per-UTC-date idempotence guards (already-rendered-today /
+branch-exists / no-change) make the other 23 fires silent no-ops. The
+systemd twin (`minsky-daily-metrics.timer`) supports UTC natively and
+fires once daily at 00:10 UTC.
+
+Default behaviour: installed via `bin/minsky install-daemon` alongside
+the supervisor (which renders every distribution/launchd/*.plist).
+
+Placeholders substituted by `bin/minsky install-daemon` via envsubst:
+  ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+  ${HOME}          — operator's home directory
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.minsky.daily-metrics</string>
+
+    <key>WorkingDirectory</key>
+    <string>${MINSKY_HOME}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MINSKY_HOME</key>
+        <string>${MINSKY_HOME}</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>${MINSKY_HOME}/distribution/systemd/run-daily-metrics.sh</string>
+    </array>
+
+    <!--
+    StartCalendarInterval with only Minute set fires every hour at :10.
+    See the header comment — this is the launchd-local-time-safe
+    equivalent of "daily at 00:10 UTC"; the script's idempotence guards
+    turn all but the first post-UTC-midnight fire into silent no-ops.
+    :10 avoids contention with the auto-merge cycle (300s tick) and the
+    weekly-competitive Monday-04:00 run.
+    -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Minute</key>
+        <integer>10</integer>
+    </dict>
+
+    <!--
+    RunAtLoad: regen on host bootstrap so a machine that slept through
+    UTC midnight unwedges main immediately on wake/login instead of
+    waiting up to an hour. The script is idempotent — re-running is a
+    cheap no-op when main is already fresh. Mirrors
+    com.minsky.weekly-competitive.plist + the systemd twin's
+    Persistent=true.
+    -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Dormant by default (2026-06-17). Operator enables via
+         `minsky enable-autostart`. -->
+    <key>Disabled</key>
+    <true/>
+
+    <!--
+    Cycle cap: 300 CPU-seconds. collect-metrics shells out to git/gh
+    with 30s-per-command timeouts and the regen adds a push + gh pr
+    create; anything past this is a hang — SIGKILL.
+    -->
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>CPU</key>
+        <integer>300</integer>
+    </dict>
+
+    <!--
+    Logs go to ~/.local/state/minsky/daily-metrics.log per the
+    AGENTS.md convention for scheduled-task logs.
+    -->
+    <key>StandardOutPath</key>
+    <string>${HOME}/.local/state/minsky/daily-metrics.log</string>
+    <key>StandardErrorPath</key>
+    <string>${HOME}/.local/state/minsky/daily-metrics.log</string>
+</dict>
+</plist>

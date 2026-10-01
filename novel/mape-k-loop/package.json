@@ -1,0 +1,62 @@
+{
+  "name": "@minsky/mape-k-loop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MAPE-K reference architecture (Kephart-Chess 2003) for Minsky's autonomic manager. Sub-task 2/4 of mape-k-loop-v0 — pure Monitor + Analyze phases (Goldratt 1984 Theory of Constraints).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./monitor": {
+      "import": "./dist/monitor.js",
+      "types": "./dist/monitor.d.ts"
+    },
+    "./analyze": {
+      "import": "./dist/analyze.js",
+      "types": "./dist/analyze.d.ts"
+    },
+    "./plan": {
+      "import": "./dist/plan.js",
+      "types": "./dist/plan.d.ts"
+    },
+    "./execute": {
+      "import": "./dist/execute.js",
+      "types": "./dist/execute.d.ts"
+    },
+    "./sustained-gain": {
+      "import": "./dist/sustained-gain.js",
+      "types": "./dist/sustained-gain.d.ts"
+    },
+    "./oscillation": {
+      "import": "./dist/oscillation.js",
+      "types": "./dist/oscillation.d.ts"
+    },
+    "./orchestrator": {
+      "import": "./dist/orchestrator.js",
+      "types": "./dist/orchestrator.d.ts"
+    }
+  },
+  "bin": {
+    "mape-k-orchestrator": "bin/mape-k-orchestrator.mjs"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "bin/**/*.mjs"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@minsky/adapter-types": "workspace:*",
+    "@minsky/observability": "workspace:*",
+    "@minsky/prompt-optimizer": "workspace:*"
+  }
+}

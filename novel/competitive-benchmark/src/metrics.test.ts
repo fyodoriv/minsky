@@ -1,0 +1,183 @@
+import { describe, expect, it } from "vitest";
+
+// Import through the package barrel so `index.ts` (a pure re-export) is
+// covered by the same suite — mirrors `novel/adapters/types/src/index.test.ts`.
+import {
+  compareValues,
+  computeDelta,
+  METRICS,
+  type MetricDefinition,
+  metricById,
+} from "./index.js";
+
+describe("METRICS catalogue", () => {
+  it("ships ≥5 metrics across all three families (slice-(c) success bar)", () => {
+    expect(METRICS.length).toBeGreaterThanOrEqual(5);
+    const categories = new Set(METRICS.map((m) => m.category));
+    expect([...categories].sort()).toEqual(["agentic", "dora", "public-benchmark"]);
+  });
+
+  it("includes the four DORA keys", () => {
+    const dora = METRICS.filter((m) => m.category === "dora").map((m) => m.id);
+    expect(dora.sort()).toEqual([
+      "change-fail-rate",
+      "deploy-frequency",
+      "lead-time-for-changes",
+      "mttr",
+    ]);
+  });
+
+  it("includes the public-benchmark hooks (SWE-bench agent-tier, HumanEval + MATH orchestrator-tier, OpenHands Index suite)", () => {
+    // SWE-bench is the agent-tier head-to-head; HumanEval is the orchestrator-
+    // tier code head-to-head (MetaGPT publishes it); math-whole-test-accuracy
+    // is the orchestrator-tier math-reasoning axis (AutoGen). The four added
+    // via `research-finding-multi-task-benchmark-suite` are the OpenHands Index
+    // multi-task dimensions beyond issue-resolution: greenfield (Commit0),
+    // frontend (SWE-bench Multimodal), testing (SWT-Bench), info-gathering
+    // (GAIA). All live in the public-benchmark category — different tiers /
+    // axes, not competing definitions.
+    const pub = METRICS.filter((m) => m.category === "public-benchmark");
+    expect(pub).toHaveLength(7);
+    const ids = pub.map((m) => m.id).sort();
+    expect(ids).toEqual([
+      "commit0-library-resolve-rate",
+      "gaia-resolve-rate",
+      "humaneval-pass-at-1",
+      "math-whole-test-accuracy",
+      "swe-bench-multimodal-resolve-rate",
+      "swe-bench-verified-resolve-rate",
+      "swt-bench-test-generation-rate",
+    ]);
+  });
+
+  it("ships the OpenHands Index 5-task multi-benchmark suite (research-finding-multi-task-benchmark-suite)", () => {
+    // The OpenHands Index reports per-task scores across 5 dimensions; a single
+    // SWE-bench number masks where the agent fails. Each dimension is pinned to
+    // its originating public dataset so the metric is reproducible and primary-
+    // cited (rule #1 — cite the dataset, don't re-run OpenHands' harness).
+    const suite: Record<string, RegExp> = {
+      // issue-resolution → already in the catalogue pre-this-task
+      "swe-bench-verified-resolve-rate": /Jimenez/,
+      // greenfield → Commit0
+      "commit0-library-resolve-rate": /Commit0|2412\.01769/,
+      // frontend → SWE-bench Multimodal
+      "swe-bench-multimodal-resolve-rate": /Multimodal|2410\.03859/,
+      // testing → SWT-Bench
+      "swt-bench-test-generation-rate": /SWT-Bench|2406\.12952/,
+      // info-gathering → GAIA
+      "gaia-resolve-rate": /GAIA|2311\.12983/,
+    };
+    for (const [id, anchorPattern] of Object.entries(suite)) {
+      const m = metricById(id);
+      expect(m, `suite dimension ${id} must be registered`).toBeDefined();
+      expect(m?.category).toBe("public-benchmark");
+      expect(m?.direction).toBe("higher-is-better");
+      expect(m?.unit).toBe("ratio");
+      expect(m?.anchor).toMatch(anchorPattern);
+    }
+    // The measurement intent of the task: ≥5 metrics whose id names a
+    // SWE-bench-shape or GAIA dataset (the suite axes), so the corpus surfaces
+    // ≥5 per-dimension axes rather than one aggregate number.
+    const suiteShaped = METRICS.filter(
+      (m) =>
+        m.id.startsWith("swe-bench-") ||
+        m.id.startsWith("gaia-") ||
+        m.id.startsWith("swt-bench-") ||
+        m.id.startsWith("commit0-"),
+    );
+    expect(suiteShaped.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("has unique kebab-case ids", () => {
+    const ids = METRICS.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) {
+      expect(id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    }
+  });
+
+  it("every metric carries a non-empty primary-source anchor and description", () => {
+    for (const m of METRICS) {
+      expect(m.anchor.length).toBeGreaterThan(10);
+      expect(m.description.length).toBeGreaterThan(10);
+      expect(["higher-is-better", "lower-is-better"]).toContain(m.direction);
+      expect(["count-per-day", "seconds", "ratio", "usd"]).toContain(m.unit);
+    }
+  });
+});
+
+describe("metricById", () => {
+  it("resolves a known id", () => {
+    expect(metricById("autonomous-merge-rate")?.label).toBe("Autonomous merge rate");
+  });
+
+  it("returns undefined for an unknown id", () => {
+    expect(metricById("not-a-metric")).toBeUndefined();
+  });
+
+  it("includes daemon-stability-pct (M1.1 reliability SLI)", () => {
+    // 2026-05-24: added to close out `single-stability-number` P0 task — the
+    // operator's headline reliability number is now a first-class row in the
+    // competitive scorecard. M1.1 gates on this at ≥0.90.
+    const m = metricById("daemon-stability-pct");
+    expect(m).toBeDefined();
+    expect(m?.category).toBe("agentic");
+    expect(m?.unit).toBe("ratio");
+    expect(m?.direction).toBe("higher-is-better");
+    expect(m?.label).toContain("Daemon stability");
+    expect(m?.anchor).toContain("Beyer");
+    expect(m?.description).toContain("≥0.90");
+  });
+});
+
+const higher: MetricDefinition = {
+  id: "h",
+  label: "H",
+  category: "agentic",
+  unit: "ratio",
+  direction: "higher-is-better",
+  anchor: "test anchor citation",
+  description: "test description text",
+};
+const lower: MetricDefinition = { ...higher, id: "l", direction: "lower-is-better" };
+
+describe("compareValues", () => {
+  it("ranks higher-is-better correctly", () => {
+    expect(compareValues(higher, 0.9, 0.5)).toBe(1);
+    expect(compareValues(higher, 0.5, 0.9)).toBe(-1);
+  });
+
+  it("ranks lower-is-better correctly", () => {
+    expect(compareValues(lower, 10, 30)).toBe(1);
+    expect(compareValues(lower, 30, 10)).toBe(-1);
+  });
+
+  it("returns 0 on an exact tie regardless of direction", () => {
+    expect(compareValues(higher, 0.5, 0.5)).toBe(0);
+    expect(compareValues(lower, 0.5, 0.5)).toBe(0);
+  });
+});
+
+describe("computeDelta", () => {
+  it("is positive when minsky is ahead (higher-is-better)", () => {
+    expect(computeDelta(higher, 0.9, 0.6)).toBeCloseTo(0.3);
+  });
+
+  it("is negative when minsky is behind (higher-is-better)", () => {
+    expect(computeDelta(higher, 0.6, 0.9)).toBeCloseTo(-0.3);
+  });
+
+  it("is positive when minsky is ahead (lower-is-better)", () => {
+    // minsky cheaper/faster → ahead → positive
+    expect(computeDelta(lower, 10, 25)).toBeCloseTo(15);
+  });
+
+  it("is negative when minsky is behind (lower-is-better)", () => {
+    expect(computeDelta(lower, 25, 10)).toBeCloseTo(-15);
+  });
+
+  it("is zero on parity", () => {
+    expect(computeDelta(higher, 1, 1)).toBe(0);
+    expect(computeDelta(lower, 1, 1)).toBe(-0);
+  });
+});

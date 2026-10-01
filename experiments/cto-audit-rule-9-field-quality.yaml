@@ -1,0 +1,20 @@
+id: cto-audit-rule-9-field-quality
+hypothesis: |
+  Adding a pre-write rule-9 validator + 2-retry loop to writeProposedTask in
+  novel/cross-repo-runner/src/host-cto-audit.ts will raise the LLM pass rate from
+  an estimated ~70% baseline to ≥95% over a 7-day window.
+  New artifacts: novel/cross-repo-runner/src/host-cto-audit.ts,
+  novel/cross-repo-runner/src/host-cto-audit.test.ts,
+  novel/cross-repo-runner/tsconfig.json,
+  user-stories/007-cto-audit-files-new-tasks.test.ts.
+  The --input flag added to scripts/check-rule-9-tasksmd-fields.mjs enables in-process
+  validation without reading TASKS.md, allowing writeProposedTask to validate proposed
+  blocks before writing them.
+success: "proposal reject_rate below 0.05 over a seven-day window (under five percent rejected after two retries); pnpm pre-pr-lint --stage=fast exits 0"
+pivot: "proposal reject_rate at or above 0.10 after forty-eight hours (retry-success-to-reject ratio below half) → replace retry with deterministic template filler"
+measurement: "node scripts/cto-audit-rule-9-reject-rate.mjs | jq -e 'has(\"rule_9_reject_rate\")'"
+timeout_seconds: 30
+anchor: |
+  Munafò et al., "A Manifesto for Reproducible Science", Nature Human Behaviour 1,
+  0021, 2017 — pre-registration requires the metric to be committed before observation;
+  the validator enforces this mechanically before write.

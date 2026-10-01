@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# bin/minsky-ollama — bash wrapper around `@minsky/ollama`'s Node CLI.
+#
+# Forwards every argument to `novel/adapters/ollama/bin/cli.mjs` under
+# the resolved minsky repo root. Keeps the call site in
+# `bin/minsky-run.sh` readable (`bin/minsky-ollama warm <model>`)
+# without each call having to spell out the full Node argv.
+#
+# Resolution: this script discovers its own repo root via realpath +
+# dirname (mirrors `bin/minsky`'s pattern). Operators can also run
+# this from anywhere on PATH provided the symlink resolves correctly.
+#
+# Subcommands forwarded verbatim:
+#   warm <model> [base-url]
+#   unload <model> [base-url]
+#   ps [base-url]
+#
+# Exit code is the Node CLI's exit code:
+#   0  — success
+#   1  — transport failure or HTTP non-2xx (graceful-degrade per rule #7)
+#   2  — bad argv
+#
+# Source: user-stories/020-ollama-jit-warm-unload.md acceptance criterion #2.
+
+set -euo pipefail
+
+_resolve_self() {
+  local p="$1"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$p" 2>/dev/null && return 0
+  fi
+  while [ -L "$p" ]; do
+    local next
+    next=$(readlink "$p" 2>/dev/null) || break
+    case "$next" in
+      /*) p="$next" ;;
+      *) p="$(dirname "$p")/$next" ;;
+    esac
+  done
+  ( cd "$(dirname "$p")" 2>/dev/null && printf "%s/%s" "$(pwd -P)" "$(basename "$p")" )
+}
+
+_self_abs="$(_resolve_self "$0")"
+_repo_root="$(dirname "$(dirname "$_self_abs")")"
+_cli="$_repo_root/novel/adapters/ollama/bin/cli.mjs"
+
+if [[ ! -f "$_cli" ]]; then
+  echo "minsky-ollama: CLI not found at $_cli" >&2
+  echo "  run \`pnpm install\` in $_repo_root to build dist/ via the prepare hook" >&2
+  exit 1
+fi
+
+exec node "$_cli" "$@"

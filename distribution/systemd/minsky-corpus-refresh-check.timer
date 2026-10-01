@@ -1,0 +1,26 @@
+# <!-- scope: human-approved 2026-05-22 M1.10 self-refresh — systemd .timer for the corpus-freshness check; operator directive "add a mechanism so that minsky keeps competitors list updated and competitors there too". -->
+# <!-- pattern: not-applicable — systemd .timer unit mirroring the launchd StartCalendarInterval in com.minsky.corpus-refresh-check.plist; the periodic-task supervisor pattern (Borg/Bashir/Burns/Hightower 2017) is already declared at vision.md § "Pattern conformance index" row 95. -->
+#
+# Minsky corpus-freshness check timer — fires
+# minsky-corpus-refresh-check.service every Monday at 04:15 local
+# while minsky-supervisor.target is active. Parallels the launchd
+# com.minsky.corpus-refresh-check.plist's StartCalendarInterval.
+
+[Unit]
+Description=Minsky corpus-freshness timer — fire freshness check Mondays at 04:15
+PartOf=minsky-supervisor.target
+
+[Timer]
+Unit=minsky-corpus-refresh-check.service
+# Mondays at 04:15 local time. 15 min after
+# minsky-weekly-competitive.timer (Monday 04:00) so the freshness check
+# reads against the post-scoreboard-rebuild state.
+OnCalendar=Mon *-*-* 04:15:00
+# Refresh on boot so a fresh host sees the staleness signal without
+# waiting until Monday.
+OnBootSec=2min
+RandomizedDelaySec=30s
+Persistent=true
+
+[Install]
+WantedBy=minsky-supervisor.target

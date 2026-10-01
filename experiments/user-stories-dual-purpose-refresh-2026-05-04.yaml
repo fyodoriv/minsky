@@ -1,0 +1,56 @@
+id: user-stories-dual-purpose-refresh-2026-05-04
+hypothesis: |
+  The 2026-05-04 user brief restated the original Minsky vision in
+  terms vision.md's previous headline did not surface clearly: Minsky
+  is a plug-and-play repo transformer for any repo (host or itself).
+  PR #137 fixed vision.md and rule #12. This follow-up PR refreshes
+  the two flagship user stories — `user-stories/001-loop-runs-
+  overnight.md` (Minsky on itself) and `user-stories/006-runner-on-
+  any-repo.md` (Minsky on any host) — so a reader who lands on either
+  story understands the dual-purpose framing without re-reading
+  vision.md.
+
+  Both stories gain a "Dual-purpose framing" blockquote near the top
+  citing rule #12, cross-linking the counterpart story, and noting
+  that both stories describe one supervisor on two substrates. No
+  substantive acceptance criteria change — the change is purely
+  framing the existing acceptance criteria as instances of one
+  pattern.
+success: |
+  - `grep -c "rule #12" user-stories/001-loop-runs-overnight.md
+    user-stories/006-runner-on-any-repo.md` returns ≥1 per file.
+  - `grep -E "(006-runner-on-any-repo|001-loop-runs-overnight)"
+    user-stories/001-loop-runs-overnight.md user-stories/006-runner-
+    on-any-repo.md` returns ≥1 cross-link per file (each story
+    references the counterpart).
+  - `npx markdownlint-cli2 user-stories/001-loop-runs-overnight.md
+    user-stories/006-runner-on-any-repo.md` exits 0.
+  - `tasks-lint TASKS.md` exits 0 (the closed task block is removed
+    cleanly).
+pivot: |
+  If the dual-purpose framing reads as redundant in practice (two
+  stories saying "we are the same loop" creates confusion rather
+  than clarity), pivot to a *single umbrella* user story —
+  `user-stories/000-minsky-transforms-any-repo.md` — that frames
+  both as instances of one pattern, with 001 / 006 reduced to
+  acceptance specifications. The unified framing then lives in one
+  document, not two cross-references.
+measurement: |
+  bash -c 'a=$(grep -c "rule #12" user-stories/001-loop-runs-overnight.md); b=$(grep -c "rule #12" user-stories/006-runner-on-any-repo.md); c=$(grep -cE "006-runner-on-any-repo" user-stories/001-loop-runs-overnight.md); d=$(grep -cE "001-loop-runs-overnight" user-stories/006-runner-on-any-repo.md); test "$a" -ge 1 && test "$b" -ge 1 && test "$c" -ge 1 && test "$d" -ge 1 && echo "PASS: rule#12 mentions a=$a b=$b; cross-links c=$c d=$d" || (echo "FAIL"; exit 1)'
+anchor: |
+  rule #12 (vision.md § "Scope discipline" — shipped #137; this PR
+  surfaces it in both flagship user stories so the rule is reachable
+  from either entry point).
+  rule #5 (vision.md § "Clear vocabulary, sourced from literature";
+  the dual-purpose framing is a vocabulary item — readers must be
+  able to name the pattern from either story without prior context).
+  rule #1 (vision.md § "Don't reinvent the wheel" — both stories
+  describe the *same* supervisor on different substrates; framing
+  them as one loop is the rule-#1 application of the framing
+  principle).
+  Munafò, M. R., Nosek, B. A., Bishop, D. V. M., et al., "A
+  Manifesto for Reproducible Science", *Nature Human Behaviour* 1,
+  0021, 2017 (rule-#9 pre-registration — even doc PRs declare a
+  measurable hypothesis; this PR's measurement asserts both
+  cross-link + rule-#12 mentions).
+timeout_seconds: 30

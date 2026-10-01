@@ -1,0 +1,108 @@
+# Node
+node_modules/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.pnp.*
+
+# Build artifacts
+dist/
+build/
+*.tsbuildinfo
+coverage/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs
+.vscode/
+.idea/
+.obsidian/
+*.swp
+*.swo
+*~
+
+# Obsidian scratch (daily notes, canvases) — keep tracked .md docs only
+*.canvas
+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
+
+# Minsky runtime state (per ARCHITECTURE.md — paths under .orchestrator/ are never committed)
+.orchestrator/state/
+.orchestrator/logs/
+.orchestrator/handoffs/
+*.flag
+*.pid
+
+# Minsky setup.sh local state — reference template lives at distribution/state.example.json
+.minsky/
+
+# Claude Code per-session config materialized by the daemon spawn — purely
+# runtime state; never committed.
+.minsky-claude-config/
+
+# Throughput benchmark fixture fleet — the seed `TASKS.md` + resolved
+# `.minsky/repo.yaml` per fixture host are tracked fixtures (NOT runtime
+# state), so they must override the `TASKS.md` (operator global ignore)
+# and `.minsky/` (above) patterns. Source: TASKS.md
+# `throughput-at-scale-benchmark`; user-stories/016-code-factory-throughput.md.
+!test-fixtures/throughput/**/TASKS.md
+!test-fixtures/throughput/**/.minsky/
+!test-fixtures/throughput/**/.minsky/**
+
+# Fleet-stability-report fixture hosts — committed `.minsky/experiment-store`
+# iteration JSONL so `scripts/fleet-stability-report.mjs --html` is testable
+# offline (NOT runtime state). Same fixture-override rationale as the
+# throughput block above. Source: TASKS.md `fleet-log-aggregation`;
+# scripts/fleet-stability-report.test.mjs.
+!tests/fixtures/fleet-host-*/.minsky/
+!tests/fixtures/fleet-host-*/.minsky/**
+
+# Claire local agent-runner runtime dir (same class as `.claude/worktrees`,
+# `.minsky`). Source: `gitignore-claire-runtime-dir` (P3, surfaced 2026-05-16
+# when markdownlint failed on a `.claire/worktrees/*/pr-body.md` and blocked
+# a push). Excluded alongside the sibling agent-runtime dirs.
+.claire/
+
+# Operator's per-machine opencode config (lives in repo for convenience but
+# never committed — operator manages it through their own workflow; minsky's
+# resolveLocalAgentConfig reads it as one of the machine-state inputs).
+opencode.json
+opencode.notes.md
+
+# Claude Code local
+.claude/local/
+.claude/projects/*
+
+# Tailscale local state
+.tailscale/
+
+# Ephemeral working directories — not committed. The /tmp scratch dir
+# is recreated on demand by scripts; never check it in.
+tmp/
+.aider*
+
+# Ephemeral PR-body working file written by gh pr create — not committed.
+# Use `gh pr create --body "$(cat <<'EOF' ...` directly instead of leaving
+# pr-body.md sitting at root.
+pr-body.md
+
+# pytest's local cache. Created on first `uv run --with pytest pytest`,
+# never committed. Auto-generated `.pytest_cache/README.md` would
+# otherwise be linted by `pnpm lint:md` against the markdownlint atx-
+# heading rule and fail — but the file is pytest's, not ours.
+.pytest_cache/
+pr-body.md
+
+# Python bytecode — generated per-machine; tracked copies caused recurring
+# merge/stash conflicts (every python version + run mtime differs per host)
+__pycache__/
+*.pyc

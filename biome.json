@@ -1,0 +1,110 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+  "files": {
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/node_modules",
+      "!**/coverage",
+      "!.claude",
+      "!.minsky",
+      "!.minsky-claude-config",
+      "!.worktrees",
+      "!.obsidian",
+      "!.claire",
+      "!.aider*"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "domains": {
+      "types": "all"
+    },
+    "rules": {
+      "recommended": true,
+      "complexity": {
+        "noExcessiveCognitiveComplexity": {
+          "level": "error",
+          "options": { "maxAllowedComplexity": 10 }
+        },
+        "noUselessTypeConstraint": "error",
+        "useLiteralKeys": "off",
+        "noForEach": "off"
+      },
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noEmptyBlockStatements": "warn",
+        "useAwait": "off",
+        "noConsole": {
+          "level": "warn",
+          "options": {
+            "allow": [
+              "assert",
+              "clear",
+              "count",
+              "countReset",
+              "debug",
+              "dir",
+              "dirxml",
+              "error",
+              "group",
+              "groupCollapsed",
+              "groupEnd",
+              "info",
+              "table",
+              "time",
+              "timeEnd",
+              "timeLog",
+              "trace",
+              "warn"
+            ]
+          }
+        }
+      },
+      "style": {
+        "noNonNullAssertion": "error",
+        "useImportType": "error",
+        "useConsistentArrayType": {
+          "level": "error",
+          "options": { "syntax": "shorthand" }
+        },
+        "noNamespace": "error",
+        "noParameterAssign": "error",
+        "noUselessElse": "error",
+        "useNumberNamespace": "error",
+        "useNodejsImportProtocol": "error",
+        "useThrowOnlyError": "error",
+        "useThrowNewError": "error"
+      },
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUnusedImports": "error",
+        "noUnusedFunctionParameters": "error",
+        "noUndeclaredVariables": "error"
+      },
+      "performance": {
+        "noAccumulatingSpread": "error",
+        "noDelete": "error"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+  "json": {
+    "formatter": {
+      "indentWidth": 2,
+      "lineWidth": 100
+    }
+  }
+}

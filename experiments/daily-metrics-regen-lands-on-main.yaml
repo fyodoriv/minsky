@@ -1,0 +1,49 @@
+id: daily-metrics-regen-lands-on-main
+hypothesis: |
+  docs/METRICS.md is the committed metric surface; the `cross-repo-pr-rate`
+  row carries a 1-day freshness budget and `check-metric-freshness` is a
+  whole-tree gate on every PR + a vitest suite. Nothing scheduled a regen
+  that LANDS ON MAIN, so main went red every midnight UTC — observed
+  2026-06-11T00:00Z and hand-unwedged by PR #1208 (1 manual unwedge per
+  day, each blocking every open PR until an operator intervened).
+  Effect: a scheduled daily collect+render+PR
+  (`scripts/daily-metrics-regen.mjs`, fired by
+  `distribution/launchd/com.minsky.daily-metrics.plist` hourly-at-:10 and
+  `distribution/systemd/minsky-daily-metrics.timer` at 00:10 UTC via
+  `distribution/systemd/run-daily-metrics.sh` +
+  `distribution/systemd/minsky-daily-metrics.service`) keeps
+  check-metric-freshness green on main with ZERO hand-unwedges — manual
+  unwedge commits drop from 1/day to 0/day, and the regen PR cadence is
+  exactly one `chore/metrics-daily-regen-<date>` PR per UTC date (the
+  decision core's already-rendered-today / branch-exists / no-change
+  guards make extra fires silent no-ops).
+success: |
+  Over the first 14 days after the units are installed:
+    (1) ≥12 of 14 UTC dates (≥85%) have a `chore(metrics): daily regen`
+        commit landing on main, AND
+    (2) 0 manual unwedge commits (a regen commit NOT authored via a
+        `chore/metrics-daily-regen-*` branch) are needed.
+  The v0 measurement at PR-merge time is the structural smoke test in
+  `measurement` below: the decision core publishes on stale-main input,
+  the systemd timer fires daily at 00:10 UTC, and the launchd plist
+  dispatches the shared runner.
+pivot: |
+  If <70% of UTC dates get a merged regen PR over the first 14 days, OR
+  the scheduled path produces ≥2 broken/duplicate regen PRs per week
+  (duplicate dated branches, red `check-metric-freshness` on the
+  generated PR, or a PR that races a manual edit), the PR-based approach
+  is abandoned: pivot to direct-push-to-main of the plumbing regen
+  commit (smaller surface, no PR-gate dependency), or — if direct push
+  is rejected for audit reasons — widen the `cross-repo-pr-rate`
+  freshness budget from 1d to 2d so a single missed day cannot redden
+  main.
+measurement: |
+  node --input-type=module -e "import('./scripts/daily-metrics-regen.mjs').then(m=>{const d=m.decideRegen({todayUtc:'2026-06-12',mainMetricsMd:'snap .minsky/metric-snapshots/2026-06-11.json',renderedMetricsMd:null,remoteBranchExists:false});process.exit(d.action==='publish'?0:1)})" && test "$(grep -c 'OnCalendar=\*-\*-\* 00:10:00 UTC' distribution/systemd/minsky-daily-metrics.timer)" -eq 1 && test "$(grep -c 'run-daily-metrics.sh' distribution/launchd/com.minsky.daily-metrics.plist)" -ge 1
+anchor: |
+  Beyer, Jones, Petoff, Murphy (eds.), *Site Reliability Engineering*,
+  O'Reilly 2016, Ch. 7 "The Evolution of Automation at Google" — automate
+  the toil (the daily hand-unwedge IS toil: manual, repetitive,
+  automatable, no enduring value); rule #4 (vision.md § 4 — everything
+  measurable, everything visible: the committed METRICS.md surface only
+  stays trustworthy if its refresh is scheduled, not remembered); rule
+  #16 (default by default — the regen unit installs with the supervisor).

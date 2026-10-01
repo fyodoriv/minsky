@@ -1,0 +1,9 @@
+id: npx-integrated-run-blockers
+hypothesis: |
+  the published @fyodoriv/minsky package cannot reach a live iteration via integrated `npx -y @fyodoriv/minsky` because of three blockers: (A) bin/minsky's repo resolver never considers its own unpacked package dir and swallows the actionable error under set -euo pipefail (exit 1 in ~4s with zero output); (B) the npm tarball ships bin/ files mode 644 (npm only chmods the bin-entry), so the `-x` gates on bin/minsky-run.sh reject the package even though it is invoked via `bash`; (C) the openhands spawn shim is excluded from package.json files so the openhands backend is unavailable. Adding self-resolution + un-swallowing the error (A), switching the runner gates from -x to -s since the runner is bash-invoked (B), and packaging the shim subtree (C) makes the tarball path reach the daemon spawn instead of failing silently.
+success: "the npx-init-tarball integration suite passes (tarball-extracted bin/minsky-run.sh runs without an exec bit; the openhands spawn shim is present in the tarball file list; the integrated no-subcommand run reaches the daemon path instead of silent exit-1; resolver failure prints an actionable error naming MINSKY_REPO)."
+pivot: "if blocker (C) cannot be closed by packaging the shim alone (e.g. the integrated run still needs an agent runtime the tarball can't ship), narrow M1.3's acceptance to the claude-backed path (claude -p on the OAuth token, no shim) and file the openhands-tarball path as M2 scope, rather than shipping a package that silently exits 1."
+measurement: "MINSKY_RUN_INTEGRATION=1 npx vitest run test/integration/npx-init-tarball.test.ts"
+timeout_seconds: 600
+anchor: |
+  Raymond, *The Art of Unix Programming* (2003), Ch. 1 — the rule of repair: when a program must fail, it must fail noisily and as soon as possible; a silent exit-1 is the anti-pattern this fixes.

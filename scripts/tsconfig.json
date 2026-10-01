@@ -1,0 +1,17 @@
+{
+  // Global TypeScript checking for scripts/*.mjs. The migration is
+  // complete: every script in this directory passes strict tsc. New
+  // scripts MUST also pass — no per-file opt-out is supported. If a
+  // script genuinely cannot be typed strictly, document the reason in
+  // a one-line comment and add a follow-up TASKS.md entry; do NOT
+  // re-introduce a per-file directive.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "checkJs": true,
+    "allowJs": true,
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": ["**/*.mjs"]
+}

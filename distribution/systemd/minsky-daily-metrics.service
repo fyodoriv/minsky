@@ -1,0 +1,42 @@
+# <!-- scope: human-approved 2026-06-11 operator task "daily METRICS.md regen lands on main" — daily docs/METRICS.md regen + PR; Linux/systemd parallel of com.minsky.daily-metrics.plist. -->
+# <!-- pattern: not-applicable — systemd .service unit mirroring com.minsky.daily-metrics.plist; the periodic-task supervisor pattern (Borg/Bashir/Burns/Hightower 2017) is declared at vision.md § "Pattern conformance index" for the supervisor unit-files. Same shape as minsky-weekly-competitive.service. -->
+#
+# Minsky daily metrics regen — Linux/systemd parallel of the launchd
+# `com.minsky.daily-metrics.plist`. Triggered by
+# `minsky-daily-metrics.timer` daily at 00:10 UTC. `Type=oneshot` —
+# each invocation regenerates docs/METRICS.md (when stale on main),
+# pushes `chore/metrics-daily-regen-<date>`, opens the PR, and exits.
+#
+# Pattern: periodic-task supervisor (Borg/Bashir/Burns/Hightower
+# _Designing Distributed Systems_ 2017, periodic-scheduling primitive).
+# The timer is the cadence kernel; this service is the unit of work.
+# Source: experiments/daily-metrics-regen-lands-on-main.yaml; manual
+# unwedge precedent PR #1208.
+
+[Unit]
+Description=Minsky daily docs/METRICS.md regen — keep metric-freshness green on main
+PartOf=minsky-supervisor.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=${MINSKY_HOME}
+Environment=MINSKY_HOME=${MINSKY_HOME}
+ExecStart=/bin/sh ${MINSKY_HOME}/distribution/systemd/run-daily-metrics.sh
+
+# Sandboxing — same shape as the other minsky-* services so the
+# `scripts/check-supervisor-sandbox-hardening.mjs` lint stays green.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+
+# Hard cap: 300s. collect-metrics shells out with 30s-per-command
+# timeouts and the regen adds a push + `gh pr create`; anything past
+# this is a hang — systemd reaps cleanly.
+TimeoutStartSec=300
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=minsky-daily-metrics

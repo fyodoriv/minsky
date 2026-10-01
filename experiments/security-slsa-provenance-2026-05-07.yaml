@@ -1,0 +1,66 @@
+id: security-slsa-provenance-2026-05-07
+hypothesis: |
+  TASKS.md `supply-chain-hardening-lockfile-sbom-slsa` § Details (c)
+  specifies `.github/workflows/slsa.yml` — a GitHub Actions workflow
+  that uses `slsa-framework/slsa-github-generator` to produce a SLSA
+  Build Level 3 provenance attestation for each Minsky release.
+
+  Today (2026-05-07) the supply-chain task has shipped lockfile-
+  integrity gates (PRs #263-#265) and SBOM-shape gates (PRs
+  #269-#270, #285-#286, #290), but the provenance / attestation
+  slice is unshipped. Without it, a consumer of a Minsky release
+  has no cryptographic proof that the released artefact was built
+  by the expected GitHub Actions workflow and not tampered with in
+  transit (the 2025 chalk/debug incident is the load-bearing
+  precedent — `vision.md § 13.5`).
+
+  The workflow: on `release` creation, pack `distribution/` and
+  `setup.sh` into a versioned tarball, hash it with SHA-256, and
+  pass the base64-encoded hashes to the slsa-github-generator
+  reusable workflow, which produces and uploads a SLSA provenance
+  document signed by Sigstore. Consumers verify with either
+  `slsa-verifier` or `gh attestation verify`.
+
+  Pre-registration (Munafò et al. 2017): the prediction is
+  committed BEFORE any code is written — the `.yml` file does not
+  exist on `main` at experiment-creation time.
+success: |
+  - `.github/workflows/slsa.yml` exists and passes the CI
+    pattern-index gate (`grep -q slsa vision.md` exits 0).
+  - The workflow YAML is syntactically valid:
+    `node -e "require('js-yaml').load(require('fs').readFileSync('.github/workflows/slsa.yml','utf8'))"` exits 0.
+  - The workflow references `slsa-framework/slsa-github-generator`
+    (the industry-standard SLSA generator) and `actions/checkout@v4`
+    (the pinned checkout action).
+  - Vision.md pattern conformance index carries a row mentioning
+    `.github/workflows/slsa.yml` (`grep -q "slsa.yml" vision.md`
+    exits 0).
+pivot: |
+  If slsa-github-generator v2 has breaking changes that prevent the
+  workflow from completing (e.g., the generator's required
+  `permissions` shape changes), pivot to GitHub's native
+  `actions/attest-build-provenance@v2` action, which provides the
+  same SLSA Build Level 3 guarantee on GitHub-hosted runners via
+  Sigstore without the external generator dependency. The pivot
+  preserves the security guarantee; only the implementation
+  mechanism changes.
+
+  Pivot trigger: ≥2 consecutive release runs fail with a generator-
+  specific error (not a Minsky build error) AND the slsa-github-
+  generator has a known open issue for the runner OS version.
+measurement: |
+  grep -q "slsa.yml" vision.md && grep -q "slsa-framework/slsa-github-generator" .github/workflows/slsa.yml && node -e "require('js-yaml').load(require('fs').readFileSync('.github/workflows/slsa.yml','utf8'))" && echo "ok"
+anchor: |
+  TASKS.md `supply-chain-hardening-lockfile-sbom-slsa` § Details (c)
+  — the pre-registered scope: `.github/workflows/slsa.yml`; vision.md
+  § 13.5 (supply-chain hardening — SLSA Build Level 3 + Sigstore for
+  attestations); SLSA Specification 1.0 (slsa.dev/spec/v1.0/) — the
+  industry standard for build provenance and tamper-evident release
+  artefacts; Sigstore (sigstore.dev) — the public-good transparency
+  log the generator uploads to; rule #1 (vision.md § 1 — adopt
+  industry-standard primitives; slsa-github-generator is the CNCF-
+  hosted reference implementation); rule #13 (vision.md § 13 —
+  security & privacy second priority; SLSA is item 5 of the 8-item
+  minimum bar); Munafò, Nosek, Bishop et al., "A Manifesto for
+  Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017
+  (pre-registration — prediction committed before code is written).

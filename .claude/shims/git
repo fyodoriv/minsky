@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+#
+# .claude/shims/git — argv-level guard against destructive git.
+#
+# Prepend `${CLAUDE_PROJECT_DIR}/.claude/shims` to PATH (see
+# `.claude/settings.json`) so this shim runs ahead of the real `git`. It
+# closes the indirect-invocation gap left by the PreToolUse hook
+# `.claude/hooks/block-dangerous-bash.sh`, which only sees the literal
+# Bash command and cannot peer into scripts, `sh -c '...'`, or aliases
+# (incident 2026-06-10).
+#
+# Anchor: Tuszynski 2026 — argv interception is a narrower waist than
+# command-string matching. The hook stays as the user-facing
+# safety-with-guidance layer; the shim is the last-resort net that fires
+# however the call is constructed.
+#
+# What it does, in order:
+#   1. Locate the real git by stripping the shim dir from PATH.
+#   2. Detect tree kind (main checkout vs `.worktrees/*` / external).
+#   3. In a worktree, exec real git transparently — worktrees are
+#      per-agent isolated, so the destructive-revert blast radius is
+#      one session and not worth blocking.
+#   4. In the operator root, scan argv for known-destructive subcommand
+#      shapes; emit a guidance block + exit 2 when matched.
+#   5. Everything else (status, log, diff, fetch, …): exec real git.
+#
+# Test seams (parity with `block-dangerous-bash.sh`):
+#   BDB_TREE_KIND_OVERRIDE=main|worktree   force tree-kind detection
+#   MINSKY_GIT_SHIM_REAL_GIT=<path>        substitute real-git target
+#
+# Escape hatch (operator only, NOT for agents):
+#   MINSKY_GIT_SHIM_DISABLE=1              skip all checks, transparent
+
+set -eu
+
+SHIM_DIR=$(cd "$(dirname "$0")" && pwd)
+
+find_real_git() {
+  if [ -n "${MINSKY_GIT_SHIM_REAL_GIT:-}" ]; then
+    printf '%s\n' "$MINSKY_GIT_SHIM_REAL_GIT"
+    return 0
+  fi
+  local clean_path
+  clean_path=$(printf '%s' "$PATH" | awk -v RS=: -v ORS=: -v shim="$SHIM_DIR" '$0 != shim && $0 != ""' | sed 's/:$//')
+  PATH="$clean_path" command -v git 2>/dev/null || true
+}
+
+REAL_GIT=$(find_real_git)
+if [ -z "$REAL_GIT" ] || [ "$REAL_GIT" = "$0" ]; then
+  echo "git-shim: cannot find real git on PATH (after stripping $SHIM_DIR)" >&2
+  exit 127
+fi
+
+if [ "${MINSKY_GIT_SHIM_DISABLE:-}" = "1" ]; then
+  exec "$REAL_GIT" "$@"
+fi
+
+if [ -n "${BDB_TREE_KIND_OVERRIDE:-}" ]; then
+  TREE_KIND="$BDB_TREE_KIND_OVERRIDE"
+else
+  _gd=$("$REAL_GIT" rev-parse --git-dir 2>/dev/null || echo "")
+  _gcd=$("$REAL_GIT" rev-parse --git-common-dir 2>/dev/null || echo "")
+  if [ -n "$_gd" ] && [ "$_gd" = "$_gcd" ]; then TREE_KIND="main"; else TREE_KIND="worktree"; fi
+fi
+
+if [ "$TREE_KIND" != "main" ]; then
+  exec "$REAL_GIT" "$@"
+fi
+
+# Find the subcommand: first non-flag token, skipping git's global flags
+# and their values where applicable.
+SUBCMD=""
+skip_next=0
+for arg in "$@"; do
+  if [ $skip_next -eq 1 ]; then
+    skip_next=0
+    continue
+  fi
+  case "$arg" in
+    -C|--git-dir|--work-tree|-c|--exec-path|--namespace)
+      skip_next=1
+      ;;
+    --git-dir=*|--work-tree=*|--exec-path=*|--namespace=*)
+      ;;
+    -*)
+      ;;
+    *)
+      SUBCMD="$arg"
+      break
+      ;;
+  esac
+done
+
+emit_block() {
+  local label="$1"
+  local guidance="$2"
+  {
+    echo
+    echo "git-shim: BLOCKED \"$label\" (operator-root, argv-level guard)"
+    echo "Command: git $*"
+    echo
+    echo "$guidance"
+    echo
+    echo "Escape hatch (operator only): MINSKY_GIT_SHIM_DISABLE=1 git ..."
+  } >&2
+  exit 2
+}
+
+case "$SUBCMD" in
+  reset)
+    for a in "$@"; do
+      if [ "$a" = "--hard" ]; then
+        emit_block "git reset --hard" \
+"\`git reset --hard\` wipes uncommitted changes from ALL sessions on this checkout. Use \`git restore <specific-files>\` to revert specific files, or \`git stash\` to save changes temporarily."
+      fi
+    done
+    ;;
+  restore)
+    for a in "$@"; do
+      case "$a" in
+        .|:/)
+          emit_block "git restore . (wholesale revert)" \
+"\`git restore .\` / \`git restore :/\` reverts EVERY uncommitted change including other sessions' work-in-progress, with no reflog trace. Name the specific files: \`git restore <file1> <file2>\`."
+          ;;
+      esac
+    done
+    ;;
+  checkout)
+    has_path_dot=0
+    has_dash_b=0
+    has_feat_ref=0
+    for a in "$@"; do
+      case "$a" in
+        .) has_path_dot=1 ;;
+        -b|-B) has_dash_b=1 ;;
+        feat/*|fix/*|docs/*|chore/*|test/*|refactor/*|perf/*|ci/*|build/*|release/*|hotfix/*)
+          has_feat_ref=1
+          ;;
+      esac
+    done
+    if [ $has_path_dot -eq 1 ]; then
+      emit_block "git checkout . (wholesale revert)" \
+"Use \`git restore <specific-files>\` to revert only the files you intend to touch. \`git checkout .\` reverts EVERY uncommitted change including other sessions' work-in-progress."
+    fi
+    if [ $has_dash_b -eq 1 ] || [ $has_feat_ref -eq 1 ]; then
+      emit_block "git checkout <feature-branch> (operator root)" \
+"This is the SHARED operator checkout — switching it to a feature branch strands sibling agents and the daemon. Work in an isolated worktree instead: \`git worktree add /tmp/minsky-<task> -b <branch> origin/main\`."
+    fi
+    ;;
+  switch)
+    for a in "$@"; do
+      case "$a" in
+        -c|-C)
+          emit_block "git switch -c (operator root)" \
+"This is the SHARED operator checkout. Work in an isolated worktree instead: \`git worktree add /tmp/minsky-<task> -b <branch> origin/main\`."
+          ;;
+        feat/*|fix/*|docs/*|chore/*|test/*|refactor/*|perf/*|ci/*|build/*|release/*|hotfix/*)
+          emit_block "git switch <feature-branch> (operator root)" \
+"This is the SHARED operator checkout. Work in an isolated worktree instead: \`git worktree add /tmp/minsky-<task> -b <branch> origin/main\`."
+          ;;
+      esac
+    done
+    ;;
+  clean)
+    for a in "$@"; do
+      case "$a" in
+        -[fdxX]*[fd]*|-[fd])
+          emit_block "git clean -fd" \
+"\`git clean -fd\` deletes untracked files across ALL sessions on this checkout. Use \`rm <file>\` for specific paths, or work in a worktree."
+          ;;
+      esac
+    done
+    ;;
+  stash)
+    for a in "$@"; do
+      case "$a" in
+        drop|clear)
+          emit_block "git stash drop/clear" \
+"On a shared checkout a stash may hold ANOTHER session's work. Inspect with \`git stash show -p\`, restore with \`git stash pop\`, and only drop after confirming the content is yours."
+          ;;
+      esac
+    done
+    ;;
+  push)
+    has_force=0
+    has_protected=0
+    for a in "$@"; do
+      case "$a" in
+        --force|-f|--force-with-lease) has_force=1 ;;
+        main|master|origin/main|origin/master|HEAD:main|HEAD:master) has_protected=1 ;;
+      esac
+    done
+    if [ $has_force -eq 1 ] && [ $has_protected -eq 1 ]; then
+      emit_block "git push --force to main/master" \
+"Protected branches reject force-push. If you need to amend a PR commit, use \`git push --force-with-lease origin <feature-branch>\` against the feature branch only."
+    fi
+    ;;
+  commit|tag)
+    for a in "$@"; do
+      case "$a" in
+        --no-verify|-n)
+          emit_block "git --no-verify (hook bypass)" \
+"lefthook pre-commit/pre-push exists to catch regressions BEFORE they land. Run \`pnpm pre-pr-lint --stage=fast\` and fix the failures, then \`git commit\` (without --no-verify)."
+          ;;
+      esac
+    done
+    ;;
+esac
+
+exec "$REAL_GIT" "$@"

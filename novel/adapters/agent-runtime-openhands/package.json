@@ -1,0 +1,29 @@
+{
+  "name": "@minsky/agent-runtime-openhands",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OpenHands agent-runtime adapter — TS-side spawn-config builder + Python SDK shim (Adapter pattern, Gamma 1994). Replaces direct Claude/Devin/Aider CLI adapters per operator 2026-05-22 Path C reshape directive; OpenHands is Minsky's canonical agent runtime.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "bin/**/*.py",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

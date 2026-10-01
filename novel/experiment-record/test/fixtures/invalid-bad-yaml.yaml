@@ -1,0 +1,6 @@
+id: bad-yaml-task
+hypothesis: "this string starts but never closes
+success: "missing"
+pivot: "missing"
+measurement: "missing"
+anchor: "missing"

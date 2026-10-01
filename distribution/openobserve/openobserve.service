@@ -1,0 +1,45 @@
+# OpenObserve daemon — Minsky observability backend (OTLP receiver).
+#
+# Pattern: OTP "permanent" restart (Armstrong, *Programming Erlang*, 2007).
+# `Restart=always` is the closest-fitting POSIX equivalent.
+#
+# Placeholders (consumer expands at install time):
+#   ${HOME}   — user's home directory
+#
+# Install (no root):
+#   mkdir -p ~/.config/systemd/user
+#   envsubst '${HOME}' < distribution/openobserve/openobserve.service \
+#     > ~/.config/systemd/user/openobserve.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now openobserve.service
+#
+# Default endpoints once running:
+#   - UI / OTLP HTTP receiver:  http://127.0.0.1:5080
+#   - Health probe:             http://127.0.0.1:5080/healthz
+#   - PromQL instant query:     http://127.0.0.1:5080/api/default/prometheus/api/v1/query
+
+[Unit]
+Description=OpenObserve daemon — Minsky observability backend
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${HOME}/.openobserve/data
+Environment=ZO_ROOT_USER_EMAIL=root@minsky.local
+Environment=ZO_ROOT_USER_PASSWORD=Complexpass#123
+Environment=ZO_DATA_DIR=${HOME}/.openobserve/data
+Environment=ZO_HTTP_PORT=5080
+ExecStart=${HOME}/.local/bin/openobserve
+
+# Permanent restart: the OTLP receiver should always be up.
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openobserve
+
+[Install]
+WantedBy=default.target

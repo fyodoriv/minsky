@@ -1,0 +1,25 @@
+{
+  "name": "@minsky/tick-loop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure data shapes + anonymizer for the self-reported findings a minsky installation submits back to fyodoriv/minsky (rule #13.7 privacy-by-default; opt-in telemetry).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

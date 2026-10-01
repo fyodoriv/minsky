@@ -1,0 +1,3846 @@
+#!/bin/bash
+# `minsky` — PATH-accessible shim for running the minsky cross-repo
+#   runner from any folder.
+#
+# Pattern: thin bash wrapper + delegating Node subprocess (Martin
+#   2017 — I/O at the edge; the resolver `resolveMinskyRepo` in
+#   `novel/cross-repo-runner/src/shim-resolve.ts` is pure, the shim
+#   here is the I/O boundary that probes the filesystem).
+# Source: minsky-observer-plugin-via-agentbrew task block + slice D
+#   (PR #492) autonomous defaults (`minsky-run` does cwd auto-detect,
+#   this shim just lets the operator invoke it from any shell).
+# Conformance: full — no business logic here, only DI + forwarding.
+#
+# Usage:
+# (subcommand-style, nx + openhands shape — 2026-05-26 CLI overhaul)
+#
+#   ─── Lifecycle ─────────────────────────────────────────────────
+#   minsky init [path]              → write per-machine config for this repo
+#   minsky setup                    → install supervisor + openhands SDK
+#   minsky update                   → pull + rebuild + re-render plists
+#   minsky uninstall [--force]      → remove all per-machine state
+#   minsky reset [--hard]           → clear iteration store + claims + truncate logs
+#                                     (--hard also stops supervisor)
+#
+#   ─── Run ───────────────────────────────────────────────────────
+#   minsky run                      → autonomous run (foreground, SIGHUP-immune)
+#   minsky run --once               → one iteration
+#   minsky run --host <dir>         → explicit single-host
+#   minsky run --hosts-dir <p>      → explicit multi-host walk
+#   minsky run --local              → local-only mode (no cloud tokens)
+#   minsky solve <task-id>          → one iteration of one task (openhands-pattern
+#                                     killer-feature verb — "minsky solve" answers
+#                                     "what does minsky do for me?" in one line)
+#   minsky transform [<path>]       → "point at any repo, demo improvement"
+#                                     (composes bootstrap + baseline + run + report;
+#                                     forwards --max-hours / --baseline-only / etc.)
+#
+#   ─── Daemon (supervisor lifecycle, nx-pattern noun-space) ──────
+#   minsky daemon start             → was: minsky --daemon
+#   minsky daemon stop              → was: minsky stop
+#   minsky daemon status            → was: minsky status
+#   minsky daemon logs              → was: minsky logs
+#   minsky daemon restart           → stop then start
+#   minsky daemon doctor            → was: minsky doctor / setup.sh --doctor
+#
+#   ─── Show / list (read-only introspection, nx-pattern) ─────────
+#   minsky show tasks               → queued tasks + next-pick + per-priority counts
+#   minsky show task <id>           → one task block from TASKS.md
+#   minsky show iterations          → recent iterations
+#   minsky show config              → effective ~/.minsky/config.json
+#   minsky show supervisors         → loaded launchd/systemd units
+#   minsky show findings            → self-diagnose with actor labels
+#   minsky list agents              → available cloud-agent backends
+#   minsky list scripts             → operator-facing command surface
+#
+#   ─── Resources (openhands-pattern noun-spaces) ─────────────────
+#   minsky config show / set <k>=<v>     → ~/.minsky/config.json
+#   minsky agent list / set <name> / test <name>  → cloud-agent backend mgmt
+#
+#   ─── Reports & analyses ────────────────────────────────────────
+#   minsky metrics [collect|render]      → success-metrics ops
+#   minsky changelog [today|snapshot]    → release notes
+#   minsky milestone check               → 7-surface alignment gate
+#   minsky m1 metrics / observability / coverage → M1 milestone reporting
+#   minsky audit cto / runany / lint / chaos / llm-throughput → diagnostics
+#   minsky trend / recommend / knowledge → MAPE-K analyses
+#
+#   ─── Help / global ─────────────────────────────────────────────
+#   minsky --help / minsky help          → this block
+#   minsky <cmd> --help                  → per-command help (every subcommand)
+#   minsky ui                            → open dashboard at http://localhost:8181
+#
+# DEPRECATED aliases (kept ≤30 days, removed 2026-06-26):
+#   `minsky --daemon` / `--once` / `--transform` / `--bash-runner` flag-style
+#   entrypoints still work but the subcommand form (`minsky run --once`,
+#   `minsky daemon start`, `minsky transform`) is preferred.
+#
+# Resolution order (via `resolveMinskyRepo`):
+#   1. $MINSKY_REPO env var (if set + exists)
+#   2. ~/minsky, ~/code/minsky, ~/src/minsky, ~/apps/minsky (common
+#      clone locations the shim searches automatically)
+#
+# Failure modes (rule #7):
+#   - No repo found: loud-crash-supervisor-restart; prints the exact
+#     resolver hint + exit 1. The operator sees "Set MINSKY_REPO=..."
+#     and can act. Silent fallback would hide the misconfiguration.
+#   - Node missing: loud-crash. The upstream `node` probe is single-
+#     execution; if node isn't installed, `minsky-run` can't work
+#     either, so the shim exits with a message pointing at
+#     `setup.sh`.
+#   - Subcommand `status`/`stop`/`logs` with no running process: graceful
+#     degrade. `status` prints "no running minsky-run on this host";
+#     `stop` prints "nothing to stop" and exits 0 (idempotent).
+
+set -euo pipefail
+
+# ── 0. Node availability ─────────────────────────────────────
+if ! command -v node >/dev/null 2>&1; then
+  echo "minsky: node is not on PATH. Install Node 20+ and retry, or run setup.sh in the minsky repo." >&2
+  exit 1
+fi
+
+# ── Daemon paths ──────────────────────────────────────────────
+# `MINSKY_STATE_DIR` is env-override-friendly so integration tests can
+# isolate the fixture against a tmpdir without clobbering the operator's
+# real `~/.minsky/`. The default still resolves to `${HOME}/.minsky`
+# for operator-facing invocations. Same pattern as `MINSKY_INSTALL_
+# DAEMON_QUIET:-0` and other opt-out env vars in this script.
+MINSKY_STATE_DIR="${MINSKY_STATE_DIR:-${HOME}/.minsky}"
+MINSKY_DAEMON_LOG="${MINSKY_STATE_DIR}/daemon.log"
+MINSKY_DAEMON_PID="${MINSKY_STATE_DIR}/daemon.pid"
+
+# ── Portable helpers (zero deps — no python3, no uv) ─────────
+# We previously shelled out to `python3 -c "import os; print(os.path.realpath(...))"`
+# but a `python3` wrapper can bootstrap a uv cache
+# on first call with a fresh HOME. That added 30+ seconds to `minsky report`
+# when invoked from a clean test environment. This script must stay portable
+# and FAST — replace all python3 calls with shell-only equivalents.
+# Discovered 2026-05-19 — rule-#17 fix.
+_minsky_realpath() {
+  # Resolve symlinks for $1. Works on macOS + Linux. Falls back to $1
+  # if both `realpath` and `readlink -f` are missing.
+  local _p="$1"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$_p" 2>/dev/null && return 0
+  fi
+  # macOS readlink doesn't have -f; emulate it.
+  while [ -L "$_p" ]; do
+    local _next
+    _next=$(readlink "$_p" 2>/dev/null) || break
+    case "$_next" in
+      /*) _p="$_next" ;;
+      *) _p="$(dirname "$_p")/$_next" ;;
+    esac
+  done
+  # Resolve relative path to absolute.
+  ( cd "$(dirname "$_p")" 2>/dev/null && printf "%s/%s" "$(pwd -P)" "$(basename "$_p")" )
+}
+
+_minsky_config_value() {
+  # Read `$1` (key) from $MINSKY_STATE_DIR/config.json without a JSON parser.
+  # Handles only top-level string values — sufficient for `default_host`,
+  # `cloud_agent`, etc. Returns empty string on missing file or missing key.
+  local _key="$1"
+  local _cfg="${2:-$MINSKY_STATE_DIR/config.json}"
+  [ -f "$_cfg" ] || { printf ""; return 0; }
+  # awk: find a line `"key": "value"`, strip quotes/commas, print value.
+  awk -v key="$_key" '
+    BEGIN { FS="\""; found=0 }
+    $0 ~ "\"" key "\"[ \t]*:" {
+      # Match either string ("...") or bare token after the colon
+      idx = index($0, ":")
+      rest = substr($0, idx+1)
+      gsub(/^[ \t]+|[ \t,]+$/, "", rest)
+      gsub(/^"|"$/, "", rest)
+      print rest
+      found = 1
+      exit
+    }
+  ' "$_cfg" 2>/dev/null
+}
+
+_minsky_count_bootstrapped_siblings() {
+  # Count the bootstrapped host repos that live directly under `$1`
+  # (a parent directory). A host is "bootstrapped" iff it carries the
+  # `.minsky/repo.yaml` sidecar that `bin/minsky-bootstrap.sh` writes —
+  # the same marker `bin/minsky-run.sh`'s scan mode and Invariant 6 use.
+  # Prints the integer count to stdout (0 when the parent is missing or
+  # has no bootstrapped children). Used by `install-daemon` (to decide
+  # `--host` vs `--hosts-dir`) and by `doctor` (to warn on the
+  # single-host-plist-with-many-hosts misconfig). Pure read-only glob —
+  # no JSON parser, portable everywhere `fd`/`find` are shimmed.
+  local _parent="$1"
+  [ -n "$_parent" ] && [ -d "$_parent" ] || { printf '0'; return 0; }
+  local _count=0 _d
+  for _d in "$_parent"/*/; do
+    [ -f "${_d}.minsky/repo.yaml" ] && _count=$((_count + 1))
+  done
+  printf '%s' "$_count"
+}
+
+_minsky_autostart_sentinel() {
+  printf '%s' "${MINSKY_STATE_DIR}/autostart-enabled"
+}
+
+_minsky_autostart_enabled() {
+  [ -f "$(_minsky_autostart_sentinel)" ]
+}
+
+# Hard-off sentinel: written by `disable-autostart`, it durably blocks
+# `enable-autostart` so a routine update or an accidental re-enable can
+# never silently bring the supervisor back. Re-enabling is an explicit
+# operator action (`--force`, or remove the sentinel).
+_minsky_autostart_hard_off_sentinel() {
+  printf '%s' "${MINSKY_STATE_DIR}/autostart-disabled"
+}
+
+_minsky_launchd_agent_labels() {
+  printf '%s\n' \
+    com.minsky.tick-loop \
+    com.minsky.daemon \
+    com.minsky.watchdog \
+    com.minsky.budget-guard \
+    com.minsky.runany \
+    com.minsky.auto-merge \
+    com.minsky.weekly-competitive \
+    com.minsky.corpus-refresh-check \
+    com.minsky.daily-metrics
+}
+
+_minsky_bootout_all_launchagents() {
+  local _label
+  for _label in $(_minsky_launchd_agent_labels); do
+    launchctl bootout "gui/$(id -u)/$_label" 2>/dev/null || true
+  done
+}
+
+_minsky_set_all_plists_disabled() {
+  local _disabled="$1"
+  local _f
+  for _f in "$HOME/Library/LaunchAgents"/com.minsky.*.plist; do
+    [ -f "$_f" ] || continue
+    plutil -replace Disabled -bool "$_disabled" "$_f" 2>/dev/null || true
+  done
+}
+
+_minsky_render_launchd_templates() {
+  # Render distribution/launchd/*.plist templates into
+  # ~/Library/LaunchAgents/ with ${MINSKY_HOME} + ${HOME} substituted.
+  local _repo_dir="$1"
+  local _unit_dir="$HOME/Library/LaunchAgents"
+  local _template_dir="$_repo_dir/distribution/launchd"
+  local _f _target
+  mkdir -p "$_unit_dir"
+  for _f in "$_template_dir"/*.plist; do
+    [ -f "$_f" ] || continue
+    _target="$_unit_dir/$(basename "$_f")"
+    MINSKY_HOME="$_repo_dir" HOME="$HOME" envsubst '${MINSKY_HOME} ${HOME}' < "$_f" > "$_target"
+  done
+}
+
+# ── Built-runtime guard (fresh-clone bootstrap, rule #6 loud-fail) ───
+#
+# On a fresh clone the foreground/daemon paths below `exec` a run
+# target — the Node runner `novel/cross-repo-runner/bin/minsky-run.mjs`
+# (when present) or the canonical bash runner `bin/minsky-run.sh`. The
+# `prepare` lifecycle hook (`tsc -b --force` in package.json) builds the
+# TS workspaces' `dist/` on `pnpm install`, so a normal `git clone &&
+# pnpm install` leaves both runnable with no separate build step.
+#
+# But a partial/interrupted install can leave the tree with NO runnable
+# entrypoint: an empty/gutted `minsky-run.mjs` AND a missing
+# `bin/minsky-run.sh`. Without this guard the operator would see a raw
+# node `ERR_MODULE_NOT_FOUND` (or a bare `bash: ...: No such file`)
+# instead of an actionable next step. Per Armstrong 2003 (let-it-crash
+# AT the actionable boundary), we crash loudly HERE with a one-line
+# `pnpm install` hint, not a stack trace deep in node's module loader.
+#
+# Pure-ish: the only I/O is `[ -s ]` / `[ -f ]` existence probes. The
+# repo dir is passed in ($1) so the function is callable against a
+# fixture tree from the bats suite (`tests/fresh-clone-bootstrap.bats`)
+# without touching the operator's real checkout.
+#
+# Returns 0 when a runnable entrypoint exists; prints the hint to
+# stderr and returns 1 when neither does.
+#
+# Source: TASKS.md `minsky-cli-fresh-clone-bootstrap`; rule #6
+# (stay-alive — loud-crash at the right boundary); pnpm docs (`prepare`
+# is the canonical build-on-install hook).
+_minsky_assert_built() {
+  local _ab_repo="$1"
+  local _ab_node_runner="$_ab_repo/novel/cross-repo-runner/bin/minsky-run.mjs"
+  local _ab_bash_runner="$_ab_repo/bin/minsky-run.sh"
+
+  # A runnable Node runner is a NON-EMPTY .mjs (`-s`): the gutted
+  # Path-A placeholder is a zero-byte file, which `-f` would wrongly
+  # accept.
+  if [ -s "$_ab_node_runner" ]; then
+    return 0
+  fi
+  # The bash runner is accepted on NON-EMPTY (`-s`), NOT executable
+  # (`-x`): the published npm tarball strips the exec bit from every
+  # bin/ file except the `bin`-entry `minsky` itself (npm only chmods
+  # the entry), so `bin/minsky-run.sh` lands mode 644 in the artifact.
+  # The runner is always invoked via `bash "$runner"` downstream, so the
+  # exec bit is irrelevant — gating on it wrongly rejected the npx path.
+  # See blocker (B), TASKS.md `npx-integrated-run-blockers`.
+  if [ -s "$_ab_bash_runner" ]; then
+    return 0
+  fi
+
+  echo "minsky: no runnable entrypoint found (looked for $_ab_node_runner and $_ab_bash_runner)." >&2
+  echo "minsky: run \`pnpm install\` from the repo root to build it ($_ab_repo)." >&2
+  return 1
+}
+
+# ── Bash-skeleton probe set (shared by `doctor` and the deprecated
+#    `bash-doctor` alias) ──────────────────────────────────────────────
+#
+# Single source of truth for the Path A bash + Python skeleton's
+# pre-flight checks (jq, python3 ≥3.10, executable bits on bash
+# entrypoints, agent backend, API key, host bootstrap, machine config,
+# disk space, git HEAD state, lockfile, optional --smoke).
+#
+# Previously this probe set was duplicated: a `bash-doctor` case block
+# (~280 lines) and a sub-shell call from the `doctor` case block.
+# Merged into ONE function (rule #16 CLI-consolidation corollary,
+# 2026-05-25 follow-up): both surfaces call this function inline —
+# no sub-shell, no second front door.
+#
+# Inputs (args parsed from $@):
+#   --quiet   — suppress PASS lines
+#   --smoke   — additionally syntax-check every pipeline script + lint
+#               every bash entrypoint with the shell-script linter
+#
+# Outputs:
+#   PASS / FAIL / WARN status lines on stdout via _bd_print.
+#   Sets the global `_bd_skeleton_crit_fail` (0 = no critical fails;
+#   1 = at least one critical fail). Callers decide whether to
+#   propagate this into the overall doctor exit code.
+#
+# Source: 2026-05-25 retro slice 1+2 (PR #866 introduced the probes;
+# PR #868 folded the front door); rule #1 (don't reinvent — single
+# probe body across both callers).
+_run_bash_skeleton_probes() {
+  local _bd_quiet=0
+  local _bd_smoke=0
+  local _a
+  for _a in "$@"; do
+    case "$_a" in
+      --quiet) _bd_quiet=1 ;;
+      --smoke) _bd_smoke=1 ;;
+    esac
+  done
+
+  _bd_skeleton_crit_fail=0  # GLOBAL — callers read this
+
+  _bd_print() {
+    # _bd_print STATUS NAME MESSAGE — quiet hides PASS lines.
+    [ "$_bd_quiet" = "1" ] && [ "$1" = "PASS" ] && return 0
+    printf "  %-4s  %-22s %s\n" "$1" "$2" "$3"
+  }
+
+  local _bd_real_bin
+  _bd_real_bin=$(_minsky_realpath "$0")
+  local _bd_repo_dir
+  _bd_repo_dir=$(dirname "$(dirname "$_bd_real_bin")")
+  local _bd_probes="$_bd_repo_dir/scripts/bash-doctor-probes.sh"
+
+  # CRITICAL — jq (record_iteration depends on it)
+  if command -v jq >/dev/null 2>&1; then
+    local _v
+    _v=$(jq --version 2>/dev/null | sed 's/^jq-//')
+    _bd_print PASS "jq" "$_v"
+  else
+    _bd_print FAIL "jq" "not on PATH (record_iteration cannot serialize JSONL — install via brew install jq / apt-get install jq)"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # CRITICAL — python3 ≥3.10. Delegates to scripts/bash-doctor-probes.sh
+  # to keep `python3 -c` out of bin/minsky (rule enforced by
+  # test/integration/m1-red-green.test.ts § "bin/minsky uses portable
+  # shell helpers, not python3"). Some Python wrappers can take
+  # 30+ seconds to bootstrap uv on a fresh HOME — this function only
+  # runs when the caller has opted into the bash-skeleton path; the
+  # cost is intentional.
+  if [ -x "$_bd_probes" ]; then
+    local _pyv
+    if _pyv=$(bash "$_bd_probes" python-version 2>/dev/null); then
+      _bd_print PASS "python3" "$_pyv"
+    else
+      local _pyv_fallback
+      _pyv_fallback=$(bash "$_bd_probes" python-version 2>/dev/null || echo "?")
+      _bd_print FAIL "python3" "$_pyv_fallback (need 3.10+ for scripts/*.py)"
+      _bd_skeleton_crit_fail=1
+    fi
+  else
+    _bd_print FAIL "python3" "probe helper missing at $_bd_probes"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # CRITICAL — bin/minsky-run.sh present + non-empty. `-s` not `-x`:
+  # these scripts are always invoked via `bash "$script"`, so the exec
+  # bit is irrelevant — and the published npm tarball ships bin/ files
+  # mode 644 (npm only chmods the `bin`-entry). Gating on `-x` made
+  # `doctor` crit-fail on every npx install. See blocker (B), TASKS.md
+  # `npx-integrated-run-blockers`.
+  if [ -s "$_bd_repo_dir/bin/minsky-run.sh" ]; then
+    _bd_print PASS "minsky-run.sh" "$_bd_repo_dir/bin/minsky-run.sh"
+  else
+    _bd_print FAIL "minsky-run.sh" "missing or empty at $_bd_repo_dir/bin/minsky-run.sh (run \`pnpm install\` from $_bd_repo_dir)"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # CRITICAL — bin/minsky-default-session.sh present + non-empty (`-s`,
+  # invoked via bash; see the minsky-run.sh note above).
+  if [ -s "$_bd_repo_dir/bin/minsky-default-session.sh" ]; then
+    _bd_print PASS "default-session.sh" "$_bd_repo_dir/bin/minsky-default-session.sh"
+  else
+    _bd_print FAIL "default-session.sh" "missing or empty at $_bd_repo_dir/bin/minsky-default-session.sh"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # CRITICAL — scripts/spawn_agent.py exists and is python-parseable
+  if [ -f "$_bd_repo_dir/scripts/spawn_agent.py" ]; then
+    if [ -x "$_bd_probes" ] && bash "$_bd_probes" syntax "$_bd_repo_dir/scripts/spawn_agent.py" >/dev/null 2>&1; then
+      _bd_print PASS "spawn_agent.py" "syntax OK"
+    else
+      _bd_print FAIL "spawn_agent.py" "syntax error or probe missing — bash $_bd_probes syntax $_bd_repo_dir/scripts/spawn_agent.py"
+      _bd_skeleton_crit_fail=1
+    fi
+  else
+    _bd_print FAIL "spawn_agent.py" "missing at $_bd_repo_dir/scripts/spawn_agent.py"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # CRITICAL — at least ONE agent backend reachable: canonical
+  # `openhands` CLI (post-June-2026 world) OR OpenHands SDK importable.
+  local _bd_agent_ok=0
+  local _ohv _sdkv
+  if [ -x "$_bd_probes" ] && _ohv=$(bash "$_bd_probes" openhands-cli 2>/dev/null); then
+    _bd_print PASS "openhands CLI" "$_ohv"
+    _bd_agent_ok=1
+  fi
+  if [ -x "$_bd_probes" ] && _sdkv=$(bash "$_bd_probes" openhands-sdk 2>/dev/null); then
+    _bd_print PASS "OpenHands SDK" "importable (v$_sdkv)"
+    _bd_agent_ok=1
+  elif [ "$_bd_agent_ok" = "0" ]; then
+    _bd_print FAIL "agent backend" "neither \`openhands\` CLI nor OpenHands SDK importable (install via: pip install openhands-ai OR install the canonical CLI when shipped)"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # WARN — API key env (OPENHANDS_API_KEY / LLM_API_KEY / ANTHROPIC_API_KEY)
+  if [ -n "${OPENHANDS_API_KEY:-}" ] || [ -n "${LLM_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    _bd_print PASS "API key env" "set (OPENHANDS_API_KEY / LLM_API_KEY / ANTHROPIC_API_KEY)"
+  else
+    _bd_print WARN "API key env" "none of OPENHANDS_API_KEY / LLM_API_KEY / ANTHROPIC_API_KEY set — agent will fail at spawn time"
+  fi
+
+  # WARN — .minsky/repo.yaml in $PWD (only meaningful when called from a host)
+  if [ -f "$PWD/.minsky/repo.yaml" ]; then
+    _bd_print PASS "host bootstrap" "$PWD/.minsky/repo.yaml exists"
+  else
+    _bd_print WARN "host bootstrap" "$PWD/.minsky/repo.yaml missing (run: $_bd_repo_dir/bin/minsky-bootstrap.sh $PWD before --transform)"
+  fi
+
+  # CRITICAL — ~/.minsky/config.json (bash runner's Invariant 1)
+  if [ -f "$HOME/.minsky/config.json" ]; then
+    _bd_print PASS "machine config" "$HOME/.minsky/config.json exists"
+  else
+    _bd_print FAIL "machine config" "$HOME/.minsky/config.json missing (run \`minsky init\` to create it; without this, every iteration fails at Invariant 1)"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # WARN — shellcheck on bin/minsky-run.sh
+  if command -v shellcheck >/dev/null 2>&1; then
+    if shellcheck -x "$_bd_repo_dir/bin/minsky-run.sh" >/dev/null 2>&1; then
+      _bd_print PASS "shellcheck" "minsky-run.sh clean"
+    else
+      _bd_print WARN "shellcheck" "minsky-run.sh has violations (run: shellcheck -x $_bd_repo_dir/bin/minsky-run.sh)"
+    fi
+  else
+    _bd_print WARN "shellcheck" "not installed (install via brew install shellcheck — non-blocking but recommended)"
+  fi
+
+  # WARN — gh CLI authenticated
+  if command -v gh >/dev/null 2>&1; then
+    local _ghv
+    _ghv=$(gh --version 2>/dev/null | head -1 | sed 's/^gh version //')
+    if gh auth status >/dev/null 2>&1; then
+      _bd_print PASS "gh CLI" "$_ghv (authenticated)"
+    else
+      _bd_print WARN "gh CLI" "$_ghv (not authenticated — run \`gh auth login\` before --transform)"
+    fi
+  else
+    _bd_print FAIL "gh CLI" "not on PATH (record_iteration + PR-state probes require it)"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # WARN — disk space (failure captures + JSONL ledger grow over time)
+  local _df_threshold_mb=1024
+  if command -v df >/dev/null 2>&1; then
+    local _avail_kb
+    _avail_kb=$(df -k "$HOME" 2>/dev/null | awk 'NR==2 {print $4}')
+    if [ -n "$_avail_kb" ] && [ "$_avail_kb" -gt 0 ] 2>/dev/null; then
+      local _avail_mb=$((_avail_kb / 1024))
+      if [ "$_avail_mb" -ge "$_df_threshold_mb" ]; then
+        _bd_print PASS "disk free ($HOME)" "${_avail_mb}MB available"
+      else
+        _bd_print WARN "disk free ($HOME)" "${_avail_mb}MB available (below ${_df_threshold_mb}MB threshold — failure captures + JSONL ledger may hit ENOSPC mid-iteration)"
+      fi
+    else
+      _bd_print WARN "disk free ($HOME)" "(df unparseable)"
+    fi
+  else
+    _bd_print WARN "disk free" "df not on PATH (cannot probe)"
+  fi
+
+  # WARN — git HEAD state in $PWD (rebase/merge/cherry-pick in progress breaks per-iter git push)
+  if [ -d "$PWD/.git" ] || git -C "$PWD" rev-parse --git-dir >/dev/null 2>&1; then
+    local _git_branch
+    _git_branch=$(git -C "$PWD" symbolic-ref --short HEAD 2>/dev/null || echo "")
+    if [ -n "$_git_branch" ]; then
+      local _git_dir
+      _git_dir=$(git -C "$PWD" rev-parse --git-dir 2>/dev/null)
+      if [ -d "$_git_dir/rebase-merge" ] || [ -d "$_git_dir/rebase-apply" ]; then
+        _bd_print WARN "git HEAD ($PWD)" "rebase in progress (run \`git rebase --abort\` or finish it before --transform)"
+      elif [ -f "$_git_dir/MERGE_HEAD" ]; then
+        _bd_print WARN "git HEAD ($PWD)" "merge in progress (run \`git merge --abort\` or commit it before --transform)"
+      elif [ -f "$_git_dir/CHERRY_PICK_HEAD" ]; then
+        _bd_print WARN "git HEAD ($PWD)" "cherry-pick in progress (run \`git cherry-pick --abort\` before --transform)"
+      else
+        _bd_print PASS "git HEAD ($PWD)" "on branch $_git_branch"
+      fi
+    else
+      _bd_print WARN "git HEAD ($PWD)" "detached HEAD (agent cannot push to a non-branch ref — \`git checkout main\` or similar)"
+    fi
+  else
+    _bd_print PASS "git HEAD" "$PWD is not a git repo (skipped — only checked when called from inside one)"
+  fi
+
+  # WARN — lockfile presence when $PWD/package.json exists
+  if [ -f "$PWD/package.json" ]; then
+    if [ -f "$PWD/pnpm-lock.yaml" ] || [ -f "$PWD/package-lock.json" ] || [ -f "$PWD/yarn.lock" ]; then
+      _bd_print PASS "lockfile" "found (pnpm-lock.yaml / package-lock.json / yarn.lock)"
+    else
+      _bd_print WARN "lockfile" "$PWD/package.json exists but no lockfile (every iteration's install will resolve fresh — slow + non-deterministic)"
+    fi
+  fi
+
+  # --smoke — opt-in deeper checks: dry-run pipeline scripts + shellcheck
+  # every bash entrypoint. ~5s extra runtime.
+  if [ "$_bd_smoke" = "1" ]; then
+    [ "$_bd_quiet" = "0" ] && echo "" && echo "--smoke: dry-running pipeline scripts to catch integration bugs"
+    local _bd_smoke_fail=0
+    local _bd_script _bd_path
+    for _bd_script in "scripts/pick_task.py" "scripts/build_brief.py" "scripts/build_cto_brief.py" "scripts/spawn_agent.py" "scripts/extract_pr_url.py" "scripts/resolve_gh_host.py" "scripts/transform_trend.py" "scripts/transform_recommend.py" "scripts/transform_knowledge.py" "scripts/baseline_metrics.py" "scripts/minsky_report.py" "scripts/iteration_ship_rate.py" "scripts/dynamic_timeout.py" "scripts/synth_experiment_yaml.py" "scripts/spawn_with_watchdog.py"; do
+      _bd_path="$_bd_repo_dir/$_bd_script"
+      if [ ! -f "$_bd_path" ]; then
+        _bd_print FAIL "smoke: $_bd_script" "missing"
+        _bd_smoke_fail=1
+        continue
+      fi
+      if bash "$_bd_probes" syntax "$_bd_path" >/dev/null 2>&1; then
+        _bd_print PASS "smoke: $_bd_script" "syntax OK"
+      else
+        _bd_print FAIL "smoke: $_bd_script" "syntax error or import-time crash"
+        _bd_smoke_fail=1
+      fi
+    done
+    for _bd_script in "bin/minsky-bootstrap.sh" "bin/minsky-default-session.sh" "scripts/capture-failure.sh" "scripts/bash-doctor-probes.sh"; do
+      _bd_path="$_bd_repo_dir/$_bd_script"
+      if [ ! -f "$_bd_path" ]; then
+        _bd_print FAIL "smoke: $_bd_script" "missing"
+        _bd_smoke_fail=1
+        continue
+      fi
+      if command -v shellcheck >/dev/null 2>&1; then
+        if shellcheck -x "$_bd_path" >/dev/null 2>&1; then
+          _bd_print PASS "smoke: $_bd_script" "shellcheck clean"
+        else
+          _bd_print WARN "smoke: $_bd_script" "shellcheck violations (run: shellcheck -x $_bd_path)"
+        fi
+      else
+        if bash -n "$_bd_path" 2>/dev/null; then
+          _bd_print PASS "smoke: $_bd_script" "bash -n clean"
+        else
+          _bd_print FAIL "smoke: $_bd_script" "bash -n syntax error"
+          _bd_smoke_fail=1
+        fi
+      fi
+    done
+    if [ "$_bd_smoke_fail" = "1" ]; then
+      _bd_skeleton_crit_fail=1
+    fi
+  fi
+
+  return "$_bd_skeleton_crit_fail"
+}
+
+# ── iter-once probe body (shared by `minsky --once` and the deprecated
+#    `iter-once` alias) ────────────────────────────────────────────────
+#
+# Single source of truth for the operator's "run one iteration, show me
+# everything" tight-loop. Two callers:
+#   - `minsky --once <host>` (the new canonical form per rule #16 CLI
+#     consolidation — flag on no-args entry).
+#   - `minsky iter-once <host>` (deprecated alias, banner + delegation).
+#
+# Args:
+#   $1            host-dir (REQUIRED; absolute or relative)
+#   $2..$N        flags: --live, --no-capture
+#
+# Behavior unchanged from PR #867: defaults to --dry-run (no agent
+# spawn). `--live` flips to real spawn. Tees all I/O to
+# <host>/.minsky/iter-once.log. Prints summary block on exit.
+#
+# Returns: the bash runner's exit code (caller propagates), or 3 when the
+# verdict is spawn-failed. The last stdout line is a JSON verdict.
+#
+# Source: 2026-05-25 PR #867 (introduced as iter-once subcommand);
+# rule #16 CLI consolidation corollary (2026-05-25 follow-up — fold
+# into `minsky --once`); rule #1 (don't reinvent — wraps the existing
+# bin/minsky-run.sh --max-iterations=1 path).
+_run_iter_once() {
+  local _io_host=""
+  local _io_live=0
+  local _io_no_capture=0
+  local _io_a
+  for _io_a in "$@"; do
+    case "$_io_a" in
+      --live) _io_live=1 ;;
+      --no-capture) _io_no_capture=1 ;;
+      -h|--help)
+        cat <<'IUSAGE'
+Usage:
+  minsky --once <host-dir> [--live] [--no-capture]
+
+Options:
+  --live          Spawn the agent for real (default: --dry-run, no spawn)
+  --no-capture    Disable failure-capture for this iteration (sets
+                  MINSKY_CAPTURE_FAILURES=0)
+  -h, --help      Print this help
+
+Output: <host-dir>/.minsky/iter-once.log — full stdout+stderr of the
+iteration; survives across runs (appended).
+
+After exit, the summary line names:
+  - the verdict from the JSONL ledger row
+  - the ledger path: <host-dir>/.minsky/experiment-store/cross-repo/<task-id>.jsonl
+  - the failure-capture path: <host-dir>/.minsky/failures/<latest>/
+    (only if the verdict was non-validated AND capture was on)
+
+The last stdout line is one JSON object for callers:
+  {"task":"<id>","verdict":"<verdict>","pr":"<url>|null","duration_ms":<n>|null}
+
+Exit: the runner's exit code; 3 when the verdict is spawn-failed (the agent
+never ran or was killed), so a caller cannot mistake a dead round for success.
+IUSAGE
+        return 0
+        ;;
+      --*) echo "--once: unknown flag: $_io_a" >&2; return 2 ;;
+      *)
+        if [ -z "$_io_host" ]; then
+          _io_host="$_io_a"
+        else
+          echo "--once: unexpected arg: $_io_a" >&2; return 2
+        fi
+        ;;
+    esac
+  done
+  if [ -z "$_io_host" ]; then
+    echo "--once: host-dir required" >&2
+    echo "  usage: minsky --once <host-dir> [--live] [--no-capture]" >&2
+    return 2
+  fi
+  if [ ! -d "$_io_host" ]; then
+    echo "--once: host-dir not found: $_io_host" >&2
+    return 1
+  fi
+  _io_host="$(cd "$_io_host" && pwd)"
+  local _io_real_bin
+  _io_real_bin=$(_minsky_realpath "$0")
+  local _io_repo_dir
+  _io_repo_dir=$(dirname "$(dirname "$_io_real_bin")")
+  local _io_runner="$_io_repo_dir/bin/minsky-run.sh"
+  # `-s` (non-empty), not `-x`: the runner is invoked via `bash
+  # "$_io_runner"` below, so the exec bit is irrelevant — and the
+  # published npm tarball ships it mode 644 (npm only chmods the
+  # `bin`-entry). Gating on `-x` wrongly rejected the npx path.
+  if [ ! -s "$_io_runner" ]; then
+    echo "--once: $_io_runner missing or empty (run \`pnpm install\` from $_io_repo_dir)" >&2
+    return 1
+  fi
+  # PR #875: upgrade the doctor's "config not found" check from a
+  # silent WARN-then-proceed (which lets the bash runner hard-fail
+  # deep with `INVARIANT FAIL: config not at <path>`) to a fast-
+  # path actionable error. The bash runner's invariant chain still
+  # runs as a defense-in-depth backstop on machines where the env
+  # var hides the standard path.
+  local _io_cfg_file="${MINSKY_CONFIG:-$HOME/.minsky/config.json}"
+  if [ ! -f "$_io_cfg_file" ]; then
+    echo "minsky --once: $_io_cfg_file not found." >&2
+    echo "  Run: minsky init $_io_host" >&2
+    echo "  (or set MINSKY_CONFIG=<path> if your config lives elsewhere)" >&2
+    return 1
+  fi
+  mkdir -p "$_io_host/.minsky"
+  local _io_log="$_io_host/.minsky/iter-once.log"
+  {
+    echo ""
+    echo "=== minsky --once @ $(date -u +%Y-%m-%dT%H:%M:%S.000Z) ==="
+    echo "host:        $_io_host"
+    echo "mode:        $([ "$_io_live" = "1" ] && echo "LIVE (agent will spawn)" || echo "dry-run (no agent spawn)")"
+    echo "capture:     $([ "$_io_no_capture" = "1" ] && echo "OFF" || echo "on")"
+    echo "---"
+  } >> "$_io_log"
+
+  # PR #875: pass `--host "$_io_host"` (filter mode) instead of
+  # `--hosts-dir "$(dirname "$_io_host")"` (scan mode) — closes the
+  # live-smoke finding that `minsky --once <repo>` was iterating
+  # every sibling of <repo> instead of just <repo>. The bash runner
+  # now distinguishes single-host (--host) from multi-host
+  # (--hosts-dir) mode at arg-parse time.
+  local _io_runner_args=(--host "$_io_host" --max-iterations 1 --iterations-per-host 1)
+  if [ "$_io_live" != "1" ]; then
+    _io_runner_args+=(--dry-run)
+  fi
+  if [ "$_io_no_capture" = "1" ]; then
+    export MINSKY_CAPTURE_FAILURES=0
+  fi
+
+  # PR #875: capture iteration start time so the summary block can
+  # filter ledger candidates by "written THIS iteration" instead of
+  # "most-recently-mtimed-on-disk-ever". Closes the live-smoke
+  # finding that on a multi-ledger host (like minsky-on-itself), the
+  # summary reported a verdict from a stale ledger when the
+  # iteration didn't write a new one.
+  #
+  # Marker file is touched immediately before invoking the runner; we
+  # then use `find -newer <marker>` to find ONLY ledger files
+  # mtime-newer than the marker. POSIX-portable; no clock-skew
+  # concerns because the marker and the candidate files are on the
+  # same filesystem with the same clock.
+  local _io_start_marker
+  _io_start_marker="$(mktemp -t minsky-once-start.XXXXXX)"
+  echo "--once: running $_io_runner ${_io_runner_args[*]}" >&2
+  set +e
+  bash "$_io_runner" "${_io_runner_args[@]}" 2>&1 | tee -a "$_io_log"
+  local _io_run_exit=${PIPESTATUS[0]}
+  set -e
+
+  # Summarize. The ledger candidate must be mtime-NEWER than the
+  # iteration's start marker — otherwise we report "no ledger
+  # written this iteration" instead of silently surfacing a
+  # historical row from a prior run.
+  local _io_ledger_dir="$_io_host/.minsky/experiment-store/cross-repo"
+  local _io_latest_ledger=""
+  if [ -d "$_io_ledger_dir" ]; then
+    _io_latest_ledger=$(/usr/bin/find "$_io_ledger_dir" -maxdepth 1 -type f -name '*.jsonl' -newer "$_io_start_marker" -print0 2>/dev/null \
+      | xargs -0 ls -t 2>/dev/null \
+      | head -1 || true)
+  fi
+  rm -f "$_io_start_marker"
+  local _io_latest_verdict=""
+  local _io_latest_notes=""
+  local _io_latest_pr_url=""
+  if [ -n "$_io_latest_ledger" ] && [ -f "$_io_latest_ledger" ]; then
+    _io_latest_verdict=$(tail -1 "$_io_latest_ledger" | jq -r '.verdict // "(no-verdict-field)"' 2>/dev/null || echo "(parse-error)")
+    _io_latest_notes=$(tail -1 "$_io_latest_ledger" | jq -r '.notes // ""' 2>/dev/null || echo "")
+    _io_latest_pr_url=$(tail -1 "$_io_latest_ledger" | jq -r '.pr_url // ""' 2>/dev/null || echo "")
+  fi
+  local _io_latest_failure_dir=""
+  local _io_latest_duration_ms=""
+  if [ -d "$_io_host/.minsky/failures" ]; then
+    _io_latest_failure_dir=$(/usr/bin/find "$_io_host/.minsky/failures" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null \
+      | xargs -0 ls -dt 2>/dev/null \
+      | head -1 || true)
+    if [ -n "$_io_latest_failure_dir" ] && [ -f "$_io_latest_failure_dir/metadata.json" ]; then
+      _io_latest_duration_ms=$(jq -r '.duration_ms // ""' "$_io_latest_failure_dir/metadata.json" 2>/dev/null || echo "")
+    fi
+  fi
+
+  local _io_task=""
+  [ -n "$_io_latest_ledger" ] && _io_task="$(basename "$_io_latest_ledger" .jsonl)"
+  # spawn-failed = the agent never ran or was killed. Say so in the exit code,
+  # so a caller does not read a dead round as success (it did: exit 0).
+  if [ "$_io_latest_verdict" = "spawn-failed" ] && [ "$_io_run_exit" -eq 0 ]; then
+    _io_run_exit=3
+  fi
+
+  echo ""
+  echo "=== --once summary ==="
+  if [ -z "$_io_latest_ledger" ]; then
+    # No ledger written THIS iteration. Per PR #875, don't surface a
+    # historical row — name the gap instead so the operator knows to
+    # check the iter log.
+    echo "  ledger:         (no ledger written this iteration — see iter log)"
+    echo "  iter log:       $_io_log"
+    _minsky_once_result "" "" "" ""
+    return "$_io_run_exit"
+  fi
+  echo "  verdict:        $_io_latest_verdict"
+  if [ -n "$_io_latest_duration_ms" ] && [ "$_io_latest_duration_ms" != "0" ] && [ "$_io_latest_duration_ms" != "null" ]; then
+    echo "  spawn duration: ${_io_latest_duration_ms}ms"
+  fi
+  if [ -n "$_io_latest_notes" ] && [ "$_io_latest_notes" != "null" ]; then
+    local _io_notes_short
+    _io_notes_short=$(printf '%s' "$_io_latest_notes" | head -c 120)
+    [ "${#_io_latest_notes}" -gt 120 ] && _io_notes_short="${_io_notes_short}..."
+    echo "  notes:          $_io_notes_short"
+  fi
+  if [ -n "$_io_latest_pr_url" ] && [ "$_io_latest_pr_url" != "null" ] && [ "$_io_latest_pr_url" != "" ]; then
+    echo "  pr url:         $_io_latest_pr_url"
+  fi
+  echo "  ledger row:     $_io_latest_ledger"
+  echo "  iter log:       $_io_log"
+  if [ -n "$_io_latest_failure_dir" ] && [ "$_io_latest_verdict" != "validated" ] && [ "$_io_latest_verdict" != "planned" ]; then
+    echo "  failure capture: $_io_latest_failure_dir"
+    echo "                   (minsky logs --failures $_io_host --latest)"
+  fi
+  _minsky_once_result "$_io_task" "$_io_latest_verdict" "$_io_latest_pr_url" "$_io_latest_duration_ms"
+  return "$_io_run_exit"
+}
+
+# The last stdout line of `minsky --once`: one JSON object a caller can parse
+# ({"task","verdict","pr","duration_ms"}; empty values are null).
+_minsky_once_result() {
+  jq -nc --arg task "$1" --arg verdict "$2" --arg pr "$3" --arg duration "$4" '{
+    task: (if $task == "" then null else $task end),
+    verdict: (if $verdict == "" then null else $verdict end),
+    pr: (if $pr == "" or $pr == "null" then null else $pr end),
+    duration_ms: ($duration | tonumber? // null)
+  }'
+}
+
+# ── tail-failures probe body (shared by `minsky logs --failures` and
+#    the deprecated `tail-failures` alias) ────────────────────────────
+#
+# Single source of truth for the operator's "show me what just broke"
+# surface. Reads <host>/.minsky/failures/*/ written by the capture
+# pattern (PR #866).
+#
+# Args:
+#   $1..$N        host-dir + flags (--count N, --latest)
+#
+# Defaults: host = $PWD, --count = 5.
+#
+# Source: 2026-05-25 PR #867 (introduced as tail-failures subcommand);
+# rule #16 CLI consolidation corollary (2026-05-25 follow-up — fold
+# into `minsky logs --failures`).
+_run_tail_failures() {
+  local _tf_host=""
+  local _tf_count=5
+  local _tf_latest=0
+  local _tf_a
+  while [ $# -gt 0 ]; do
+    _tf_a="$1"
+    case "$_tf_a" in
+      --count)
+        [ $# -ge 2 ] || { echo "--count requires a value" >&2; return 2; }
+        _tf_count="$2"; shift 2 ;;
+      --latest) _tf_latest=1; shift ;;
+      -h|--help)
+        cat <<'TUSAGE'
+Usage:
+  minsky logs --failures [host-dir] [--count N] [--latest]
+
+Default host-dir is $PWD. Default --count is 5.
+
+  --count N       Show the N most recent capture dirs (default 5)
+  --latest        Shortcut: show JUST the most recent capture dir's
+                  metadata.json + brief.md (head) + stdout.log (tail).
+                  Operator's "show me what broke last" one-liner.
+
+Reads <host-dir>/.minsky/failures/*/ written by the failure-capture
+pattern (PR #866). If the dir is empty or missing, prints a friendly
+message and exits 0.
+TUSAGE
+        return 0
+        ;;
+      --*) echo "--failures: unknown flag: $_tf_a" >&2; return 2 ;;
+      *)
+        if [ -z "$_tf_host" ]; then
+          _tf_host="$_tf_a"; shift
+        else
+          echo "--failures: unexpected arg: $_tf_a" >&2; return 2
+        fi
+        ;;
+    esac
+  done
+  [ -z "$_tf_host" ] && _tf_host="$PWD"
+  if [ ! -d "$_tf_host" ]; then
+    echo "--failures: host-dir not found: $_tf_host" >&2
+    return 1
+  fi
+  _tf_host="$(cd "$_tf_host" && pwd)"
+  local _tf_failures_dir="$_tf_host/.minsky/failures"
+  if [ ! -d "$_tf_failures_dir" ]; then
+    echo "--failures: no failure-capture dir at $_tf_failures_dir"
+    echo "  (no iterations have failed on this host, or capture is disabled via MINSKY_CAPTURE_FAILURES=0)"
+    return 0
+  fi
+  local _tf_capture_dirs
+  _tf_capture_dirs=$(/usr/bin/find "$_tf_failures_dir" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null \
+    | xargs -0 ls -dt 2>/dev/null || true)
+  if [ -z "$_tf_capture_dirs" ]; then
+    echo "--failures: $_tf_failures_dir exists but is empty"
+    return 0
+  fi
+  if [ "$_tf_latest" = "1" ]; then
+    local _tf_latest_dir
+    _tf_latest_dir=$(echo "$_tf_capture_dirs" | head -1)
+    echo "=== latest failure capture: $_tf_latest_dir ==="
+    echo ""
+    if [ -f "$_tf_latest_dir/metadata.json" ]; then
+      echo "--- metadata.json ---"
+      if command -v jq >/dev/null 2>&1; then
+        jq . "$_tf_latest_dir/metadata.json"
+      else
+        cat "$_tf_latest_dir/metadata.json"
+      fi
+      echo ""
+    fi
+    if [ -f "$_tf_latest_dir/brief.md" ]; then
+      echo "--- brief.md (first 30 lines) ---"
+      head -30 "$_tf_latest_dir/brief.md"
+      echo ""
+    fi
+    if [ -f "$_tf_latest_dir/stdout.log" ]; then
+      echo "--- stdout.log (last 50 lines) ---"
+      tail -50 "$_tf_latest_dir/stdout.log"
+      echo ""
+    fi
+    echo "(full artifacts at $_tf_latest_dir/)"
+    return 0
+  fi
+  echo "=== last $_tf_count failure captures on $_tf_host ==="
+  echo "$_tf_capture_dirs" | head -"$_tf_count" | while read -r _tf_dir; do
+    [ -z "$_tf_dir" ] && continue
+    local _tf_verdict=""
+    local _tf_duration=""
+    local _tf_task_id=""
+    if [ -f "$_tf_dir/metadata.json" ] && command -v jq >/dev/null 2>&1; then
+      _tf_verdict=$(jq -r '.verdict // "?"' "$_tf_dir/metadata.json" 2>/dev/null)
+      _tf_duration=$(jq -r '.duration_ms // "?"' "$_tf_dir/metadata.json" 2>/dev/null)
+      _tf_task_id=$(jq -r '.task_id // "?"' "$_tf_dir/metadata.json" 2>/dev/null)
+    fi
+    printf "  %-60s  verdict=%s  task=%s  duration_ms=%s\n" "$(basename "$_tf_dir")" "$_tf_verdict" "$_tf_task_id" "$_tf_duration"
+  done
+  echo ""
+  echo "(deep-dive: minsky logs --failures $_tf_host --latest)"
+  return 0
+}
+
+# ── 1. Handle subcommands that DON'T need the repo ──────────
+#
+# `minsky status` / `minsky stop` / `minsky logs` only need
+# ps/grep/kill/tail. Handle them before we pay the repo-resolution
+# cost so a fresh machine without minsky checked out can still
+# report "no running process".
+case "${1:-}" in
+  --help|-h)
+    # Print the canonical usage block from the comment header at the
+    # top of this file. Extracted via sed — the source-of-truth lives
+    # in the file's own docstring, so editing the docstring updates
+    # the help output. Drives "minsky --help" through a real top-
+    # level handler instead of falling through to the smart-auto-
+    # attach block (which would otherwise start a daemon — wrong UX
+    # for a help request).
+    sed -n '/^# Usage:$/,/^# Resolution order/p' "$0" \
+      | sed -e 's/^# //' -e 's/^#$//' \
+      | sed '$d'
+    echo
+    echo "For more on the minsky-run loop: minsky --bash-runner --self-check"
+    echo "For the transform orchestrator:  minsky --transform --help"
+    exit 0
+    ;;
+  --version|-V|version)
+    # `minsky --version` — print the package version and exit, with ZERO
+    # side-effects (no daemon start, no config write, no repo resolution).
+    # This is the script-friendly probe mode (`minsky-npx-install-and-run`
+    # Success criterion §3): `npx minsky --version` must print the
+    # published version so CI / wrapper scripts can detect the install
+    # without triggering the start-or-attach flow.
+    #
+    # Source-of-truth: the `version` field of the package's own
+    # `package.json`, located relative to THIS script (so the version is
+    # correct whether minsky runs from a git clone or an npm-installed
+    # tarball — the `bin/minsky` shim sits at `<pkg-root>/bin/minsky`).
+    # Rule #6: if the version can't be read, fall back to "unknown"
+    # rather than crash — a probe must never be the thing that breaks.
+    _ver_pkg="$(dirname "$(_minsky_realpath "$0")")/../package.json"
+    if [ -f "$_ver_pkg" ]; then
+      MINSKY_VER_PKG="$_ver_pkg" node --input-type=module -e "
+import { readFileSync } from 'node:fs';
+try {
+  const p = JSON.parse(readFileSync(process.env.MINSKY_VER_PKG, 'utf8'));
+  process.stdout.write((p.version ?? 'unknown') + '\n');
+} catch {
+  process.stdout.write('unknown\n');
+}
+" 2>/dev/null || echo "unknown"
+    else
+      echo "unknown"
+    fi
+    exit 0
+    ;;
+  __assert-built)
+    # Hidden test seam (double-underscore = not in help / not operator
+    # surface). Runs ONLY the built-runtime guard against a repo dir so
+    # `tests/fresh-clone-bootstrap.bats` can pin both branches against a
+    # fixture tree — never the real dist (no `rm -rf` race with
+    # concurrent test runs). Default repo = this script's repo root.
+    # Source: TASKS.md `minsky-cli-fresh-clone-bootstrap`.
+    _ab_target="${2:-$(dirname "$(dirname "$(_minsky_realpath "$0")")")}"
+    _minsky_assert_built "$_ab_target"
+    exit $?
+    ;;
+  status)
+    if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
+      cat <<'EOF'
+Usage: minsky status
+
+Print a snapshot of the daemon state for this host:
+  - daemon process (running / not running) + recent log tail
+  - stability number from the experiment store (1.0 = no failures)
+  - on-call decisions captured by the tick-loop
+
+Sourced exclusively from local files in ~/.minsky and the repo's
+.minsky/ directory; no network calls.
+
+See also: `minsky logs` (tail every operator-relevant log stream),
+`minsky doctor` (health probe of the host machine itself).
+EOF
+      exit 0
+    fi
+    echo "=== minsky daemon ==="
+    # Stability number (from experiment store)
+    # `set -e -o pipefail` aborts the script when any pipe stage exits
+    # non-zero. With no daemon running, `grep -v grep` finds zero matches
+    # and exits 1 → pipefail kills `status` with exit 1. The `|| true`
+    # absorbs the empty-match case so `status` always reaches the rest
+    # of the block. Discovered 2026-05-19 — rule-#17 fix.
+    _host_dir=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1 || true)
+    if [ -n "$_host_dir" ] && command -v node >/dev/null 2>&1; then
+      _stability=$(node "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/../scripts/stability-number.mjs" "$_host_dir" 2>/dev/null || echo "")
+      [ -n "$_stability" ] && echo "Stability: $_stability"
+    fi
+    if [ -f "$MINSKY_DAEMON_PID" ]; then
+      pid=$(cat "$MINSKY_DAEMON_PID")
+      if kill -0 "$pid" 2>/dev/null; then
+        echo "running (PID $pid)"
+        ps -p "$pid" -o etime=,command= 2>/dev/null | head -1
+      else
+        echo "stale PID file (PID $pid not running)"
+        rm -f "$MINSKY_DAEMON_PID"
+      fi
+    else
+      # Fall back to pgrep for processes started without --daemon
+      if pgrep -fal "cross-repo-runner/bin/minsky-run" 2>/dev/null; then
+        echo "(no PID file — started without --daemon)"
+      else
+        echo "not running"
+      fi
+    fi
+    if [ -f "$MINSKY_DAEMON_LOG" ]; then
+      echo ""
+      echo "=== last 10 log lines ==="
+      tail -10 "$MINSKY_DAEMON_LOG"
+    fi
+    exit 0
+    ;;
+  stop)
+    if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
+      cat <<'EOF'
+Usage: minsky stop [--host <dir>]
+
+Thorough daemon shutdown: bootout the launchd service (prevents
+auto-restart via KeepAlive), then kill every minsky-* process and
+its agent children. Zero ghost processes after this command exits.
+
+  --host <dir>   Limit SIGTERM to the single minsky-run whose argv
+                 carries the matching `--host <dir>` (resolved via
+                 realpath so relative paths still match absolute argv).
+                 Other operators' minsky-runs on this machine are left
+                 untouched — the per-host kill switch for multi-tenant
+                 machines. The launchd bootout is SKIPPED in this mode
+                 (KeepAlive is a machine-global concern, not per-host).
+
+With no --host the global shutdown runs, preceded by a banner listing
+every host about to be stopped and a 3s grace period (Ctrl-C to abort).
+Set MINSKY_NON_INTERACTIVE=1 to skip the banner + grace period (the
+launchd unit and CI invoke `minsky stop` this way).
+
+Idempotent — safe to invoke when the daemon is already stopped.
+
+See also: `minsky` (start the daemon), `minsky status` (snapshot
+of the daemon state).
+EOF
+      exit 0
+    fi
+
+    # ── --host <dir> filter (multi-tenant per-host kill switch) ──────
+    # When two operators (or one operator running plugin + api in
+    # parallel) co-exist on one machine, the global `minsky stop` below
+    # SIGTERMs BOTH minsky-runs. `--host <dir>` narrows the kill to the
+    # one runner whose argv carries the matching `--host`. Source:
+    # TASKS.md `minsky-stop-host-filter`; rule #6 (let-it-crash at the
+    # RIGHT boundary — the per-host kill is the operator's correct
+    # boundary; global stop crosses the wrong one). The runner pattern
+    # `cross-repo-runner/bin/minsky-run.*--host <dir>` is consumed by
+    # the paired test in bin/minsky.test.mjs via a mocked `pgrep`.
+    _stop_host=""
+    if [ "${2:-}" = "--host" ]; then
+      if [ -z "${3:-}" ]; then
+        echo "minsky stop: --host requires a directory argument" >&2
+        echo "  usage: minsky stop --host <dir>" >&2
+        exit 2
+      fi
+      # realpath so a relative `--host ./repo` still matches the runner's
+      # absolute-path argv. Falls back to the raw arg if it doesn't
+      # resolve (e.g. the dir was already removed) so the operator can
+      # still target a stale path.
+      _stop_host=$(_minsky_realpath "$3" 2>/dev/null || true)
+      [ -n "$_stop_host" ] || _stop_host="$3"
+      _stop_pattern="cross-repo-runner/bin/minsky-run.*--host $_stop_host"
+      _stop_host_pids=$(pgrep -f "$_stop_pattern" 2>/dev/null || true)
+      if [ -z "$_stop_host_pids" ]; then
+        echo "nothing to stop for host=$_stop_host (no matching minsky-run)"
+        exit 0
+      fi
+      _stop_host_killed=0
+      for _stop_pid in $_stop_host_pids; do
+        if kill -TERM "$_stop_pid" 2>/dev/null; then
+          echo "  ✅ sent SIGTERM to pid $_stop_pid (host=$_stop_host)"
+          _stop_host_killed=$((_stop_host_killed + 1))
+        fi
+      done
+      echo ""
+      echo "minsky stop --host $_stop_host: SIGTERM sent to $_stop_host_killed runner(s); other hosts untouched."
+      exit 0
+    fi
+
+    # Thorough shutdown: kill ALL minsky processes + their agent children
+    # + bootout the launchd service. Zero ghost processes after this.
+    _killed=0
+
+    # 0. Pre-kill banner + grace period. `minsky stop` with no --host is
+    #    a machine-wide kill; on a multi-tenant box that can be
+    #    surprising. List every host about to be stopped and give the
+    #    operator a 3s window to Ctrl-C. MINSKY_NON_INTERACTIVE=1 (set by
+    #    the launchd unit + CI) skips the banner + sleep. Source: TASKS.md
+    #    `minsky-stop-host-filter` Acceptance (2) + (3).
+    if [ "${MINSKY_NON_INTERACTIVE:-0}" != "1" ]; then
+      _stop_all_hosts=$(pgrep -af "cross-repo-runner/bin/minsky-run" 2>/dev/null \
+        | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | sort -u || true)
+      echo "minsky stop: about to SIGTERM EVERY minsky-run on this machine."
+      if [ -n "$_stop_all_hosts" ]; then
+        echo "  hosts affected:"
+        printf '    %s\n' $_stop_all_hosts
+        echo "  (to stop just one: minsky stop --host <dir>)"
+      else
+        echo "  (no running minsky-run detected — nothing to list)"
+      fi
+      echo "  Ctrl-C within 3s to abort..."
+      sleep 3
+    fi
+
+    # 1. Bootout launchd service (prevents auto-restart via KeepAlive)
+    if launchctl list 2>/dev/null | grep -q 'com.minsky.daemon'; then
+      launchctl bootout "gui/$(id -u)/com.minsky.daemon" 2>/dev/null || true
+      echo "  ✅ launchd com.minsky.daemon stopped"
+      _killed=1
+    fi
+
+    # 2. SIGTERM all minsky-run node processes
+    if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
+      pkill -TERM -f "cross-repo-runner/bin/minsky-run"
+      echo "  ✅ SIGTERM sent to minsky-run processes"
+      _killed=1
+    fi
+
+    # 3. Kill orphaned agent children (devin/claude/aider spawned by minsky)
+    #    These are children of minsky-run that may outlive the parent.
+    for _agent_pat in 'devin.*--prompt-file.*/minsky-devin' 'claude.*--print' 'aider.*--message-file'; do
+      if pgrep -f "$_agent_pat" >/dev/null 2>&1; then
+        pkill -TERM -f "$_agent_pat" 2>/dev/null || true
+        echo "  ✅ SIGTERM sent to agent children matching: $_agent_pat"
+        _killed=1
+      fi
+    done
+
+    # 4. Clean up PID file
+    rm -f "$MINSKY_DAEMON_PID"
+
+    # 5. Wait briefly, then verify nothing remains
+    if [ "$_killed" = "1" ]; then
+      sleep 2
+      _remaining=$(pgrep -f "cross-repo-runner/bin/minsky-run" 2>/dev/null | wc -l | tr -d ' ')
+      _agents=$(pgrep -f "devin.*--prompt-file.*/minsky-devin" 2>/dev/null | wc -l | tr -d ' ')
+      if [ "$_remaining" != "0" ] || [ "$_agents" != "0" ]; then
+        echo "  ⚠️  ${_remaining} runner(s) + ${_agents} agent(s) still alive — sending SIGKILL"
+        pkill -9 -f "cross-repo-runner/bin/minsky-run" 2>/dev/null || true
+        pkill -9 -f "devin.*--prompt-file.*/minsky-devin" 2>/dev/null || true
+        sleep 1
+      fi
+      echo ""
+      echo "minsky stopped. Zero processes remaining."
+    else
+      echo "nothing to stop (no minsky processes running)"
+    fi
+    # ALWAYS write the graceful-stop sentinel — even when nothing was
+    # killed. `minsky stop` is the operator's explicit intent to shut
+    # down cleanly; the next `minsky` start must honour that intent
+    # regardless of whether there happened to be a process to kill.
+    # Rule #17 — proactive healing of the auto-reset surprise; see
+    # TASKS.md `minsky-bin-auto-resets-to-main-surprise`. The sentinel
+    # is consumed by `reset-host-if-crashed` so it only protects ONE
+    # subsequent start; a real crash after that point still resets.
+    _stop_default_host=$(_minsky_config_value "default_host")
+    if [ -n "$_stop_default_host" ] && [ -d "$_stop_default_host/.git" ]; then
+      mkdir -p "$_stop_default_host/.minsky"
+      date -u +%Y-%m-%dT%H:%M:%SZ > "$_stop_default_host/.minsky/graceful-stop"
+    fi
+    exit 0
+    ;;
+  logs)
+    # `minsky logs` — tail every operator-relevant log stream (tick-loop
+    # out + err, auto-merge, daemon, watchdog, runany) with full ANSI
+    # colors and a `[source-tag]` prefix per line. Routes through
+    # `scripts/minsky-logs.mjs --all` since 2026-05-27 (operator
+    # directive "ensure all logs commands have full colors & tags") —
+    # the previous shape was a raw `tail -f $MINSKY_DAEMON_LOG`, which
+    # showed only the legacy `daemon.log` and stripped all context.
+    #
+    # `minsky logs --failures [host] [--latest|--count N]` — list/show
+    # failure-capture artifacts written by the capture pattern (PR #866).
+    #
+    # The `--failures` mode is the consolidated form of what was
+    # previously its own `tail-failures` subcommand (PR #867). Folded
+    # here per rule #16 CLI consolidation corollary (2026-05-25):
+    # failure-tailing is a refinement of "show me what the daemon did",
+    # not a fundamentally new verb.
+    shift
+    if [ "${1:-}" = "--failures" ]; then
+      shift
+      _run_tail_failures "$@"
+      exit $?
+    fi
+    # `--source <name>` and `--help` flags pass through to the node
+    # formatter. Default (no args) tails EVERY source — sane-default
+    # per the 2026-05-27 operator directive "one log command with sane
+    # defaults". `--all` is kept as an explicit no-op alias for back-
+    # compat.
+    _logs_script_dir="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
+    _logs_script="$_logs_script_dir/../scripts/minsky-logs.mjs"
+    if [ -f "$_logs_script" ]; then
+      exec node "$_logs_script" "$@"
+    fi
+    # Fallback: scripts/minsky-logs.mjs not present (very old checkout
+    # or fresh `npx minsky init` substrate). Preserve the legacy
+    # raw-tail behavior so the operator at least sees something.
+    if [ -f "$MINSKY_DAEMON_LOG" ]; then
+      exec tail -f "$MINSKY_DAEMON_LOG"
+    fi
+    echo "no daemon log found at $MINSKY_DAEMON_LOG"
+    echo "start minsky with --daemon to enable logging"
+    echo ""
+    echo "subcommands:"
+    echo "  minsky logs --failures [host] [--latest|--count N]"
+    echo "    Tail per-iteration failure-capture artifacts."
+    exit 1
+    ;;
+  reset-host-if-crashed)
+    # Crash-recovery for the host repo. Replaces the previous in-line
+    # `git checkout main && git clean -fd` block, which had two
+    # multi-agent-safety violations: (1) `clean -fd` is on the global
+    # ban list because it deletes other agents' untracked files, and
+    # (2) the reset ran EVERY start — surprising developers who'd
+    # gracefully stopped the daemon and were now working on a feature
+    # branch.
+    #
+    # The new rule:
+    #   - If the sentinel file `<sidecar>/graceful-stop` exists, the
+    #     previous shutdown was graceful → do nothing (action: keep).
+    #   - Otherwise the previous shutdown crashed → if the tree is
+    #     dirty, STASH uncommitted+untracked work with a recoverable
+    #     label (`minsky auto-stash <iso-ts>`) and then check out the
+    #     default branch. Output the stash ref so the operator can
+    #     recover (action: stash-and-reset). If the tree is clean,
+    #     just check out the default branch (action: reset-only).
+    #
+    # Output format (one key=value per line) is stable for paired tests:
+    #   action: keep|stash-and-reset|reset-only
+    #   branch: <current branch after the operation>
+    #   stash: <stash ref> | n/a
+    #
+    # Sources: rule #6 (stay alive — never by destroying state); rule
+    # #17 (proactive healing — every multi-agent-safety violation is
+    # P0); global AGENTS.md § "Git Safety (Multi-Agent)".
+    _rh_host=""
+    _rh_sentinel=""
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --host)
+          _rh_host="$2"
+          shift 2
+          ;;
+        --sentinel)
+          _rh_sentinel="$2"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+    if [ -z "$_rh_host" ] || [ ! -d "$_rh_host/.git" ]; then
+      echo "minsky: reset-host-if-crashed needs --host <git-repo>" >&2
+      exit 2
+    fi
+    _rh_default=$(git -C "$_rh_host" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo "main")
+    _rh_current=$(git -C "$_rh_host" branch --show-current 2>/dev/null)
+    # Graceful path — sentinel says the previous shutdown was clean.
+    # Consume the sentinel so the NEXT start is treated as "no sentinel"
+    # unless the operator stops gracefully again.
+    if [ -n "$_rh_sentinel" ] && [ -f "$_rh_sentinel" ]; then
+      rm -f "$_rh_sentinel"
+      echo "action: keep"
+      echo "branch: $_rh_current"
+      echo "stash: n/a"
+      exit 0
+    fi
+    # Crash path. Check whether the tree is dirty BEFORE switching branches.
+    if [ -z "$(git -C "$_rh_host" status --porcelain 2>/dev/null)" ]; then
+      # Clean tree — just check out the default branch if we're somewhere else.
+      if [ "$_rh_current" != "$_rh_default" ] && [ -n "$_rh_current" ]; then
+        git -C "$_rh_host" checkout "$_rh_default" 2>/dev/null || true
+      fi
+      echo "action: reset-only"
+      echo "branch: $(git -C "$_rh_host" branch --show-current 2>/dev/null)"
+      echo "stash: n/a"
+      exit 0
+    fi
+    # Dirty tree — REFUSE to recover. Operator confirms manually.
+    #
+    # Previous behavior (removed 2026-05-26): auto-stash + checkout default.
+    # That was a feature for unattended crash recovery, but the side-effect
+    # was that an operator's (or parallel agent's) concurrent WIP got
+    # silently swept into the stash list every time the supervisor
+    # respawned. Over the 2026-05-19 to 2026-05-21 stability window the
+    # stash list grew to 10+ entries of lost context.
+    #
+    # New behavior: refuse-with-error. Print what's dirty, suggest the
+    # three legitimate next steps (commit / manual stash / move out),
+    # exit 1. Operator runs `git -C <host> status` and decides what to
+    # do, then re-runs the daemon manually. Loud surface ≫ silent recovery.
+    #
+    # Rule #6 (loud-crash > silent failure — never destroy state without
+    # explicit confirmation; auto-stash is destruction-by-side-effect from
+    # the operator's perspective even though git keeps the bits).
+    # Operator directive 2026-05-26: "fix the root cause of [auto-stashes]
+    # even appearing".
+    echo "minsky: REFUSING to recover host — $_rh_host has dirty state:" >&2
+    git -C "$_rh_host" status --short 2>&1 | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "minsky: resolve manually before restarting the daemon:" >&2
+    echo "  - commit:  cd $_rh_host && git add -A && git commit -m '<msg>'" >&2
+    echo "  - stash:   cd $_rh_host && git stash push -u -m 'manual: <reason>'" >&2
+    echo "  - move:    mv unwanted-file <somewhere outside the work tree>" >&2
+    echo "" >&2
+    echo "minsky: then re-run \`minsky\` (or \`pnpm dogfood\`)" >&2
+    exit 1
+    ;;
+  init)
+    # `minsky init [host]` — write per-machine config so subsequent
+    # `minsky` invocations know which repo to run against.
+    #
+    # Behavior:
+    #   - host defaults to `pwd` (the most ergonomic case: cd into a
+    #     repo, run `minsky init`, you're done).
+    #   - host MUST be a git repo. If it isn't, refuse with exit 2 and
+    #     a hint — silent fallback would leave a config pointing at a
+    #     non-repo and surprise the operator on the first daemon start.
+    #   - writes ~/.minsky/config.json with `default_host` set.
+    #   - preserves any existing keys (cloud_agent, etc.) — non-destructive.
+    #   - prints next steps (`minsky` to start the daemon) so the operator
+    #     never has to consult docs.
+    #
+    # Source: M1 milestone exit criterion §3 (one-command bootstrap);
+    # rule #1 (loud-crash on misconfig); rule #15 (UX = ergonomic
+    # defaults).
+    _init_host="${2:-$(pwd)}"
+    # Resolve to absolute path so the config doesn't depend on cwd.
+    _init_host=$(cd "$_init_host" 2>/dev/null && pwd)
+    if [ -z "$_init_host" ] || [ ! -d "$_init_host/.git" ]; then
+      echo "minsky init: '${2:-$(pwd)}' is not a git repo" >&2
+      echo "  hint: cd into a git repo first, or run: minsky init /path/to/repo" >&2
+      exit 2
+    fi
+    mkdir -p "$MINSKY_STATE_DIR"
+    _cfg="$MINSKY_STATE_DIR/config.json"
+    # Preserve existing config keys; only update default_host.
+    # Rule #17: avoid python3 (slow + uv-bootstrap on fresh HOME). Use
+    # node which is already a hard dep of the runner. Inline script keeps
+    # this file zero-dep at the install layer.
+    if [ -f "$_cfg" ]; then
+      MINSKY_INIT_HOST="$_init_host" node --input-type=module -e "
+import { readFileSync, writeFileSync } from 'node:fs';
+const path = '$_cfg';
+const cfg = JSON.parse(readFileSync(path, 'utf8'));
+cfg.default_host = process.env.MINSKY_INIT_HOST;
+writeFileSync(path, JSON.stringify(cfg, null, 2));
+" 2>/dev/null || printf '{\n  "default_host": "%s"\n}\n' "$_init_host" > "$_cfg"
+    else
+      printf '{\n  "default_host": "%s"\n}\n' "$_init_host" > "$_cfg"
+    fi
+    echo "✅ minsky initialized"
+    echo "   default_host: $_init_host"
+    echo "   config:       $_cfg"
+    echo ""
+    echo "Next: run 'minsky' (with no args) to start the daemon on $(basename "$_init_host")"
+    exit 0
+    ;;
+  submit-finding|submit)
+    # `minsky submit-finding --message "<text>" [--priority p0|p1|p2|p3]`
+    # — M1.8 substrate. Compose a rule-#9 task block from the operator's
+    # one-line finding and open a PR against the current repo's TASKS.md.
+    #
+    # Defaults:
+    #   - priority: p2 (per global_rules.md taxonomy: code-health,
+    #     refactor, observation — operator overrides for P0/P1)
+    #   - tags: auto-submitted,observation
+    #   - Hypothesis/Success/Pivot/Measurement/Anchor pre-populated as
+    #     non-empty placeholders so the rule-9 lint passes — the
+    #     operator edits them in the PR before merge.
+    #
+    # The submit shell is `gh pr create` against the current repo. PII
+    # redaction is the operator's responsibility for the message body
+    # (we auto-add hostname + UTC timestamp only). The operator reviews
+    # the PR before merge — `gh pr create --draft` ensures no auto-
+    # merge can fire.
+    #
+    # Source: user-stories/017-remote-task-submission.md § Acceptance
+    # criterion §1; M1.8 substrate completion 2026-05-27.
+    _sf_message=""
+    _sf_priority="p2"
+    _sf_tags="auto-submitted,observation"
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --message)   _sf_message="$2"; shift 2 ;;
+        --message=*) _sf_message="${1#--message=}"; shift ;;
+        --priority)   _sf_priority="$2"; shift 2 ;;
+        --priority=*) _sf_priority="${1#--priority=}"; shift ;;
+        --tags)   _sf_tags="$2"; shift 2 ;;
+        --tags=*) _sf_tags="${1#--tags=}"; shift ;;
+        --help|-h)
+          echo "Usage: minsky submit-finding --message \"<text>\" [--priority p0|p1|p2|p3] [--tags <comma-list>]"
+          echo ""
+          echo "Compose a rule-9 task block from a one-line finding and open a draft PR."
+          echo "Defaults: priority=p2, tags=auto-submitted,observation."
+          echo "Operator edits Hypothesis/Pivot/Measurement/Anchor in the PR before merge."
+          exit 0
+          ;;
+        *) echo "minsky submit-finding: unknown argument: $1" >&2; exit 2 ;;
+      esac
+    done
+    if [ -z "$_sf_message" ]; then
+      echo "minsky submit-finding: --message <text> is required" >&2
+      echo "  hint: minsky submit-finding --message 'The X probe in Y is flaky on Z'" >&2
+      exit 2
+    fi
+    case "$_sf_priority" in
+      p0|p1|p2|p3) ;;
+      *) echo "minsky submit-finding: --priority must be one of p0|p1|p2|p3 (got '$_sf_priority')" >&2; exit 2 ;;
+    esac
+    # Current repo must have TASKS.md (otherwise there's nowhere to file).
+    if [ ! -f "TASKS.md" ]; then
+      echo "minsky submit-finding: no TASKS.md in current directory ($(pwd))" >&2
+      echo "  hint: cd into a minsky-bootstrapped repo first" >&2
+      exit 2
+    fi
+    # Generate a deterministic kebab-case task ID from the message +
+    # a short random suffix for uniqueness (the same message submitted
+    # twice produces two distinct task IDs — the operator dedupes in
+    # review).
+    _sf_kebab=$(echo "$_sf_message" \
+      | tr '[:upper:]' '[:lower:]' \
+      | tr -c 'a-z0-9' '-' \
+      | sed -E 's/-+/-/g; s/^-//; s/-$//' \
+      | cut -c1-50)
+    _sf_suffix=$(date -u +%s | tail -c 5)
+    _sf_task_id="submit-${_sf_kebab}-${_sf_suffix}"
+    _sf_branch="submit/${_sf_task_id}"
+    _sf_utc=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    _sf_hostname=$(hostname -s 2>/dev/null || echo "unknown-host")
+    _sf_pri_upper=$(echo "$_sf_priority" | tr '[:lower:]' '[:upper:]')
+    echo "minsky submit-finding:"
+    echo "   task ID:   $_sf_task_id"
+    echo "   priority:  $_sf_pri_upper"
+    echo "   branch:    $_sf_branch"
+    echo "   target:    $(pwd)/TASKS.md"
+    echo ""
+    # Compose the task block as a heredoc, then insert under the right
+    # priority header. node is the canonical text-mutation tool — pure
+    # in-process, no temp files.
+    MINSKY_SF_TASKS=TASKS.md \
+    MINSKY_SF_PRIORITY="$_sf_pri_upper" \
+    MINSKY_SF_BLOCK="$(cat <<EOF
+- [ ] \`${_sf_task_id}\` — ${_sf_message}
+  - **ID**: ${_sf_task_id}
+  - **Tags**: ${_sf_tags}, ${_sf_priority}
+  - **Hypothesis**: acting on \`${_sf_message}\` will reduce its operator-cost; measurable by closed-PR rate against this task's branch
+  - **Success**: a PR landing this finding's fix passes \`pnpm pre-pr-lint --stage=fast\` and the operator marks the task complete
+  - **Pivot**: if 2 attempts at this finding produce no usable PR after 7 days, retire as wontfix and document why in the PR comment
+  - **Measurement**: \`gh pr list --search 'head:${_sf_branch}' --state merged --json url -q '.[].url'\` returns a non-empty list within 30 days
+  - **Anchor**: operator-submitted finding ${_sf_utc} via \`bin/minsky submit-finding\` on ${_sf_hostname}; user-stories/017-remote-task-submission.md (M1.8 substrate)
+EOF
+)" \
+    node --input-type=module -e "
+import { readFileSync, writeFileSync } from 'node:fs';
+const p = process.env.MINSKY_SF_TASKS;
+const priority = process.env.MINSKY_SF_PRIORITY;
+const block = process.env.MINSKY_SF_BLOCK;
+let content = readFileSync(p, 'utf8');
+const header = '## ' + priority;
+const idx = content.indexOf(header);
+if (idx === -1) {
+  // Header missing — append at end with the new section.
+  if (!content.endsWith('\n')) content += '\n';
+  content += '\n' + header + '\n\n' + block + '\n';
+} else {
+  // Insert AFTER any header-immediate comment lines (e.g. policy notes),
+  // BEFORE the first task block. Find the first occurrence of '- [ ]' (or '- [x]')
+  // after the header.
+  const sectionStart = idx + header.length;
+  const tail = content.slice(sectionStart);
+  const firstTaskIdx = tail.search(/\n- \[/);
+  if (firstTaskIdx === -1) {
+    // No tasks in this section yet — append after the header (skip past one newline).
+    const insertAt = sectionStart + 1;
+    content = content.slice(0, insertAt) + '\n' + block + '\n' + content.slice(insertAt);
+  } else {
+    const insertAt = sectionStart + firstTaskIdx + 1;
+    content = content.slice(0, insertAt) + block + '\n\n' + content.slice(insertAt);
+  }
+}
+writeFileSync(p, content);
+" || { echo "minsky submit-finding: failed to mutate TASKS.md" >&2; exit 1; }
+    echo "✅ task block inserted into TASKS.md"
+    echo ""
+    echo "Next steps:"
+    echo "  1) git checkout -b $_sf_branch"
+    echo "  2) git add TASKS.md && git commit -m 'docs(tasks): submit finding — $_sf_task_id'"
+    echo "  3) gh pr create --draft --title 'submit-finding: $_sf_task_id' --label submit-finding"
+    echo "  4) Open the PR and fill in the rule-#9 fields (Hypothesis / Pivot / Measurement / Anchor)"
+    exit 0
+    ;;
+  uninstall)
+    # `minsky uninstall [--force]` — remove all per-machine state in
+    # ONE command (rule #16 default by default — the single-command
+    # path is the obvious default, not the previous two-step
+    # dry-run + --force flow that surprised operators into walking
+    # away thinking they'd uninstalled when they hadn't).
+    #
+    # Behavior (post-2026-05-23):
+    #   - TTY, no --force: prints preview, prompts `Type YES to proceed`.
+    #     On exactly-`YES` (not `y` / `yes` / Enter) → executes ALL
+    #     steps in one invocation. On anything else → aborts cleanly.
+    #   - non-TTY, no --force (e.g., piped, CI, MINSKY_NON_INTERACTIVE=1):
+    #     exits 2 with `error: non-interactive — use --force`. Preserves
+    #     the safety net for scripts that pipe stdin to the command.
+    #   - --force: skips the prompt, executes ALL steps. Back-compat for
+    #     existing scripts that rely on the force path.
+    #
+    # Execute = stop daemon (if running) → uninstall-daemon → rm -rf
+    # ~/.minsky/. Does NOT touch host repo's `.minsky/` experiment-store
+    # (operator data, preserved by design).
+    #
+    # Distinct from `uninstall-daemon` which only removes the launchd
+    # plist (preserves config + logs). `uninstall` is the full reset.
+    #
+    # Source: M1 milestone exit criterion §12 (clean uninstall); rule
+    # #16 (default by default — operator directive 2026-05-20 "to
+    # uninstall you need to just run minsky uninstall and it will do
+    # every single needed step including stopping (after confirmation)");
+    # `minsky-uninstall-one-command-with-stop` (P0, this PR).
+    _force=0
+    for _a in "$@"; do
+      [ "$_a" = "--force" ] && _force=1
+    done
+    # Compose the preview text once — used by both the interactive
+    # prompt and the non-TTY rejection's body so operators see the
+    # same shape in both paths.
+    _preview=""
+    if [ -f "$HOME/Library/LaunchAgents/com.minsky.daemon.plist" ]; then
+      _preview="${_preview}  - launchd plist: $HOME/Library/LaunchAgents/com.minsky.daemon.plist
+"
+    fi
+    if [ -d "$MINSKY_STATE_DIR" ]; then
+      _preview="${_preview}  - state dir:     $MINSKY_STATE_DIR
+"
+    fi
+    if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
+      _preview="${_preview}  - running daemon (PID $(pgrep -f cross-repo-runner/bin/minsky-run | head -1))
+"
+    fi
+    if [ "$_force" = "0" ]; then
+      # Non-TTY path: refuse without --force. `MINSKY_NON_INTERACTIVE=1`
+      # is the explicit opt-out (matches the existing convention used by
+      # `MINSKY_INSTALL_DAEMON_QUIET=1` and the daemon-side
+      # `MINSKY_NON_INTERACTIVE`).
+      if [ ! -t 0 ] || [ "${MINSKY_NON_INTERACTIVE:-0}" = "1" ]; then
+        echo "minsky uninstall — would remove:" >&2
+        printf '%s' "$_preview" >&2
+        echo "" >&2
+        echo "error: non-interactive — use --force to confirm without prompt" >&2
+        exit 2
+      fi
+      # Interactive TTY path: show preview, prompt for `YES` (exact match,
+      # no fuzzy yes/y/Enter — accidental confirmation is hard).
+      echo "minsky uninstall — will remove:"
+      printf '%s' "$_preview"
+      echo ""
+      printf "Type YES to proceed (anything else aborts): "
+      IFS= read -r _confirm
+      if [ "$_confirm" != "YES" ]; then
+        echo "aborted (got '$_confirm', expected exactly 'YES')"
+        exit 1
+      fi
+    fi
+    # Execute path — full removal. Reached by --force OR interactive YES.
+    if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
+      "$0" stop >/dev/null 2>&1 || true
+    fi
+    if [ -f "$HOME/Library/LaunchAgents/com.minsky.daemon.plist" ]; then
+      "$0" uninstall-daemon >/dev/null 2>&1 || true
+    fi
+    if [ -d "$MINSKY_STATE_DIR" ]; then
+      rm -rf "$MINSKY_STATE_DIR"
+    fi
+    echo "✅ minsky uninstalled"
+    echo "   - launchd plist removed"
+    echo "   - $MINSKY_STATE_DIR removed"
+    echo "   - daemon stopped"
+    echo ""
+    echo "Note: host repo data (.minsky/ inside your repos) is untouched."
+    exit 0
+    ;;
+  consent)
+    # `minsky consent --yes | --no` — record telemetry consent atomically.
+    #
+    # Slice (2) of P0 `agent-mediated-install` per INSTALL.md Step 5.
+    # Collapses the 10-line shell snippet (salt gen, sha256, atomic
+    # write) into one CLI invocation that all agents (claude-code /
+    # devin / cursor) handle identically. The bin shim parses + dispatches
+    # to an inline node script so this stays zero-dep at the install
+    # layer.
+    #
+    # Behavior:
+    #   - `--yes`  → records consent: true
+    #   - `--no`   → records consent: false
+    #   - both / neither → exits 2 with "ambiguous"
+    #   - idempotent (re-run with same value is a no-op rewrite)
+    #   - writes ~/.minsky/telemetry-consent.json atomically (tmp + rename)
+    #   - hashes $PWD as `host_path_hash` using ~/.minsky/machine-salt
+    #     (created on first run, 32 random bytes base64) so the server
+    #     never sees the raw path
+    #   - POSTs to MINSKY_TELEMETRY_ENDPOINT when set (best-effort;
+    #     never blocks the install)
+    #
+    # Source: M1 milestone `minsky-consent-subcommand` (P1 sub-task of
+    # parent `agent-mediated-install`); RFC 8615 (canonical-path
+    # convention for agent-discoverable metadata).
+    _yes=0
+    _no=0
+    for _a in "$@"; do
+      case "$_a" in
+        --yes) _yes=1 ;;
+        --no)  _no=1 ;;
+      esac
+    done
+    if [ "$_yes" = "1" ] && [ "$_no" = "1" ]; then
+      echo "minsky consent: --yes and --no are mutually exclusive" >&2
+      exit 2
+    fi
+    if [ "$_yes" = "0" ] && [ "$_no" = "0" ]; then
+      echo "minsky consent: pass --yes or --no" >&2
+      exit 2
+    fi
+    _consent="false"
+    [ "$_yes" = "1" ] && _consent="true"
+    MINSKY_CONSENT_VALUE="$_consent" \
+    MINSKY_STATE_DIR="$MINSKY_STATE_DIR" \
+    MINSKY_TELEMETRY_ENDPOINT="${MINSKY_TELEMETRY_ENDPOINT:-}" \
+    MINSKY_AGENT="${MINSKY_AGENT:-${MINSKY_LLM_PROVIDER:-claude}}" \
+    MINSKY_HOST_PATH="$(pwd)" \
+    node --input-type=module -e "
+import { mkdirSync, readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { join } from 'node:path';
+
+const stateDir = process.env.MINSKY_STATE_DIR;
+const consent = process.env.MINSKY_CONSENT_VALUE === 'true';
+const endpoint = process.env.MINSKY_TELEMETRY_ENDPOINT;
+const agent = process.env.MINSKY_AGENT;
+const hostPath = process.env.MINSKY_HOST_PATH;
+
+mkdirSync(stateDir, { recursive: true });
+
+const saltPath = join(stateDir, 'machine-salt');
+let salt;
+if (existsSync(saltPath)) {
+  salt = readFileSync(saltPath, 'utf8').trim();
+} else {
+  salt = randomBytes(32).toString('base64');
+  writeFileSync(saltPath, salt + '\n', { mode: 0o600 });
+}
+
+const hash = createHash('sha256').update(salt + hostPath).digest('hex');
+const timestamp = new Date().toISOString();
+const payload = {
+  consent,
+  timestamp,
+  host_path_hash: hash,
+  agent,
+};
+
+const target = join(stateDir, 'telemetry-consent.json');
+const tmp = target + '.tmp-' + process.pid;
+writeFileSync(tmp, JSON.stringify(payload, null, 2) + '\n', { mode: 0o600 });
+renameSync(tmp, target);
+
+if (endpoint) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 3000);
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!resp.ok) {
+      console.error('minsky consent: telemetry POST returned status ' + resp.status + ' (consent recorded locally)');
+    }
+  } catch (err) {
+    console.error('minsky consent: telemetry POST failed (consent recorded locally): ' + (err?.message ?? err));
+  }
+}
+
+console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + timestamp);
+"
+    exit $?
+    ;;
+  trend|recommend|knowledge)
+    # `minsky trend|recommend|knowledge [args...]` — MAPE-K
+    # Analyse/Plan/Knowledge consumers of the per-host
+    # `.minsky/transform-runs.jsonl` ledger. Each subcommand wraps
+    # the matching `scripts/transform_<name>.py` script with $PWD
+    # (or --hosts-dir for knowledge) as the default target. Operators
+    # type `minsky trend` instead of remembering the python3-script
+    # invocation path.
+    #
+    # See:
+    #   - scripts/transform_trend.py     (PR #825, Analyse phase)
+    #   - scripts/transform_recommend.py (PR #826, Plan phase)
+    #   - scripts/transform_knowledge.py (PR #827, K phase)
+    #
+    # Each python script auto-detects its target — `trend` and
+    # `recommend` default to $PWD; `knowledge` requires `--hosts-dir`
+    # (cross-host aggregation has no "current host" default).
+    _subcmd="$1"
+    shift
+    _script_dir="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
+    _python_script="$_script_dir/../scripts/transform_${_subcmd}.py"
+    if [ ! -f "$_python_script" ]; then
+      echo "minsky $_subcmd: script not found at $_python_script" >&2
+      echo "  this usually means MINSKY_REPO is misconfigured. Run \`minsky doctor\`." >&2
+      exit 1
+    fi
+    # `knowledge` doesn't take --repo; the rest default --repo to $PWD
+    # if the operator didn't pass one.
+    if [ "$_subcmd" = "knowledge" ]; then
+      exec python3 "$_python_script" "$@"
+    fi
+    _has_repo=0
+    for _a in "$@"; do
+      [ "$_a" = "--repo" ] && _has_repo=1
+    done
+    if [ "$_has_repo" = "1" ]; then
+      exec python3 "$_python_script" "$@"
+    else
+      exec python3 "$_python_script" --repo "$PWD" "$@"
+    fi
+    ;;
+  doctor)
+    if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
+      cat <<'EOF'
+Usage: minsky doctor [--quiet] [--sandbox]
+
+Health probe for this host machine. Prints PASS / WARN / FAIL for
+each of: node 20+, git, gh CLI, pnpm, repo `.minsky/` directory,
+~/.minsky/ state, launchd / systemd-user supervisor wiring, multi-host
+plist coverage (warns when the daemon plist targets a single `--host`
+but ≥2 bootstrapped hosts exist under its parent), OpenHands SDK
+installation, and any other invariant the supervisor needs.
+
+Flags:
+  --quiet     Only print FAIL lines + exit non-zero on any failure.
+  --sandbox   Run only the macOS SBPL toolchain preflight (delegates
+              to scripts/check-supervisor-sandbox.mjs): test-execs
+              python3 / git / gh / claude / node and reads
+              ~/.gitconfig.local / ~/.config/gh / ~/.claude.json under
+              the real `(deny default)` profile, and asserts
+              CLAUDE_CODE_OAUTH_TOKEN is exported. Exits 0 with a
+              SKIPPED line on non-macOS hosts.
+
+Exit codes: 0 if every check passes; 1 if any check fails.
+
+See also: `minsky setup` (re-install or repair the supervisor),
+`minsky status` (running-state snapshot).
+EOF
+      exit 0
+    fi
+    # `minsky doctor [--quiet]` — health probe for this machine.
+    #
+    # Checks (each prints PASS / WARN / FAIL):
+    #   PASS  node       — node 20+ on PATH
+    #   PASS  git        — git on PATH
+    #   PASS  gh         — gh CLI installed (optional but recommended)
+    #   WARN  config     — ~/.minsky/config.json exists (optional)
+    #   PASS  daemon     — daemon running (optional but informative)
+    #   WARN  agents     — at least one of devin/claude/aider on PATH
+    #   PASS  host       — default_host (if configured) is a git repo
+    #   WARN  multi-host — daemon plist targets a single --host but ≥2
+    #                      bootstrapped hosts exist under its parent
+    #
+    # Exit codes:
+    #   0 — all critical checks (node, git) pass
+    #   1 — at least one critical check failed
+    #
+    # Distinct from `setup.sh --doctor` which probes adapter selfTests
+    # against `.minsky/state.json` (the framework substrate). `minsky
+    # doctor` is the operator-facing health check: "is this machine
+    # ready to run minsky".
+    #
+    # Source: M1 milestone exit criterion §13 (self-heal).
+    _crit_fail=0
+    _quiet=0
+    _sandbox_only=0
+    for _a in "$@"; do
+      [ "$_a" = "--quiet" ] && _quiet=1
+      [ "$_a" = "--sandbox" ] && _sandbox_only=1
+    done
+
+    # `minsky doctor --sandbox` — preflight the SBPL profile against the live
+    # operator toolchain (sandbox-allowlist-derive-from-operator-toolchain).
+    # Delegates to scripts/check-supervisor-sandbox.mjs which test-execs
+    # python3 / git / gh / claude / node + reads ~/.gitconfig.local /
+    # ~/.config/gh / ~/.claude.json under the real `(deny default)` profile
+    # AND asserts CLAUDE_CODE_OAUTH_TOKEN is exported (gap 6 — auth via env,
+    # not Keychain). Exits non-zero on any gap with per-gap remediation;
+    # exits 0 on non-macOS hosts (graceful degrade — rule #7).
+    if [ "$_sandbox_only" = "1" ]; then
+      _bd_repo_dir="$(dirname "$(readlink "$0" 2>/dev/null || echo "$0")")/.."
+      [ -f "$_bd_repo_dir/scripts/check-supervisor-sandbox.mjs" ] || _bd_repo_dir="$(dirname "$0")/.."
+      exec node "$_bd_repo_dir/scripts/check-supervisor-sandbox.mjs" "$@"
+    fi
+
+    _doctor_print() {
+      # _doctor_print STATUS NAME MESSAGE
+      # STATUS: PASS | WARN | FAIL
+      [ "$_quiet" = "1" ] && [ "$1" = "PASS" ] && return 0
+      printf "  %-4s  %-12s %s\n" "$1" "$2" "$3"
+    }
+
+    [ "$_quiet" = "0" ] && echo "minsky doctor — checking host machine readiness" && echo ""
+
+    # CRITICAL — node 20+
+    if command -v node >/dev/null 2>&1; then
+      _v=$(node --version 2>/dev/null | sed 's/^v//')
+      _major=$(echo "$_v" | cut -d. -f1)
+      if [ "$_major" -ge 20 ] 2>/dev/null; then
+        _doctor_print PASS "node" "$_v"
+      else
+        _doctor_print FAIL "node" "$_v (need 20+)"
+        _crit_fail=1
+      fi
+    else
+      _doctor_print FAIL "node" "not on PATH"
+      _crit_fail=1
+    fi
+
+    # CRITICAL — git
+    if command -v git >/dev/null 2>&1; then
+      _doctor_print PASS "git" "$(git --version 2>/dev/null | head -1)"
+    else
+      _doctor_print FAIL "git" "not on PATH"
+      _crit_fail=1
+    fi
+
+    # OPTIONAL — gh
+    if command -v gh >/dev/null 2>&1; then
+      _doctor_print PASS "gh" "$(gh --version 2>/dev/null | head -1)"
+    else
+      _doctor_print WARN "gh" "not on PATH (PR creation will be skipped)"
+    fi
+
+    # OPTIONAL — state dir writable (minsky-runtime-resilience)
+    # A wrong-owner MINSKY_HOME or a read-only mount makes the runtime
+    # experiment-store mkdir abort mid-iteration with a raw errno. Surface
+    # it here as a doctor row BEFORE the daemon starts, with the recovery
+    # command inline (the probe prints "<dir> (… chmod u+w …)" on failure).
+    # WARN-only — `minsky doctor`'s exit-0 invariant gates on the TS-path
+    # critical checks (node/git); a state-dir failure is operator-actionable
+    # but doesn't crit-fail the machine readiness contract pinned by
+    # test/integration/m1-red-green.test.ts. Delegates to
+    # scripts/bash-doctor-probes.sh so bin/minsky's "no python3 bootstrap
+    # cost" rule stays satisfied (the probe is pure shell).
+    _bd_probes_sd="$(dirname "$(readlink "$0" 2>/dev/null || echo "$0")")/../scripts/bash-doctor-probes.sh"
+    [ -f "$_bd_probes_sd" ] || _bd_probes_sd="$(dirname "$0")/../scripts/bash-doctor-probes.sh"
+    if [ -f "$_bd_probes_sd" ]; then
+      if _sd_out=$(MINSKY_HOME="$MINSKY_STATE_DIR" bash "$_bd_probes_sd" state-dir-writable 2>/dev/null); then
+        _doctor_print PASS "state-dir" "$_sd_out (writable)"
+      else
+        _doctor_print WARN "state-dir" "${_sd_out:-$MINSKY_STATE_DIR (unwritable)}"
+      fi
+    fi
+
+    # OPTIONAL — config
+    _cfg="$MINSKY_STATE_DIR/config.json"
+    if [ -f "$_cfg" ]; then
+      _host=$(_minsky_config_value "default_host" "$_cfg")
+      if [ -n "$_host" ]; then
+        _doctor_print PASS "config" "$_cfg (default_host=$_host)"
+      else
+        _doctor_print WARN "config" "$_cfg exists but default_host is empty"
+      fi
+    else
+      _doctor_print WARN "config" "not found (run: minsky init)"
+    fi
+
+    # OPTIONAL — daemon running
+    if [ -f "$MINSKY_DAEMON_PID" ]; then
+      _pid=$(cat "$MINSKY_DAEMON_PID" 2>/dev/null)
+      if kill -0 "$_pid" 2>/dev/null; then
+        _doctor_print PASS "daemon" "running (PID $_pid)"
+      else
+        _doctor_print WARN "daemon" "stale PID file"
+      fi
+    else
+      _doctor_print WARN "daemon" "not running (run: minsky)"
+    fi
+
+    # OPTIONAL — at least one agent
+    _agent_count=0
+    _agent_list=""
+    for _agent in devin claude aider codex; do
+      if command -v "$_agent" >/dev/null 2>&1; then
+        _agent_count=$((_agent_count + 1))
+        _agent_list="$_agent_list $_agent"
+      fi
+    done
+    if [ "$_agent_count" -ge 1 ]; then
+      _doctor_print PASS "agents" "$_agent_count installed:$_agent_list"
+    else
+      _doctor_print WARN "agents" "no agents on PATH (devin / claude / aider / codex)"
+    fi
+
+    # OPTIONAL — default_host is a git repo
+    if [ -n "${_host:-}" ]; then
+      if [ -d "$_host/.git" ]; then
+        _doctor_print PASS "host" "$_host (valid git repo)"
+      else
+        _doctor_print WARN "host" "$_host is not a git repo"
+      fi
+    fi
+
+    # OPTIONAL — multi-host plist coverage
+    # (TASKS.md minsky-daemon-plist-multi-host)
+    #
+    # The auto-generated launchd plist walks EVERY bootstrapped host
+    # under the parent of default_host via `--hosts-dir`. But an older
+    # plist (installed before the multi-host emit, or hand-edited) may
+    # still target a single repo with `--host`. When that single-host
+    # plist coexists with ≥2 bootstrapped siblings, the extra host(s)
+    # are silently never visited — the exact 2026-05-20 audit bug
+    # (agentbrew bootstrapped since 2026-05-19, zero iterations against
+    # it). Warn with the one-command fix so the operator never has to
+    # reverse-engineer the launchd args. Read-only: `grep` over the
+    # plist, glob over the parent dir; never mutates state.
+    if [ -n "${_host:-}" ]; then
+      _mh_plist="$HOME/Library/LaunchAgents/com.minsky.daemon.plist"
+      _mh_parent=$(dirname "$_host")
+      _mh_siblings=$(_minsky_count_bootstrapped_siblings "$_mh_parent")
+      if [ -f "$_mh_plist" ] && [ "$_mh_siblings" -ge 2 ] 2>/dev/null; then
+        if grep -q -- "--hosts-dir" "$_mh_plist" 2>/dev/null; then
+          _doctor_print PASS "multi-host" "plist walks all $_mh_siblings bootstrapped hosts under $_mh_parent"
+        elif grep -q -- "--host" "$_mh_plist" 2>/dev/null; then
+          _doctor_print WARN "multi-host" "$_mh_siblings bootstrapped hosts under $_mh_parent but plist targets only one (--host) — re-run \`minsky install-daemon\` to walk all"
+        fi
+      fi
+    fi
+
+    # Fold bash-skeleton probes into doctor (rule #16 CLI consolidation
+    # corollary, 2026-05-25): `minsky doctor` is the single health-
+    # check surface.
+    #
+    # Conditional: only run the bash-skeleton fold when there's
+    # evidence the operator cares about the Path A bash path. Signals:
+    #   (a) `.minsky/repo.yaml` in $PWD — operator is in a bootstrapped
+    #       host (about to run `minsky --transform`).
+    #   (b) `bin/minsky-run.sh` in the repo dir AND the operator is
+    #       INSIDE the minsky repo itself — they're developing the
+    #       bash path.
+    # Without one of these signals, the bash-skeleton probes are
+    # likely noise (e.g. running `minsky doctor` in a directory that
+    # has nothing to do with minsky). Also skipping it keeps doctor
+    # FAST when called as the no-args preamble — the bash-skeleton
+    # probes shell out to shellcheck, python3 compile, etc. which add
+    # ~5s per call. The integration test in m1-red-green.test.ts spawns
+    # `minsky doctor` with a 30s timeout from a clean tmpdir; without
+    # the conditional, the spawn ETIMEDOUTs on slow CI runners.
+    # Trigger conditional: only run the bash-skeleton fold when the
+    # operator is INSIDE a bootstrapped host (`.minsky/repo.yaml`
+    # present in $PWD). This is the only signal that the operator is
+    # about to run `minsky --transform` or otherwise needs the bash
+    # path validated.
+    #
+    # Why not also fold when in the minsky repo itself? Because the
+    # bash-skeleton fold calls `python3` via `bash-doctor-probes.sh`,
+    # and some Python wrappers take 30+
+    # seconds to bootstrap uv with a fresh HOME — turning `doctor`
+    # into a 30-90s command when invoked from a fresh-HOME test env
+    # (e.g. the m1-red-green.test.ts integration suite). The existing
+    # comment at the top of this file explicitly warns about this
+    # ("bin/minsky uses portable shell helpers, not python3"). The
+    # conditional defers that cost until the operator is in a context
+    # where it actually matters (a bootstrapped host).
+    #
+    # Operator escape: pass `--all` (or `--smoke`) to force the fold
+    # regardless of $PWD signals.
+    _bd_should_run=0
+    if [ -f "$PWD/.minsky/repo.yaml" ]; then
+      _bd_should_run=1
+    fi
+    # Always run when --smoke or --all is passed (explicit operator
+    # request for the full check).
+    for _a in "$@"; do
+      case "$_a" in
+        --smoke|--all) _bd_should_run=1 ;;
+      esac
+    done
+
+    if [ "$_bd_should_run" = "1" ]; then
+      [ "$_quiet" = "0" ] && echo "" && echo "--- bash-skeleton probes (Path A) — informational ---"
+      _bd_probe_args=()
+      [ "$_quiet" = "1" ] && _bd_probe_args+=("--quiet")
+      for _a in "$@"; do
+        [ "$_a" = "--smoke" ] && _bd_probe_args+=("--smoke")
+      done
+      # Direct function call — no subshell, no second front door (rule
+      # #16 CLI-consolidation corollary, 2026-05-25 follow-up). The
+      # function sets `_bd_skeleton_crit_fail` globally; we read it but
+      # do NOT propagate into `_crit_fail` because `doctor`'s invariant
+      # is "the machine can run AT LEAST ONE Minsky path" — TS-substrate
+      # critical checks gate exit code; bash-skeleton fails are
+      # informational. This matches the integration test pin in
+      # test/integration/m1-red-green.test.ts § "minsky doctor exits 0
+      # when no critical checks fail".
+      # `|| true` because the function returns non-zero on bash-skeleton
+      # crit-fail (so the deprecated `bash-doctor` alias can preserve
+      # strict semantics), and we have `set -e` at the top of bin/minsky.
+      _run_bash_skeleton_probes "${_bd_probe_args[@]:-}" || true
+      if [ "${_bd_skeleton_crit_fail:-0}" != "0" ] && [ "$_quiet" = "0" ]; then
+        echo "(bash-skeleton has critical fails — see above; operator must fix before \`minsky --transform\`)"
+      fi
+    elif [ "$_quiet" = "0" ]; then
+      echo ""
+      echo "(bash-skeleton probes skipped: no .minsky/repo.yaml in \$PWD; run \`minsky doctor --all\` to force)"
+    fi
+
+    [ "$_quiet" = "0" ] && echo ""
+    if [ "$_crit_fail" = "0" ]; then
+      [ "$_quiet" = "0" ] && echo "✅ doctor: ready"
+      exit 0
+    else
+      echo "❌ doctor: critical checks failed — minsky cannot run on this machine until they pass"
+      exit 1
+    fi
+    ;;
+  bash-doctor)
+    # DEPRECATED alias for `minsky doctor --all` (rule #16 CLI-
+    # consolidation corollary, 2026-05-25). The probe body lives once
+    # in `_run_bash_skeleton_probes` (top of file). Direct invocation
+    # is preserved for PR-#866-era operator habits + test backwards
+    # compat; will be removed in the next major version.
+    # <!-- @deprecated 2026-05-25 — folded into `minsky doctor` -->
+    #
+    # Direct semantics differ from `doctor --all` in ONE way:
+    # `bash-doctor` exits 1 when bash-skeleton has critical fails
+    # (strict mode — script callers may rely on this). `doctor --all`
+    # exits 0 even when bash-skeleton fails (informational, per
+    # doctor's "at least one path works" invariant).
+    [ "${MINSKY_DOCTOR_FOLD:-0}" != "1" ] && \
+      echo "minsky bash-doctor: DEPRECATED — use \`minsky doctor --all\` (single front door). bash-doctor will be removed in the next major version." >&2
+
+    # Print header for direct callers (consistent with old behavior).
+    _bd_alias_quiet=0
+    for _a in "$@"; do
+      [ "$_a" = "--quiet" ] && _bd_alias_quiet=1
+    done
+    [ "$_bd_alias_quiet" = "0" ] && echo "minsky bash-doctor — pre-flight for Path A bash + Python skeleton" && echo ""
+
+    # Single body — shared with `doctor`. Exit code reflects strict
+    # bash-skeleton semantics (the only behavioral delta vs `doctor`).
+    # `|| true` because we want to read $_bd_skeleton_crit_fail below
+    # before script-wide errexit aborts us.
+    _run_bash_skeleton_probes "$@" || true
+
+    [ "$_bd_alias_quiet" = "0" ] && echo ""
+    if [ "${_bd_skeleton_crit_fail:-0}" = "0" ]; then
+      [ "$_bd_alias_quiet" = "0" ] && echo "✅ bash-doctor: bash + Python skeleton is ready for \`minsky --transform\`"
+      exit 0
+    else
+      echo "❌ bash-doctor: critical checks failed — \`minsky --transform\` will fail until the above are fixed"
+      exit 1
+    fi
+    ;;
+  iter-once)
+    # DEPRECATED 2026-05-25 — use `minsky --once <host-dir> [--live]
+    # [--no-capture]` instead. Per rule #16 CLI consolidation
+    # corollary: `--once` is a flag on the `minsky` no-args entry
+    # point, not its own verb. The body lives in
+    # `_run_iter_once()` at the top of this file — both this alias
+    # and the `--once` flag share that single source of truth.
+    #
+    # The alias is kept (rule #1, no breaking change) and emits a
+    # one-line deprecation banner unless `MINSKY_ITER_ONCE_FOLD=1`
+    # is set (which the no-args dispatch sets to suppress double-
+    # banner noise — though that path uses --once, not iter-once,
+    # so the env var is mainly for paired tests).
+    shift
+    if [ "${MINSKY_ITER_ONCE_FOLD:-0}" != "1" ]; then
+      echo "minsky: NOTE — \`iter-once\` is deprecated; use \`minsky --once <host-dir>\` instead." >&2
+    fi
+    _run_iter_once "$@"
+    exit $?
+    ;;
+  tail-failures)
+    # DEPRECATED 2026-05-25 — use `minsky logs --failures [host]
+    # [--latest|--count N]` instead. Per rule #16 CLI consolidation
+    # corollary: failure-tailing is a refinement of `logs`, not its
+    # own verb. The body lives in `_run_tail_failures()` at the top
+    # of this file — both this alias and the `--failures` flag on
+    # `logs` share that single source of truth.
+    shift
+    if [ "${MINSKY_TAIL_FAILURES_FOLD:-0}" != "1" ]; then
+      echo "minsky: NOTE — \`tail-failures\` is deprecated; use \`minsky logs --failures\` instead." >&2
+    fi
+    _run_tail_failures "$@"
+    exit $?
+    ;;
+  report)
+    # `minsky report [--baseline | --delta] [--repo <path>]` — print
+    # the latest metric snapshot, the diff against the previous, or
+    # a human-readable summary. Delegates to scripts/minsky-report.mjs
+    # which holds the pure formatting logic (covered by paired unit
+    # tests in scripts/minsky-report.test.mjs).
+    #
+    # Source: M1 milestone exit criterion §7.
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    shift  # consume `report`, forward remaining args
+    exec node "$_repo_dir/scripts/minsky-report.mjs" "$@"
+    ;;
+  benchmark)
+    # `minsky benchmark [--iterations N] [--host PATH] [--no-live] [--json]`
+    # Run N iterations of the cross-repo runner and report verdict
+    # distribution + pass-rate + mean duration. Pure helpers (verdict
+    # classification, output parsing, aggregation) live in scripts/
+    # minsky-benchmark.mjs and are covered by paired unit tests.
+    #
+    # `--throughput` mode (rule #11 — flag on the existing command, NOT a
+    # new subcommand): walk a fleet of >=5 fixture hosts and project the
+    # observed outcomes to a 24h window — the falsifiable "code factory"
+    # throughput claim (PRs/day at scale). Routes to scripts/
+    # throughput-benchmark.mjs; the `--throughput` token is consumed here
+    # so the throughput runner sees only its own flags. Source: TASKS.md
+    # `throughput-at-scale-benchmark`; user-stories/016-code-factory-throughput.md.
+    #
+    # Source: M1 milestone exit criterion §10.
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    shift  # consume `benchmark`, forward remaining args
+    _bench_throughput=0
+    _bench_args=()
+    for _bench_arg in "$@"; do
+      if [ "$_bench_arg" = "--throughput" ]; then
+        _bench_throughput=1
+      else
+        _bench_args+=("$_bench_arg")
+      fi
+    done
+    if [ "$_bench_throughput" -eq 1 ]; then
+      exec node "$_repo_dir/scripts/throughput-benchmark.mjs" "${_bench_args[@]}"
+    fi
+    exec node "$_repo_dir/scripts/minsky-benchmark.mjs" "${_bench_args[@]}"
+    ;;
+  install-daemon)
+    # Install a launchd plist so minsky auto-starts on login/reboot.
+    # Reads default_host from ~/.minsky/config.json.
+    #
+    # `--print` / `--dry-run`: write the plist to its destination but
+    # SKIP the `launchctl bootout`/`bootstrap` reload — lets the operator
+    # (and the paired bats tests) preview the generated ProgramArguments
+    # without disturbing a running daemon. The positional default_host
+    # arg ($2) still works when --print is the *second* token, so the
+    # flag is parsed out of all args, not assumed positional.
+    _real_bin=$(_minsky_realpath "$0")
+    _id_dry_run=0
+    _id_positional_host=""
+    for _id_a in "${@:2}"; do
+      case "$_id_a" in
+        --print|--dry-run) _id_dry_run=1 ;;
+        --*) ;;  # ignore unknown flags (forward-compat)
+        *) [ -z "$_id_positional_host" ] && _id_positional_host="$_id_a" ;;
+      esac
+    done
+    _default_host=$(_minsky_config_value "default_host")
+    if [ -z "$_default_host" ]; then
+      _default_host="${_id_positional_host:-$(pwd)}"
+      echo "No default_host in ~/.minsky/config.json — using: $_default_host"
+    fi
+
+    _plist="$HOME/Library/LaunchAgents/com.minsky.daemon.plist"
+    # Ensure ~/Library/LaunchAgents exists (fresh machines + --print runs
+    # against a clean HOME may not have it yet) so the later `mv` of the
+    # generated plist never fails on a missing directory.
+    mkdir -p "$(dirname "$_plist")"
+    # Resolve the node binary and runner script — launchd runs the node
+    # process DIRECTLY (foreground), not via --daemon which backgrounds.
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    # Resolve a STABLE node path — fnm's multishell paths are ephemeral
+    # (change every terminal session). Use the fnm alias or homebrew path.
+    if [ -x "$HOME/.fnm/aliases/default/bin/node" ]; then
+      _node_bin="$HOME/.fnm/aliases/default/bin/node"
+    elif _fnm_node=$(ls "$HOME/.local/share/fnm/node-versions"/v2*/installation/bin/node 2>/dev/null | sort -V | tail -1) && [ -x "$_fnm_node" ]; then
+      _node_bin="$_fnm_node"
+    elif [ -x "/opt/homebrew/bin/node" ]; then
+      _node_bin="/opt/homebrew/bin/node"
+    elif [ -x "/usr/local/bin/node" ]; then
+      _node_bin="/usr/local/bin/node"
+    else
+      _node_bin=$(which node)
+    fi
+    _runner="$_repo_dir/novel/cross-repo-runner/bin/minsky-run.mjs"
+    # Phase 7 default-flip (TASKS.md `daemon-cold-spawn-mjs-default-
+    # flip`): the bash runner is now the unconditional default — the
+    # Node runner has been gutted in Path A Phase 7, so writing a
+    # plist that execs `node $_runner` produces a KeepAlive crash
+    # loop and a daemon log full of MODULE_NOT_FOUND.
+    #
+    # Back-compat: the legacy `MINSKY_INSTALL_DAEMON_BASH=1` env var
+    # still resolves to bash (it's a no-op now, since bash is the
+    # default). The new opt-IN for the Node runner is
+    # `MINSKY_INSTALL_DAEMON_NODE=1`, and it ALSO checks that the
+    # `.mjs` file actually exists — otherwise we silently fall back
+    # to bash with a stderr breadcrumb (rule #6 — never write a
+    # plist that crashes on first start).
+    _want_node_runner=0
+    if [ "${MINSKY_INSTALL_DAEMON_NODE:-0}" = "1" ]; then
+      if [ -f "$_runner" ]; then
+        _want_node_runner=1
+      else
+        echo "minsky: MINSKY_INSTALL_DAEMON_NODE=1 but $_runner is missing (Path A Phase 7 gut). Falling back to bash runner." >&2
+      fi
+    fi
+    if [ "$_want_node_runner" = "0" ]; then
+      _bash_runner="$_repo_dir/bin/minsky-run.sh"
+      if [ ! -x "$_bash_runner" ]; then
+        echo "minsky: bash runner $_bash_runner not executable (run \`chmod +x $_bash_runner\`)" >&2
+        exit 1
+      fi
+      # ProgramArguments for the bash variant: invoke bash directly so
+      # launchd sees the bash PID and KeepAlive=true reaches it. The
+      # bash runner takes --hosts-dir <parent>; the walker then visits
+      # EVERY bootstrapped host repo under that parent in round-robin —
+      # which is exactly the multi-host behavior TASKS.md
+      # minsky-daemon-plist-multi-host wants (a second bootstrapped
+      # sibling like agentbrew is no longer silently skipped). The
+      # `MINSKY_MULTI_HOST=0` escape hatch falls back to the explicit
+      # single-host `--host` form for operators who only want one repo
+      # walked (the task's Pivot path).
+      _bash_hosts_parent=$(dirname "$_default_host")
+      if [ "${MINSKY_MULTI_HOST:-1}" = "0" ]; then
+        _program_args="    <string>/bin/bash</string>
+    <string>$_bash_runner</string>
+    <string>--host</string>
+    <string>$_default_host</string>"
+      else
+        _program_args="    <string>/bin/bash</string>
+    <string>$_bash_runner</string>
+    <string>--hosts-dir</string>
+    <string>$_bash_hosts_parent</string>"
+      fi
+    else
+      # Multi-host auto-detect (TASKS.md minsky-daemon-plist-multi-host):
+      # when ≥2 bootstrapped hosts (`.minsky/repo.yaml`) live under the
+      # parent of default_host, walk all of them via `--hosts-dir` so a
+      # second bootstrapped sibling (e.g. agentbrew alongside minsky) is
+      # never silently skipped. Single-host operators (0 or 1 sibling)
+      # keep the explicit `--host` form. `MINSKY_MULTI_HOST=0` forces the
+      # single-host form (the task's Pivot escape hatch for the window
+      # where multi-host might expose latent walker bugs).
+      _node_hosts_parent=$(dirname "$_default_host")
+      _node_sibling_count=$(_minsky_count_bootstrapped_siblings "$_node_hosts_parent")
+      if [ "${MINSKY_MULTI_HOST:-1}" != "0" ] && [ "$_node_sibling_count" -ge 2 ] 2>/dev/null; then
+        _program_args="    <string>$_node_bin</string>
+    <string>$_runner</string>
+    <string>--hosts-dir</string>
+    <string>$_node_hosts_parent</string>
+    <string>--loop</string>"
+      else
+        _program_args="    <string>$_node_bin</string>
+    <string>$_runner</string>
+    <string>--host</string>
+    <string>$_default_host</string>
+    <string>--loop</string>"
+      fi
+    fi
+    # Propagate agent-auth env vars from the operator's current shell
+    # so the daemon child inherits them via launchd's `EnvironmentVariables`.
+    # Without this, devin/claude/openai/anthropic CLIs spawn under launchd
+    # with EMPTY auth, exit non-zero (often signal-killed), and surface
+    # as `verdict=spawn-failed exit=-1 stderr=(empty)` — the entire
+    # `spawn-failed-exit-minus-one-silent-empty-stderr` P0 (2026-05-19).
+    # Iterate over DEVIN_*, CLAUDE_*, OPENAI_*, ANTHROPIC_* and emit
+    # one `<key>NAME</key><string>VALUE</string>` pair per var. XML-escape
+    # the value (only `&` and `<` need escaping inside a `<string>` literal
+    # per the plist DTD) so secrets that contain those characters don't
+    # corrupt the plist. Names already pass the `^[A-Z][A-Z0-9_]*$` shape
+    # (env-var naming rule), so they need no escaping.
+    _xml_env_pairs=""
+    while IFS='=' read -r _env_name _env_value; do
+      case "$_env_name" in
+        DEVIN_*|CLAUDE_*|OPENAI_*|ANTHROPIC_*)
+          # XML-escape `&` first (so subsequent `<`/`>` escapes don't
+          # double-escape their introduced `&`), then `<` and `>`.
+          _env_value_esc=$(printf '%s' "$_env_value" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
+          _xml_env_pairs="${_xml_env_pairs}
+    <key>${_env_name}</key>
+    <string>${_env_value_esc}</string>"
+          ;;
+      esac
+    done <<EOF
+$(env | grep -E '^(DEVIN_|CLAUDE_|OPENAI_|ANTHROPIC_)' || true)
+EOF
+
+    _dotfiles_bin=""
+    for _dfb in "$HOME/apps/tooling/dotfiles/bin" "$HOME/apps/dotfiles/bin"; do
+      [ -x "$_dfb/python3" ] && _dotfiles_bin="$_dfb" && break
+    done
+    _daemon_path="${_dotfiles_bin:+${_dotfiles_bin}:}/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:$HOME/.fnm/aliases/default/bin"
+
+    # Generate the new plist content into a tempfile so we can
+    # idempotency-check against the existing file before overwriting +
+    # reloading launchd. Without this, every `minsky install-daemon`
+    # call ran `launchctl bootout` + `bootstrap` even when the plist
+    # was unchanged — which kills the running daemon on every call,
+    # making the new auto-install-on-pull hook destructive. With this:
+    # same content → silent no-op (no kill); different content →
+    # overwrite + reload as before. `MINSKY_INSTALL_DAEMON_QUIET=1`
+    # suppresses the "already up to date" line for hook callers.
+    _plist_tmp="$(mktemp)"
+    _daemon_disabled="true"
+    if _minsky_autostart_enabled; then
+      _daemon_disabled="false"
+    fi
+    cat > "$_plist_tmp" << PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.minsky.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+$_program_args
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>Disabled</key>
+  <${_daemon_disabled}/>
+  <key>ProcessType</key>
+  <string>Standard</string>
+  <key>StandardOutPath</key>
+  <string>$MINSKY_DAEMON_LOG</string>
+  <key>StandardErrorPath</key>
+  <string>$MINSKY_DAEMON_LOG</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>$_daemon_path</string>
+    <key>HOME</key>
+    <string>$HOME</string>
+    <key>MINSKY_NON_INTERACTIVE</key>
+    <string>1</string>${_xml_env_pairs}
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+</dict>
+</plist>
+PLIST_EOF
+
+    # Idempotency: if the existing plist is byte-identical to the
+    # newly-generated one, skip the bootout/bootstrap reload — that
+    # reload kills the running daemon process, which a no-op call
+    # MUST NOT do. `cmp -s` is silent + portable + fast.
+    if [ -f "$_plist" ] && cmp -s "$_plist_tmp" "$_plist"; then
+      rm -f "$_plist_tmp"
+      if [ "${MINSKY_INSTALL_DAEMON_QUIET:-0}" != "1" ]; then
+        echo "✅ com.minsky.daemon plist already up to date (no reload)"
+        echo "   plist: $_plist"
+      fi
+      exit 0
+    fi
+    mv "$_plist_tmp" "$_plist"
+
+    if [ "$_id_dry_run" = "1" ]; then
+      echo "✅ Wrote com.minsky.daemon plist (dry-run: launchctl reload skipped)"
+      echo "   plist: $_plist"
+      echo "   host: $_default_host"
+      if ! _minsky_autostart_enabled; then
+        echo "   dormant: run \`minsky enable-autostart\` to load at login"
+      fi
+      exit 0
+    fi
+
+    launchctl bootout "gui/$(id -u)/com.minsky.daemon" 2>/dev/null || true
+    if _minsky_autostart_enabled; then
+      plutil -replace Disabled -bool false "$_plist" 2>/dev/null || true
+      launchctl bootstrap "gui/$(id -u)" "$_plist"
+      echo "✅ Installed com.minsky.daemon (autostart enabled)"
+    else
+      plutil -replace Disabled -bool true "$_plist" 2>/dev/null || true
+      echo "✅ Wrote com.minsky.daemon plist (dormant — not bootstrapped)"
+      echo "   Enable: minsky enable-autostart"
+      exit 0
+    fi
+    echo "   plist: $_plist"
+    echo "   host: $_default_host"
+    # Count propagated agent-auth env vars (DEVIN_*, CLAUDE_*, OPENAI_*,
+    # ANTHROPIC_*) and report them so the operator can spot at install
+    # time when the shell didn't have the expected creds — without this
+    # line, missing env vars only surface much later as silent
+    # `exit=-1 stderr=(empty)` iterations. `spawn-failed-exit-minus-one-
+    # silent-empty-stderr` (2026-05-19) makes this visibility iron.
+    _propagated_env_count=$(env | grep -E '^(DEVIN_|CLAUDE_|OPENAI_|ANTHROPIC_)' | wc -l | tr -d ' ')
+    if [ "$_propagated_env_count" = "0" ]; then
+      echo "   ⚠ NO DEVIN_*/CLAUDE_*/OPENAI_*/ANTHROPIC_* env vars in your shell —"
+      echo "     daemon spawns may silent-fail. Export them and re-run install-daemon."
+    else
+      echo "   ✅ propagated $_propagated_env_count agent-auth env vars from shell"
+    fi
+    echo "   auto-starts on login + restarts on crash"
+    echo ""
+    echo "   Check: launchctl list | grep minsky.daemon"
+    echo "   Remove: minsky uninstall-daemon"
+    exit 0
+    ;;
+  uninstall-daemon)
+    _plist="$HOME/Library/LaunchAgents/com.minsky.daemon.plist"
+    launchctl bootout "gui/$(id -u)/com.minsky.daemon" 2>/dev/null || true
+    rm -f "$_plist"
+    echo "✅ Removed com.minsky.daemon"
+    echo "   minsky will no longer auto-start on login/reboot"
+    exit 0
+    ;;
+  enable-autostart)
+    # Opt-in: bootstrap ALL com.minsky.* LaunchAgents at login.
+    # Requires endpoint-bootstrap sentinel (endpoint-safe jq shims) before
+    # tick-loop can run. Default is dormant (Disabled=true in every plist).
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    _endpoint_ready="$HOME/.local/state/dotfiles/endpoint-ready"
+    _autostart_sentinel="$(_minsky_autostart_sentinel)"
+    _tick_sentinel="${MINSKY_HOME:-$_repo_dir}/.minsky/tick-loop-enabled"
+    _hard_off="$(_minsky_autostart_hard_off_sentinel)"
+
+    # Hard-off guard: refuse unless the operator explicitly clears the
+    # block (`--force` or removing the sentinel). Keeps autostart off
+    # "for good" across pulls, `dotfiles update`, and stray re-enables.
+    _force=0
+    for _a in "$@"; do [ "$_a" = "--force" ] && _force=1; done
+    if [ -f "$_hard_off" ] && [ "$_force" -ne 1 ]; then
+      echo "✗ minsky autostart is hard-disabled: $_hard_off" >&2
+      echo "  Autostart was explicitly turned off. To re-enable, run:" >&2
+      echo "    minsky enable-autostart --force" >&2
+      echo "  (or: rm $_hard_off && minsky enable-autostart)" >&2
+      exit 1
+    fi
+    rm -f "$_hard_off"
+
+    if [ ! -f "$_endpoint_ready" ]; then
+      echo "✗ endpoint-ready sentinel missing: $_endpoint_ready" >&2
+      echo "  Wait for com.dotfiles.endpoint-bootstrap at login, or run:" >&2
+      echo "    chezmoi apply && launchctl kickstart -k gui/\$(id -u)/com.dotfiles.endpoint-bootstrap" >&2
+      exit 1
+    fi
+
+    # shellcheck source=lib-launchd-path.sh
+    . "$_repo_dir/distribution/systemd/lib-launchd-path.sh"
+    if [ -z "${MINSKY_JQ:-}" ]; then
+      echo "✗ no endpoint-safe jq found (dotfiles/bin/jq missing or broken symlink)" >&2
+      echo "  Fix: chezmoi apply && dotfiles doctor --module security --fix" >&2
+      exit 1
+    fi
+
+    mkdir -p "$(dirname "$_autostart_sentinel")" "$(dirname "$_tick_sentinel")"
+    printf '%s\n' "$(date -u +%FT%TZ)" > "$_autostart_sentinel"
+    printf '%s\n' "$(date -u +%FT%TZ)" > "$_tick_sentinel"
+
+    _minsky_render_launchd_templates "$_repo_dir"
+    MINSKY_INSTALL_DAEMON_QUIET=1 "$0" install-daemon 2>/dev/null || "$0" install-daemon
+
+    _minsky_set_all_plists_disabled false
+    for _f in "$HOME/Library/LaunchAgents"/com.minsky.*.plist; do
+      [ -f "$_f" ] || continue
+      _label="$(basename "$_f" .plist)"
+      launchctl bootout "gui/$(id -u)/$_label" 2>/dev/null || true
+      if launchctl bootstrap "gui/$(id -u)" "$_f"; then
+        echo "   bootstrapped: $_label"
+      else
+        echo "   ⚠ failed to bootstrap: $_label (check Console.app)" >&2
+      fi
+    done
+
+    echo "✅ minsky autostart enabled (all com.minsky.* agents)"
+    echo "   sentinel: $_autostart_sentinel"
+    echo "   jq:       $MINSKY_JQ"
+    echo "   Disable:  minsky disable-autostart"
+    exit 0
+    ;;
+  disable-autostart)
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    _autostart_sentinel="$(_minsky_autostart_sentinel)"
+    _tick_sentinel="${MINSKY_HOME:-$_repo_dir}/.minsky/tick-loop-enabled"
+
+    _hard_off="$(_minsky_autostart_hard_off_sentinel)"
+
+    _minsky_bootout_all_launchagents
+    _minsky_set_all_plists_disabled true
+    rm -f "$_autostart_sentinel" "$_tick_sentinel"
+    mkdir -p "$(dirname "$_hard_off")"
+    printf '%s\n' "$(date -u +%FT%TZ)" > "$_hard_off"
+
+    echo "✅ minsky autostart disabled (no com.minsky.* agents at login)"
+    echo "   hard-off: $_hard_off (blocks re-enable until cleared)"
+    echo "   Re-enable: minsky enable-autostart --force"
+    exit 0
+    ;;
+  enable-tick-loop)
+    echo "minsky: enable-tick-loop is deprecated — use: minsky enable-autostart" >&2
+    exec "$0" enable-autostart
+    ;;
+  disable-tick-loop)
+    echo "minsky: disable-tick-loop is deprecated — use: minsky disable-autostart" >&2
+    exec "$0" disable-autostart
+    ;;
+  update)
+    # Graceful pause → pull latest → rebuild → restart from same spot.
+    # The experiment-store preserves iteration history so the daemon
+    # resumes from the next unfinished task after restart.
+    echo "minsky update — pause, pull, rebuild, resume"
+    echo ""
+
+    # 1. Stop daemon gracefully
+    if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
+      echo "  1/4 Stopping daemon..."
+      pkill -TERM -f "cross-repo-runner/bin/minsky-run"
+      rm -f "$MINSKY_DAEMON_PID"
+      sleep 2
+      echo "       ✅ Daemon stopped"
+    else
+      echo "  1/4 No daemon running — skip"
+    fi
+
+    # Resolve the real minsky repo dir (follows symlinks)
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+
+    # 2. Pull latest
+    echo "  2/4 Pulling latest from $_repo_dir..."
+    git -C "$_repo_dir" pull --rebase 2>&1 | head -5
+    echo "       ✅ Pulled"
+
+    # 3. Rebuild
+    echo "  3/4 Rebuilding..."
+    (cd "$_repo_dir" && pnpm install 2>&1 | tail -3)
+    echo "       ✅ Built"
+
+    # 4. Restart daemon with same host
+    # Detect the host from the last daemon's args
+    LAST_HOST=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1)
+    if [ -z "$LAST_HOST" ]; then
+      LAST_HOST="${2:-$(pwd)}"
+    fi
+    echo "  4/4 Restarting on $LAST_HOST..."
+    "$0" --daemon --host "$LAST_HOST"
+    echo ""
+    echo "✅ Update complete. Daemon resumed from where it left off."
+    echo "   Run 'minsky watch' to monitor."
+    exit 0
+    ;;
+  qa)
+    # `minsky qa` — open .minsky/qa-log.md in $EDITOR, then tail it.
+    #
+    # Slice 3 of P0 `minsky-human-comm-via-file`. The operator surface
+    # for the agent↔human QA channel established by slices 1+2.
+    #
+    # Behavior:
+    #   - Resolves the log path: $MINSKY_QA_LOG_PATH overrides
+    #     "<pwd>/.minsky/qa-log.md" (the convention agents write to).
+    #   - Creates the file with a usage-header template when missing so
+    #     a fresh operator who runs `minsky qa` first sees the format.
+    #   - Opens the file in $EDITOR (fallback: vi). After the editor
+    #     exits, `tail -F`'s the file so the operator can watch live
+    #     agent additions until Ctrl-C.
+    #   - --print-path: emit the resolved path and exit 0 (no editor,
+    #     no tail). For scripts / tests / agents that need the path.
+    #   - --init-only: ensure the file exists with the header, then
+    #     exit 0 (no editor, no tail). For first-run bootstrap.
+    #
+    # Source: M1 milestone `minsky-human-comm-via-file` slice 3;
+    # composes the qa-log-format spec in
+    # novel/human-loop/src/qa-log-format.ts (slice 1) and the askHuman
+    # async API in novel/human-loop/src/ask-human.ts (slice 2).
+    _qa_path="${MINSKY_QA_LOG_PATH:-$(pwd)/.minsky/qa-log.md}"
+    _qa_dir="$(dirname "$_qa_path")"
+    _init_only=0
+    _print_path=0
+    for _a in "${@:2}"; do
+      case "$_a" in
+        --init-only) _init_only=1 ;;
+        --print-path) _print_path=1 ;;
+        --help|-h)
+          echo "Usage: minsky qa [--init-only|--print-path]"
+          echo ""
+          echo "  Open the agent↔human QA log (.minsky/qa-log.md) in"
+          echo "  \$EDITOR, then tail -F it. Override the path with"
+          echo "  MINSKY_QA_LOG_PATH."
+          exit 0
+          ;;
+        *)
+          echo "minsky qa: unknown flag $_a (try --help)" >&2
+          exit 2
+          ;;
+      esac
+    done
+    mkdir -p "$_qa_dir"
+    if [ ! -f "$_qa_path" ]; then
+      cat > "$_qa_path" <<'EOF'
+# Minsky QA log
+
+This file is the channel between minsky agents and you. Agents append
+question blocks (`## Q:`) and wait up to 4 hours for your answer block
+(`## A:`) with the same task-id. The format is documented at
+`novel/human-loop/README.md` in the minsky repo.
+
+When you save this file, any agent watching it via `askHuman()` picks
+up your answer within 500 ms and resumes work.
+
+You can delete this header at any time — only the `## Q:` / `## A:`
+blocks are parsed.
+
+EOF
+    fi
+    if [ "$_print_path" = "1" ]; then
+      echo "$_qa_path"
+      exit 0
+    fi
+    if [ "$_init_only" = "1" ]; then
+      echo "minsky qa: log at $_qa_path"
+      exit 0
+    fi
+    _editor="${EDITOR:-vi}"
+    "$_editor" "$_qa_path"
+    echo "minsky qa: tailing $_qa_path (Ctrl-C to exit)" >&2
+    exec tail -F "$_qa_path"
+    ;;
+  watch)
+    # Live dashboard: status + iterations + log in a single refreshing view.
+    # Refreshes every 10s. Ctrl-C to exit (daemon keeps running).
+    HOST_ARG="${2:-}"
+    # Resolve scripts dir for stability-number.mjs
+    MINSKY_REPO_SCRIPTS="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/scripts"
+    while true; do
+      clear
+      _ver=$(git -C "$(dirname "$0")" rev-parse --short HEAD 2>/dev/null || echo "?")
+      echo "╔══════════════════════════════════════════════════════════════╗"
+      echo "║  minsky watch — $(date '+%H:%M:%S') [$_ver]  Ctrl-C to detach              ║"
+      echo "╚══════════════════════════════════════════════════════════════╝"
+      echo ""
+
+      # Status
+      if [ -f "$MINSKY_DAEMON_PID" ]; then
+        daemon_pid=$(cat "$MINSKY_DAEMON_PID" 2>/dev/null)
+        if kill -0 "$daemon_pid" 2>/dev/null; then
+          uptime=$(ps -p "$daemon_pid" -o etime= 2>/dev/null | tr -d ' ')
+          target=$(ps -p "$daemon_pid" -o args= 2>/dev/null | grep -oE '\-\-host [^ ]+' | head -1)
+          agent_count=$(pgrep -f 'devin.*--print\|claude.*--print' 2>/dev/null | wc -l | tr -d ' ')
+          echo "  🟢 DAEMON  PID=$daemon_pid  uptime=$uptime  agents=$agent_count"
+          echo "     target: $target"
+        else
+          echo "  🔴 DAEMON  stale PID $daemon_pid (not running)"
+          echo "     fix: rm -f ~/.minsky/daemon.pid && minsky --daemon --host <repo>"
+        fi
+      else
+        echo "  ⚫ DAEMON  not running"
+        echo "     start: minsky --daemon --host <repo>"
+      fi
+      echo ""
+
+      # Resolve host dir early (needed by stability + iterations + help)
+      host_dir="${HOST_ARG:-}"
+      if [ -z "$host_dir" ]; then
+        # The pipeline returns no matches when no daemon is running; `|| true`
+        # absorbs the empty-result exit-1 so `set -euo pipefail` doesn't abort
+        # the entire dashboard. Same fix shipped at line 122 for `status`.
+        # Discovered 2026-05-20 — fresh-install reader runs `minsky watch`
+        # with no daemon, dashboard exits after rendering only the DAEMON
+        # line, never gets to show RECENT ITERATIONS or NEEDS HUMAN ACTION.
+        host_dir=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1 || true)
+      fi
+      host_dir="${host_dir:-}"
+
+      # Stability + dynamic timeouts
+      if [ -n "$host_dir" ] && command -v node >/dev/null 2>&1; then
+        _stab=$(node "$MINSKY_REPO_SCRIPTS/stability-number.mjs" "$host_dir" 2>/dev/null || echo "no data")
+        echo "  📈 Stability: $_stab"
+        # Stability gate row — per `local-models-stability-gate-90-percent`
+        # (M1.1) and user-story 015. Renders one of:
+        #   gate: lifted               (≥0.90)
+        #   gate: active (78% 7d)      (0.60–0.90)
+        #   gate: pivot-eval-needed (52% 7d)  (<0.60)
+        #   gate: not-yet-measured     (insufficient data)
+        _gate_json=$(node "$MINSKY_REPO_SCRIPTS/measure-stability.mjs" --host-dir="$host_dir" --no-banner-marker 2>/dev/null || echo "")
+        if [ -n "$_gate_json" ]; then
+          _gate=$(echo "$_gate_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=JSON.parse(s);if(p.gate==="not-yet-measured"){process.stdout.write("not-yet-measured")}else{const pct=Math.round((p.rate||0)*100);process.stdout.write(`${p.gate} (${pct}% 7d)`)}}catch{process.stdout.write("")}})' 2>/dev/null || echo "")
+          [ -n "$_gate" ] && echo "  🎯 gate: $_gate"
+        fi
+      fi
+      dt_line=$(grep 'dynamic-timeouts' "$MINSKY_DAEMON_LOG" 2>/dev/null | tail -1)
+      if [ -n "$dt_line" ]; then
+        echo "  ⏱  $dt_line"
+      fi
+
+      # Current task (from last experiment yaml write)
+      _current_task=$(grep 'wrote.*experiments.*yaml' "$MINSKY_DAEMON_LOG" 2>/dev/null | tail -1 | grep -oE '[a-z][-a-z0-9]*\.yaml' | sed 's/\.yaml//')
+      if [ -n "$_current_task" ]; then
+        echo "  🔧 Current: $_current_task"
+      fi
+
+      # Last iteration summary (from the new ⏱ line)
+      _last_iter=$(grep '^⏱ iteration' "$MINSKY_DAEMON_LOG" 2>/dev/null | tail -1)
+      if [ -n "$_last_iter" ]; then
+        echo "  $_last_iter"
+      fi
+      echo ""
+
+      # Latest iterations (from experiment store)
+      echo "  📊 RECENT ITERATIONS"
+      echo "  ────────────────────────────────────────────────────────"
+      if [ -n "$host_dir" ] && [ -d "$host_dir/.minsky/experiment-store/cross-repo" ]; then
+        for f in "$host_dir"/.minsky/experiment-store/cross-repo/*.jsonl; do
+          [ -f "$f" ] || continue
+          task=$(basename "$f" .jsonl)
+          count=$(wc -l < "$f" | tr -d ' ')
+          last=$(tail -1 "$f" 2>/dev/null)
+          if [ -n "$last" ]; then
+            verdict=$(echo "$last" | grep -o '"verdict":"[^"]*"' | sed 's/"verdict":"//;s/"//')
+            ts=$(echo "$last" | grep -o '"ts":"[^"]*"' | sed 's/"ts":"//;s/"//;s/T/ /' | cut -c1-19)
+            pr=$(echo "$last" | grep -o '"pr_url":"[^"]*"' | sed 's/"pr_url":"//;s/"//')
+            if [ "$pr" = "null" ] || [ -z "$pr" ]; then pr="—"; fi
+            printf "  %-42s %s %-12s pr=%s  (%s total)\n" "$task" "$ts" "$verdict" "$pr" "$count"
+          fi
+        done
+      else
+        echo "  (no experiment data yet)"
+      fi
+      echo ""
+
+      # Human help needed
+      echo "  🆘 NEEDS HUMAN ACTION"
+      echo "  ────────────────────────────────────────────────────────"
+      _help_needed=0
+
+      # Check for scope-leak (most recent iteration)
+      _last_verdict=""
+      if [ -n "$host_dir" ] && [ -d "$host_dir/.minsky/experiment-store/cross-repo" ]; then
+        for f in "$host_dir"/.minsky/experiment-store/cross-repo/*.jsonl; do
+          [ -f "$f" ] || continue
+          v=$(tail -1 "$f" | grep -o '"verdict":"[^"]*"' | sed 's/"verdict":"//;s/"//')
+          [ "$v" = "scope-leak" ] && _last_verdict="scope-leak"
+        done
+      fi
+      if [ "$_last_verdict" = "scope-leak" ]; then
+        echo "  ⚠️  Last iteration scope-leaked. Commit your changes, then: minsky stop && minsky"
+        _help_needed=1
+      fi
+
+      # Check for repeated spawn-failed
+      if [ -f "$MINSKY_DAEMON_LOG" ]; then
+        _recent_fails=$(tail -20 "$MINSKY_DAEMON_LOG" | grep -c 'spawn-failed' 2>/dev/null || echo 0)
+        if [ "$_recent_fails" -ge 3 ]; then
+          echo "  ⚠️  3+ recent spawn failures. Check: devin --version / claude --version"
+          _help_needed=1
+        fi
+      fi
+
+      # Check for blocked tasks in TASKS.md
+      if [ -n "$host_dir" ] && [ -f "$host_dir/TASKS.md" ]; then
+        _blocked=$(grep -c '\*\*Blocked\*\*:' "$host_dir/TASKS.md" 2>/dev/null || echo 0)
+        if [ "$_blocked" -gt 0 ]; then
+          echo "  📋 $_blocked tasks marked as blocked — review TASKS.md"
+          _help_needed=1
+        fi
+      fi
+
+      # Check for stale daemon (no new log lines in 20+ min)
+      if [ -f "$MINSKY_DAEMON_LOG" ]; then
+        _log_age=$(( $(date +%s) - $(stat -f %m "$MINSKY_DAEMON_LOG" 2>/dev/null || stat -c %Y "$MINSKY_DAEMON_LOG" 2>/dev/null || echo 0) ))
+        if [ "$_log_age" -gt 1200 ]; then
+          echo "  ⚠️  Daemon log not updated in $((_log_age / 60))min — may be stuck"
+          _help_needed=1
+        fi
+      fi
+
+      if [ "$_help_needed" -eq 0 ]; then
+        echo "  ✅ No human action needed — minsky is running autonomously"
+      fi
+      echo ""
+
+      # Log tail
+      echo "  📝 LOG (last 5 lines)"
+      echo "  ────────────────────────────────────────────────────────"
+      if [ -f "$MINSKY_DAEMON_LOG" ]; then
+        tail -5 "$MINSKY_DAEMON_LOG" | sed 's/^/  /'
+      else
+        echo "  (no log)"
+      fi
+
+      sleep 10
+    done
+    ;;
+
+  # ─── Phase 1+2+3 CLI overhaul (2026-05-26 operator directive) ────
+  #
+  # nx- and openhands-shaped subcommand surface. Each block delegates to
+  # the existing implementation (pnpm scripts, supervisor commands, jq).
+  # Old surfaces (`pnpm <name>` for audit/m1/metrics/changelog/milestone;
+  # `minsky --once / --daemon / --transform`) keep working as deprecated
+  # aliases for ≤30 days (removed 2026-06-26). This block is additive;
+  # nothing existing breaks.
+
+  # ─── Phase 1: noun-spaces for diagnostics (collapses 13 pnpm scripts) ──
+
+  audit)
+    # `minsky audit <noun>` — diagnostic one-shots that used to be top-
+    # level `pnpm <name>:metrics` scripts. Consolidates: chaos:budget-
+    # exhaust, cto-audit:metrics, runany:audit, daemon-pr-lint:metrics,
+    # llm-provider:throughput. All read-only.
+    _audit_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      cto)            node "$_audit_repo/scripts/cto-audit-metrics.mjs" "${@:3}" ;;
+      runany)         node "$_audit_repo/scripts/runany-model-audit.mjs" "${@:3}" ;;
+      lint|pr-lint)   node "$_audit_repo/scripts/daemon-pr-lint-metrics.mjs" "${@:3}" ;;
+      chaos)
+        case "${3:-}" in
+          budget-exhaust) node "$_audit_repo/scripts/chaos-budget-exhaust.mjs" "${@:4}" ;;
+          *) echo "minsky audit chaos: known sub: budget-exhaust" >&2; exit 2 ;;
+        esac
+        ;;
+      llm-throughput) node "$_audit_repo/scripts/llm-provider-throughput.mjs" "${@:3}" ;;
+      ""|--help|-h)
+        cat <<'EOF'
+minsky audit <noun> — diagnostic one-shots (read-only)
+
+  cto              — cto-audit metrics (was: pnpm cto-audit:metrics)
+  runany           — runany model audit (was: pnpm runany:audit)
+  lint             — daemon-pr-lint metrics (was: pnpm daemon-pr-lint:metrics)
+  chaos <test>     — chaos engineering tests (was: pnpm chaos:<test>)
+                     known: budget-exhaust
+  llm-throughput   — LLM provider throughput (was: pnpm llm-provider:throughput)
+EOF
+        ;;
+      *) echo "minsky audit: unknown noun '$2'. See: minsky audit --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  m1)
+    # `minsky m1 <verb>` — M1 milestone reporting (collapses 3 pnpm
+    # scripts: m1:metrics, m1:observability, m1:coverage).
+    _m1_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      metrics)       node "$_m1_repo/scripts/m1-metrics-dashboard.mjs" "${@:3}" ;;
+      observability) node "$_m1_repo/scripts/m1-observability-plan.mjs" --gaps-only "${@:3}" ;;
+      coverage)
+        cd "$_m1_repo" && CI=1 pnpm test:coverage && node scripts/full-coverage-report.mjs "${@:3}"
+        ;;
+      ""|--help|-h)
+        cat <<'EOF'
+minsky m1 <verb> — M1 milestone reporting
+
+  metrics        — dashboard for M1.1-M1.14 (was: pnpm m1:metrics)
+  observability  — gaps in observability surface (was: pnpm m1:observability)
+  coverage       — full coverage report (was: pnpm m1:coverage)
+EOF
+        ;;
+      *) echo "minsky m1: unknown verb '$2'. See: minsky m1 --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  metrics)
+    # `minsky metrics <verb>` — metrics ops (was: metrics:collect / metrics:render).
+    _met_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      collect) node "$_met_repo/scripts/collect-metrics.mjs" "${@:3}" ;;
+      render)  node "$_met_repo/scripts/metrics-render.mjs" "${@:3}" ;;
+      refresh)
+        # Regenerate heal-class coverage matrix and print coverage JSON.
+        node "$_met_repo/scripts/generate-heal-coverage-matrix.mjs" --write-md "${@:3}"
+        node "$_met_repo/scripts/generate-heal-coverage-matrix.mjs" --json "${@:3}"
+        ;;
+      ""|show)
+        # `minsky metrics` with no verb = show current METRICS.md
+        if [ -f "$_met_repo/docs/METRICS.md" ]; then
+          less -R "$_met_repo/docs/METRICS.md" 2>/dev/null || cat "$_met_repo/docs/METRICS.md"
+        else
+          echo "minsky metrics: docs/METRICS.md missing (run \`minsky metrics render\` first)" >&2
+          exit 1
+        fi
+        ;;
+      --help|-h)
+        cat <<'EOF'
+minsky metrics [verb] — success-metrics ops
+
+  (no verb)  — show current docs/METRICS.md (default)
+  collect    — collect current metric values (was: pnpm metrics:collect)
+  render     — regenerate docs/METRICS.md (was: pnpm metrics:render)
+  refresh    — regenerate heal-class coverage matrix (was: pnpm minsky:metrics-refresh)
+EOF
+        ;;
+      *) echo "minsky metrics: unknown verb '$2'. See: minsky metrics --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  changelog)
+    # `minsky changelog [verb]` — was: changelog:today / changelog:snapshot.
+    _cl_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      today|"") node "$_cl_repo/scripts/changelog-today.mjs" "${@:3}" ;;
+      snapshot) node "$_cl_repo/scripts/changelog-snapshot.mjs" "${@:3}" ;;
+      --help|-h)
+        cat <<'EOF'
+minsky changelog [verb] — release-note builders
+
+  (no verb / today) — today's changelog (was: pnpm changelog:today)
+  snapshot          — snapshot current state (was: pnpm changelog:snapshot)
+EOF
+        ;;
+      *) echo "minsky changelog: unknown verb '$2'. See: minsky changelog --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  milestone)
+    # `minsky milestone <verb>` — was: pnpm milestone:check.
+    _ml_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      check|"") node "$_ml_repo/scripts/check-milestone-alignment.mjs" "${@:3}" ;;
+      --help|-h)
+        cat <<'EOF'
+minsky milestone [verb] — milestone alignment checks
+
+  (no verb / check) — verify the 7 alignment surfaces (was: pnpm milestone:check)
+EOF
+        ;;
+      *) echo "minsky milestone: unknown verb '$2'. See: minsky milestone --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  # ─── Phase 2: subcommand discipline (`run`, `daemon` noun-space) ────
+
+  run)
+    # `minsky run [--once|--host <dir>|--hosts-dir <p>|--local|--dry-run]`
+    # Subcommand form of the previously flag-styled top-level
+    # invocations. The bare `minsky` (no args) still triggers the old
+    # smart-auto-attach behavior below for backward compat. Use `minsky
+    # run` explicitly when the operator wants intent visible in shell
+    # history. Phase 2 of the 2026-05-26 CLI overhaul.
+    _run_args=()
+    shift  # drop the `run` token; pass everything else through
+    for _ra in "$@"; do
+      _run_args+=("$_ra")
+    done
+    # Re-exec self with the args so the smart-auto-attach block below
+    # picks up `--once`, `--host`, etc. as if they'd been passed at
+    # top level. Idempotent: `minsky run --once` ≡ `minsky --once`.
+    exec "$0" "${_run_args[@]}"
+    ;;
+
+  transform)
+    # `minsky transform [<path>] [--max-hours N] [--baseline-only] ...`
+    # Subcommand form of the previously `--transform` flag — the
+    # killer-feature "point at any repo, demo improvement" command.
+    # Delegates to `bin/minsky-default-session.sh` exactly as the flag
+    # path does (the dispatch site below detects `--transform` either
+    # as the first arg OR set in MINSKY_TRANSFORM_MODE env).
+    MINSKY_TRANSFORM_MODE=1 exec "$0" --transform "${@:2}"
+    ;;
+
+  daemon)
+    # `minsky daemon <verb>` — supervisor lifecycle consolidated under
+    # one noun. Each verb delegates to the existing implementation.
+    # nx-pattern (`nx daemon ...`) — gives the operator one mental
+    # bucket for "stuff that touches the launchd/systemd supervisor".
+    case "${2:-}" in
+      start) exec "$0" --daemon "${@:3}" ;;
+      stop) exec "$0" stop "${@:3}" ;;
+      status) exec "$0" status "${@:3}" ;;
+      logs) exec "$0" logs "${@:3}" ;;
+      doctor) exec "$0" doctor "${@:3}" ;;
+      restart)
+        # Compose stop + start as a single atomic verb.
+        "$0" stop "${@:3}" >/dev/null 2>&1 || true
+        exec "$0" --daemon "${@:3}"
+        ;;
+      ""|--help|-h)
+        cat <<'EOF'
+minsky daemon <verb> — supervisor lifecycle
+
+  start    — start the supervisor (was: minsky --daemon)
+  stop     — stop the supervisor (was: minsky stop)
+  status   — show running daemon + tail (was: minsky status)
+  logs     — tail the daemon log (was: minsky logs)
+  restart  — stop then start
+  doctor   — health probe (was: minsky doctor; equiv: setup.sh --doctor)
+EOF
+        ;;
+      *) echo "minsky daemon: unknown verb '$2'. See: minsky daemon --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  # ─── Phase 3: noun-spaces for resource introspection ─────────────
+
+  show)
+    # `minsky show <noun>` — read-only introspection. nx pattern.
+    _show_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      tasks)
+        # What's queued? Show the next picker choice + count by priority.
+        python3 "$_show_repo/scripts/pick_task.py" "$_show_repo/TASKS.md" 2>/dev/null \
+          | { read -r _next; echo "next-pick: ${_next:-<none>}"; }
+        echo ""
+        echo "tasks by priority:"
+        for _p in P0 P1 P2 P3; do
+          _ct=$(awk -v p="^## $_p\$" '
+            $0 ~ p {in_p=1; next}
+            /^## P/ {in_p=0}
+            in_p && /^- \[ \] `/ {n++}
+            END {print n+0}
+          ' "$_show_repo/TASKS.md")
+          printf "  %s: %d\n" "$_p" "$_ct"
+        done
+        ;;
+      task)
+        # `minsky show task <id>` — print the task block.
+        [ -z "${3:-}" ] && { echo "minsky show task: id required" >&2; exit 2; }
+        awk -v id="\`$3\`" '
+          $0 ~ "^- \\[ \\] " id { in_b=1 }
+          in_b { print }
+          in_b && /^- \[ \] / && !($0 ~ "^- \\[ \\] " id) { exit }
+        ' "$_show_repo/TASKS.md"
+        ;;
+      iterations)
+        # Per-iteration ledger — last 20 entries from .minsky/iteration-store.
+        if [ -d "$_show_repo/.minsky/iteration-store" ]; then
+          /bin/ls -t "$_show_repo/.minsky/iteration-store"/*.jsonl 2>/dev/null | head -20
+        else
+          echo "minsky show iterations: .minsky/iteration-store/ missing" >&2
+          exit 1
+        fi
+        ;;
+      config)
+        # Effective config — ~/.minsky/config.json + env-var overrides.
+        if [ -f "$HOME/.minsky/config.json" ]; then
+          jq . "$HOME/.minsky/config.json" 2>/dev/null || cat "$HOME/.minsky/config.json"
+        else
+          echo "{}"  # default
+        fi
+        ;;
+      supervisors)
+        # What's loaded into launchctl / systemctl?
+        echo "=== launchctl (Darwin) ==="
+        launchctl list 2>/dev/null | grep -i minsky || echo "  (none)"
+        echo ""
+        echo "=== systemctl --user (Linux) ==="
+        systemctl --user list-units 'minsky-*' 2>/dev/null || echo "  (not on Linux or no units)"
+        ;;
+      findings)
+        # Self-diagnose findings with actor labels.
+        node "$_show_repo/scripts/self-diagnose.mjs" --human 2>&1
+        ;;
+      ""|--help|-h)
+        cat <<'EOF'
+minsky show <noun> — read-only introspection
+
+  tasks         — queued tasks + next-pick + per-priority counts
+  task <id>     — one task block from TASKS.md
+  iterations    — recent iterations (~/.minsky/iteration-store/)
+  config        — effective ~/.minsky/config.json
+  supervisors   — loaded launchd/systemd units
+  findings      — self-diagnose findings with actor labels
+EOF
+        ;;
+      *) echo "minsky show: unknown noun '$2'. See: minsky show --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  list)
+    # `minsky list <noun>` — enumerative introspection (nx + openhands pattern).
+    _list_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      agents)
+        # Read the agent matrix — claude / devin / aider / openhands.
+        cat <<'EOF'
+Available cloud-agent backends (set via `minsky config set cloud_agent=<name>`):
+
+  openhands  — DEFAULT. Python SDK + future canonical `openhands solve` CLI (2026-06-01).
+               Install via `pnpm minsky:setup` (auto-installs the Python SDK into ~/.minsky/openhands-venv).
+  claude     — Anthropic Claude Code (`claude --print`). Requires ANTHROPIC_API_KEY.
+  devin      — Cognition Devin (`devin --print --prompt-file`). Requires DEVIN_API_KEY.
+  aider      — Aider CLI against local LLM via Ollama / LM Studio / MLX. No cloud key.
+
+Current setting:
+EOF
+        if [ -f "$HOME/.minsky/config.json" ] && command -v jq >/dev/null 2>&1; then
+          jq -r '"  cloud_agent: " + (.cloud_agent // "openhands (default)")' "$HOME/.minsky/config.json"
+        else
+          echo "  cloud_agent: openhands (default)"
+        fi
+        ;;
+      scripts)
+        # List the operator-facing scripts (used to be drowning in `pnpm run`).
+        cat <<'EOF'
+Operator commands (one canonical surface — `bin/minsky <subcommand>`):
+
+  Lifecycle:   init, setup, update, uninstall, reset
+  Run:         run [--once|--host|--hosts-dir], solve, transform
+  Daemon:      daemon {start|stop|status|logs|restart|doctor}
+  Show:        show {tasks|task <id>|iterations|config|supervisors|findings}
+  List:        list {agents|scripts}
+  Config:      config {show|set <k>=<v>}
+  Agent:       agent {list|set <name>|test <name>}
+  Audit:       audit {cto|runany|lint|chaos <test>|llm-throughput}
+  Reports:     metrics, changelog [snapshot], milestone check, m1 {metrics|observability|coverage}
+  Analyses:    trend, recommend, knowledge
+  Other:       qa, watch, consent, doctor, ui
+
+Dev surface (pnpm — for the minsky repo itself, not operator use):
+  test, test:watch, test:coverage, test:integration
+  lint, lint:fix, format, lint:md, typecheck, check
+  pre-pr-lint, prepare
+EOF
+        ;;
+      ""|--help|-h)
+        cat <<'EOF'
+minsky list <noun> — enumerative introspection
+
+  agents     — available cloud-agent backends
+  scripts    — operator-facing command surface
+EOF
+        ;;
+      *) echo "minsky list: unknown noun '$2'. See: minsky list --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  config)
+    # `minsky config <verb>` — config get/set (openhands pattern).
+    _cfg_path="$HOME/.minsky/config.json"
+    case "${2:-}" in
+      show|"")
+        if [ -f "$_cfg_path" ]; then
+          jq . "$_cfg_path" 2>/dev/null || cat "$_cfg_path"
+        else
+          echo "{}"
+        fi
+        ;;
+      set)
+        # `minsky config set <key>=<value>` — preserves other keys (jq merge).
+        [ -z "${3:-}" ] && { echo "minsky config set: <key>=<value> required" >&2; exit 2; }
+        _kv="$3"
+        _key="${_kv%%=*}"
+        _val="${_kv#*=}"
+        [ "$_key" = "$_kv" ] && { echo "minsky config set: malformed '$_kv', expected <key>=<value>" >&2; exit 2; }
+        mkdir -p "$HOME/.minsky"
+        [ -f "$_cfg_path" ] || echo "{}" > "$_cfg_path"
+        # Detect numeric / bool / string and merge atomically via temp file.
+        if [[ "$_val" =~ ^[0-9]+$ ]] || [ "$_val" = "true" ] || [ "$_val" = "false" ]; then
+          jq --arg k "$_key" --argjson v "$_val" '. + {($k): $v}' "$_cfg_path" > "$_cfg_path.tmp" && mv "$_cfg_path.tmp" "$_cfg_path"
+        else
+          jq --arg k "$_key" --arg v "$_val" '. + {($k): $v}' "$_cfg_path" > "$_cfg_path.tmp" && mv "$_cfg_path.tmp" "$_cfg_path"
+        fi
+        echo "minsky config set: ${_key}=${_val}"
+        ;;
+      --help|-h)
+        cat <<'EOF'
+minsky config <verb> — manage ~/.minsky/config.json
+
+  show              — print the effective config (default)
+  set <key>=<val>   — atomically set a key (preserves other keys)
+
+Examples:
+  minsky config show
+  minsky config set cloud_agent=openhands
+  minsky config set cloud_agent_model=ollama_chat/qwen3-coder:30b
+EOF
+        ;;
+      *) echo "minsky config: unknown verb '$2'. See: minsky config --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  agent)
+    # `minsky agent <verb>` — agent backend management (openhands pattern).
+    case "${2:-}" in
+      list)
+        # Delegate to `minsky list agents` so there's one source of truth.
+        exec "$0" list agents
+        ;;
+      set)
+        [ -z "${3:-}" ] && { echo "minsky agent set: <name> required (openhands|claude|devin|aider)" >&2; exit 2; }
+        exec "$0" config set "cloud_agent=$3"
+        ;;
+      test)
+        # Smoke-test the named backend.
+        [ -z "${3:-}" ] && { echo "minsky agent test: <name> required" >&2; exit 2; }
+        case "$3" in
+          openhands)
+            if [ -d "$HOME/.minsky/openhands-venv" ]; then
+              OPENHANDS_SUPPRESS_BANNER=1 "$HOME/.minsky/openhands-venv/bin/python" \
+                -c "from openhands.sdk import Agent, LLM, Conversation; print('openhands-ai: ready')"
+            else
+              echo "openhands: venv missing — run \`pnpm minsky:setup\` to install" >&2
+              exit 1
+            fi
+            ;;
+          claude)
+            echo "smoke" | claude --print 2>&1 | head -3
+            ;;
+          devin)
+            echo "smoke" > /tmp/minsky-devin-smoke.txt && devin --print --prompt-file /tmp/minsky-devin-smoke.txt 2>&1 | head -3
+            rm -f /tmp/minsky-devin-smoke.txt
+            ;;
+          aider)
+            command -v aider >/dev/null 2>&1 && echo "aider: ready" || { echo "aider: not on PATH" >&2; exit 1; }
+            ;;
+          *) echo "minsky agent test: unknown agent '$3'. See: minsky list agents" >&2; exit 2 ;;
+        esac
+        ;;
+      ""|--help|-h)
+        cat <<'EOF'
+minsky agent <verb> — agent-backend management
+
+  list              — list available agents
+  set <name>        — change cloud_agent in ~/.minsky/config.json
+  test <name>       — smoke-test the named backend
+EOF
+        ;;
+      *) echo "minsky agent: unknown verb '$2'. See: minsky agent --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  solve)
+    # `minsky solve <task-id|--task-file <path>>` — single-task without
+    # the daemon loop. openhands pattern (`openhands solve --task-file
+    # X`). Spawns one iteration against the current repo via the bash
+    # skeleton's iterate_host function — same code path the supervisor
+    # uses, just one-shot. The "killer-feature verb" — one command that
+    # names what minsky does for an operator.
+    _solve_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    _solve_task="${2:-}"
+    if [ "$_solve_task" = "--help" ] || [ "$_solve_task" = "-h" ] || [ -z "$_solve_task" ]; then
+      cat <<'EOF'
+minsky solve <task-id> [--dry-run] — run ONE iteration of a single task
+
+  <task-id>           — task ID from TASKS.md (exact match on `**ID**:`)
+  --task-file <path>  — ad-hoc brief file (skips the picker)
+  --dry-run           — print the resolved plan + exit (no spawn)
+
+The same code path the supervisor uses (bin/minsky-run.sh iterate_host),
+just one-shot. The killer-feature verb (openhands solve pattern).
+EOF
+      [ -z "$_solve_task" ] && exit 2 || exit 0
+    fi
+    # Pin the picker via env so iterate_host picks THIS task, not the top P0.
+    MINSKY_SOLVE_TASK_ID="$_solve_task" exec bash "$_solve_repo/bin/minsky-run.sh" \
+      --host "$_solve_repo" --once "${@:3}"
+    ;;
+
+  reset)
+    # `minsky reset [--hard]` — clear iteration store + claim records.
+    # nx pattern (`nx reset` clears cache + daemon). `--hard` also
+    # bootouts the supervisor.
+    _reset_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    _hard=0
+    for _r in "${@:2}"; do
+      [ "$_r" = "--hard" ] && _hard=1
+    done
+    if [ "$_hard" = "1" ]; then
+      "$0" stop >/dev/null 2>&1 || true
+    fi
+    [ -d "$_reset_repo/.minsky/iteration-store" ] && rm -rf "$_reset_repo/.minsky/iteration-store"
+    [ -d "$_reset_repo/.minsky/claims" ]          && rm -rf "$_reset_repo/.minsky/claims"
+    [ -f "$_reset_repo/.minsky/tick-loop.out.log" ] && : > "$_reset_repo/.minsky/tick-loop.out.log"
+    [ -f "$_reset_repo/.minsky/tick-loop.err.log" ] && : > "$_reset_repo/.minsky/tick-loop.err.log"
+    echo "minsky reset: cleared iteration store + claims + truncated logs"
+    [ "$_hard" = "1" ] && echo "minsky reset --hard: supervisor stopped (re-run \`minsky daemon start\` to resume)"
+    exit 0
+    ;;
+
+  setup)
+    # `minsky setup` — subcommand alias for `pnpm minsky:setup` /
+    # `setup.sh --setup`. Renders unit files + bootstraps the
+    # supervisor + installs openhands SDK.
+    _setup_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    exec bash "$_setup_repo/setup.sh" --setup "${@:2}"
+    ;;
+
+  ui)
+    if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
+      cat <<'EOF'
+Usage: minsky ui [--port N]
+
+Start the local dashboard web app at http://localhost:$PORT
+(default 8181). The dashboard reads ~/.minsky/iterations.jsonl and
+shows the per-host stability, on-call decisions, and recent
+iteration outcomes.
+
+Env vars:
+  PORT       Listen port (default 8181).
+
+Stop with Ctrl-C or `minsky stop`.
+
+See also: `minsky status` (CLI snapshot of the same state),
+`minsky logs` (live tail).
+EOF
+      exit 0
+    fi
+    # `minsky ui` — subcommand alias for `pnpm minsky:ui`.
+    _ui_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    PORT="${PORT:-8181}" exec bash "$_ui_repo/distribution/run-dashboard-web.sh" "${@:2}"
+    ;;
+esac
+
+# ── 1c. Early `--once` dispatch (no repo resolver needed) ────────
+#
+# `minsky --once <host>` is a fast probe — it shells out to
+# bin/minsky-run.sh which is found via `realpath $0`, not via the
+# MINSKY_REPO_PATH resolver below. Dispatch it here BEFORE the
+# resolver runs so that bats tests (which set HOME to a tmp dir
+# without ~/minsky) still work.
+#
+# This is the same trade-off the subcommand-case dispatch above
+# makes: every subcommand that doesn't need MINSKY_REPO_PATH should
+# resolve before the resolver, because the resolver is the slow +
+# brittle part of startup.
+_early_use_once=0
+_early_once_args=()
+_early_in_once=0
+for _early_arg in "$@"; do
+  if [ "$_early_in_once" = "1" ]; then
+    _early_once_args+=("$_early_arg")
+    continue
+  fi
+  if [ "$_early_arg" = "--once" ]; then
+    _early_use_once=1
+    _early_in_once=1
+  fi
+done
+if [ "$_early_use_once" = "1" ]; then
+  # Safe-expansion idiom: bash 3.2 + `set -u` raises on empty arrays.
+  _run_iter_once "${_early_once_args[@]+"${_early_once_args[@]}"}"
+  exit $?
+fi
+
+# ── 2. Resolve the minsky repo via the pure `resolveMinskyRepo` ─
+#
+# The resolver lives in TypeScript; ship a tiny node inline-eval that
+# calls the compiled `dist/shim-resolve.js` OR falls back to tsx if the
+# package isn't built yet (dev ergonomics — the operator should never
+# have to `pnpm build` before the shim works).
+SHIM_HOME="${HOME:-/root}"
+SHIM_ENV_REPO="${MINSKY_REPO:-}"
+
+# Self-resolution candidate: the directory that contains THIS bin/minsky,
+# one level up. When invoked from an unpacked npx package
+# (`npx -y @fyodoriv/minsky`), the package IS the minsky repo — but the
+# resolver historically only checked $MINSKY_REPO and HOME-relative clone
+# paths, so the npx artifact could never find itself. Compute the package
+# root here (exec-bit-independent realpath) and feed it to the resolver as
+# a first-class candidate. See blocker (A), TASKS.md
+# `npx-integrated-run-blockers`.
+SHIM_SELF_ROOT="$(dirname "$(dirname "$(_minsky_realpath "$0")")")"
+export SHIM_SELF_ROOT
+
+# The resolver runs in a command substitution. Under `set -euo pipefail` a
+# non-zero exit from `$( … )` in a simple assignment ABORTS the script —
+# which historically killed `bin/minsky` BEFORE the RESOLVE_EXIT/echo
+# recovery block could print the actionable error (the `2>&1` capture
+# folded stderr into the dead variable). Disable `set -e` across the
+# substitution so the resolver's exit code is observable, then re-enable
+# it. stdout carries ONLY the resolved path; stderr carries the actionable
+# error — kept on separate streams so the error actually reaches the
+# operator. See blocker (A), TASKS.md `npx-integrated-run-blockers`.
+set +e
+MINSKY_REPO_PATH="$(node --input-type=module -e "
+  import { existsSync } from 'node:fs';
+  import { homedir } from 'node:os';
+
+  // Inline copy of the resolver's deterministic chain. Keeps the
+  // shim zero-dependency: no need to resolve the minsky repo to
+  // locate the resolver that tells us where the minsky repo is.
+  // Search order is most-recommended layout first, niche layouts after.
+  const FALLBACKS = [
+    'minsky',
+    'code/minsky',
+    'src/minsky',
+    'apps/minsky',
+    'apps/tooling/minsky',
+  ];
+  const home = homedir();
+  const envRepo = process.env.MINSKY_REPO;
+  if (envRepo && envRepo.length > 0) {
+    if (existsSync(envRepo)) {
+      process.stdout.write(envRepo);
+      process.exit(0);
+    }
+    process.stderr.write(\`minsky: MINSKY_REPO=\${envRepo} but path does not exist\\n\`);
+    process.exit(1);
+  }
+  // Self-resolution: the unpacked package directory that ships THIS
+  // bin/minsky. Accept it only when it carries a runnable bash runner
+  // (a non-empty bin/minsky-run.sh) so an arbitrary parent dir can't
+  // false-positive. This is the npx path's primary candidate.
+  const selfRoot = process.env.SHIM_SELF_ROOT;
+  if (selfRoot && selfRoot.length > 0 && existsSync(\`\${selfRoot}/bin/minsky-run.sh\`)) {
+    process.stdout.write(selfRoot);
+    process.exit(0);
+  }
+  for (const rel of FALLBACKS) {
+    const full = \`\${home}/\${rel}\`;
+    if (existsSync(full)) {
+      process.stdout.write(full);
+      process.exit(0);
+    }
+  }
+  process.stderr.write('minsky: could not find the minsky repo. Looked at MINSKY_REPO (unset), the package dir (' + (selfRoot || 'unknown') + '), ~/minsky, ~/code/minsky, ~/src/minsky, ~/apps/minsky. Set MINSKY_REPO=/path/to/minsky or clone to ~/minsky.\\n');
+  process.exit(1);
+")"
+RESOLVE_EXIT=$?
+set -e
+if [ $RESOLVE_EXIT -ne 0 ]; then
+  # The resolver already wrote the actionable error to its own stderr,
+  # which inherits this shell's stderr (no capture) — so it's already on
+  # the terminal. Exit with the same code; no echo needed.
+  exit 1
+fi
+export SHIM_HOME SHIM_ENV_REPO
+
+# ── 3. Locate the runner bin + forward ──────────────────────
+# Pre-scan args for dispatches that DON'T need the Node runner bin
+# (--transform → bin/minsky-default-session.sh; --bash-runner →
+# bin/minsky-run.sh). Otherwise the runner-bin existence check would
+# require `pnpm install` even when the operator is dogfooding a pure-
+# bash flow. The full arg parse later still owns flag stripping; this
+# is just a "do we need the Node runner at all?" probe.
+_NEEDS_NODE_RUNNER=1
+for arg in "$@"; do
+  case "$arg" in
+    --transform|--bash-runner) _NEEDS_NODE_RUNNER=0 ;;
+  esac
+done
+RUNNER_BIN="$MINSKY_REPO_PATH/novel/cross-repo-runner/bin/minsky-run.mjs"
+# Note: a missing $RUNNER_BIN is no longer a hard-fail here. Per Path
+# A Phase 7 (`docs/plans/2026-05-24-path-a-aggressive-cut.md`), the
+# Node runner is gutted and scheduled for deletion; the bash runner
+# `bin/minsky-run.sh` is canonical. Every code path that would exec
+# `node "$RUNNER_BIN"` below guards on `[ -f "$RUNNER_BIN" ]` and
+# falls back to the bash runner when it's gone. See TASKS.md
+# `daemon-cold-spawn-mjs-default-flip` for the bug class this closes
+# (cold-spawn `MODULE_NOT_FOUND` storm in `~/.minsky/daemon.log`).
+
+# ── 3b. Parse --local flag ─────────────────────────────────
+# `minsky --local [args...]` sets the env vars for local-only mode
+# and strips --local from the args before forwarding. Combinable
+# with --daemon: `minsky --local --daemon --hosts-dir <repos-parent>`.
+#
+# Also parses --bash-runner: when set (or MINSKY_BASH_RUNNER=1),
+# dispatch to bin/minsky-run.sh (the Path A bash port) instead of the
+# Node runner. Opt-in only — default stays the Node runner. Phase 7c
+# of `docs/plans/2026-05-24-path-a-aggressive-cut.md`. Operators use
+# this to live-fire-smoke the bash port; once parity is confirmed
+# end-to-end the default flips and the Node runner gets deleted in
+# Phase 7b.
+MINSKY_ARGS=()
+USE_BASH_RUNNER="${MINSKY_BASH_RUNNER:-0}"
+USE_TRANSFORM="0"
+# `--once` is handled in the EARLY-dispatch block before the resolver
+# runs (search for "1c. Early --once dispatch" above), so we don't
+# parse it here. If the user passed `--once` we already exited.
+for arg in "$@"; do
+  if [ "$arg" = "--local" ]; then
+    export MINSKY_LLM_PROVIDER="local-only"
+    export MINSKY_LOCAL_LLM=1
+  elif [ "$arg" = "--bash-runner" ]; then
+    USE_BASH_RUNNER=1
+  elif [ "$arg" = "--transform" ]; then
+    # Vertical-slice-3 flag: dispatch to bin/minsky-default-session.sh
+    # against $PWD. Composes bootstrap (#807) + baseline (#812) + run
+    # (#797 + #808) + report (#813). See bin/minsky-default-session.sh
+    # for the orchestration. The remaining args are forwarded so
+    # operators can pass `--max-hours`, `--baseline-only`, etc.
+    USE_TRANSFORM=1
+  else
+    MINSKY_ARGS+=("$arg")
+  fi
+done
+if [ "${#MINSKY_ARGS[@]}" -gt 0 ]; then
+  set -- "${MINSKY_ARGS[@]}"
+else
+  set --
+fi
+
+# Survive terminal close (SIGHUP). IDE terminals (Windsurf, Cursor,
+# VS Code) send SIGHUP to child processes when the terminal tab or
+# window closes. An autonomous minsky run (10h+) must not die because
+# the operator restarted their IDE. `trap '' HUP` sets the signal
+# disposition to "ignore" in this shell; POSIX guarantees ignored
+# signals survive exec, so the node process inherits the immunity.
+# SIGTERM from `minsky stop` is unaffected (not trapped here).
+# Note: the `nohup` binary achieves the same, but some managed Macs flag
+# it — this builtin approach is equivalent.
+trap '' HUP
+
+# ── 3b. Smart auto-attach ────────────────────────────────────
+# When invoked without subcommands, do the smartest thing:
+#   1. Run health checks (doctor) FIRST — if any critical check fails,
+#      print + exit non-zero. The operator's machine isn't ready.
+#   2. If a daemon is already running for $PWD → attach with watch.
+#   3. Otherwise → start one in daemon mode + attach.
+# This makes `minsky` in a folder always do the right thing:
+#   - machine broken? → tell the operator exactly what to fix
+#   - daemon running for this host? → attach (watch)
+#   - no daemon? → start one in daemon mode + attach (watch)
+# Operator directive 2026-05-18: "run minsky in a folder → it just works"
+# Extended 2026-05-25 with the doctor preamble (rule #16 CLI consolidation
+# corollary — `minsky` with no args owns the smartest defaults).
+
+_daemon_running_for_host() {
+  # Returns 0 if a daemon is running and targeting a path that contains $1
+  [ -f "$MINSKY_DAEMON_PID" ] || return 1
+  local pid
+  pid=$(cat "$MINSKY_DAEMON_PID" 2>/dev/null) || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  # Check if the running daemon targets the requested host
+  ps -p "$pid" -o args= 2>/dev/null | grep -q "$1" 2>/dev/null
+}
+
+# If no subcommand and no --daemon flag, try smart auto-attach.
+# Skip auto-attach when --transform or --bash-runner is in the
+# original arg list — those dispatch paths do not want the "attach
+# to running daemon" UX. (Note: the arg-strip block above already
+# consumed --transform / --bash-runner from $@, so we read the
+# USE_TRANSFORM / USE_BASH_RUNNER vars set there.)
+if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" != "--daemon" ] && [ "${1:-}" != "status" ] && [ "${1:-}" != "stop" ] && [ "${1:-}" != "logs" ] && [ "${1:-}" != "watch" ] && [ "${1:-}" != "doctor" ]; then
+  # Step 0: npx-install bootstrap (`minsky-npx-install-and-run`).
+  # When the literal first interaction is `npx minsky` (no subcommand,
+  # no prior install), the operator has NO `~/.minsky/config.json` yet —
+  # the smart-attach block below would start a daemon against an
+  # un-init'd machine. Instead, when ALL THREE of the following hold:
+  #   (i)   this is an npx invocation (npm sets `npm_lifecycle_event`
+  #         and `npm_config_user_agent` for `npx <pkg>` spawns), AND
+  #   (ii)  no `~/.minsky/config.json` exists (truly fresh machine), AND
+  #   (iii) an interactive TTY is attached (so init's prompts make sense
+  #         and we don't clobber a scripted/CI run),
+  # we prepend the `init` flow against the cwd, THEN fall through to the
+  # normal start-or-attach behaviour. The result: a fresh operator types
+  # ONE shell line (`npx minsky`) and lands in a live iteration.
+  #
+  # Escape hatch: MINSKY_SKIP_NPX_INIT=1 forces the legacy
+  # start-or-attach path even under npx (for non-interactive npx runs in
+  # CI that bring their own config). Rule #11: the bootstrap is the
+  # DEFAULT for the npx path, with a documented opt-out.
+  #
+  # `npx minsky --version` never reaches here — it short-circuits in the
+  # early `--version` case (no subcommand-stripping side-effects).
+  _is_npx=0
+  if [ -n "${npm_lifecycle_event:-}" ] || [ -n "${npm_config_user_agent:-}" ]; then
+    _is_npx=1
+  fi
+  if [ "$_is_npx" = "1" ] \
+    && [ "${MINSKY_SKIP_NPX_INIT:-0}" != "1" ] \
+    && [ ! -f "$MINSKY_STATE_DIR/config.json" ] \
+    && [ -t 0 ] && [ -t 1 ]; then
+    echo "minsky: first run via npx — no config found, bootstrapping for $(basename "$(pwd)")..."
+    # `init` against cwd writes ~/.minsky/config.json. It refuses if cwd
+    # is not a git repo (exit 2) — surface that to the operator instead
+    # of silently starting a daemon against a non-repo.
+    if ! "$0" init "$(pwd)"; then
+      echo "minsky: bootstrap could not initialize this folder." >&2
+      echo "  hint: cd into a git repo first, then re-run \`npx minsky\`." >&2
+      exit 2
+    fi
+    echo ""
+    # Fall through to the start-or-attach block below — config now exists.
+  fi
+
+  # Step 1: doctor preamble. Run the existing `doctor` check; on
+  # critical fail, print + exit. Operator gets actionable hints.
+  # Skipped when MINSKY_SKIP_DOCTOR=1 (escape hatch for known-degraded
+  # environments where the operator wants to attach anyway).
+  if [ "${MINSKY_SKIP_DOCTOR:-0}" != "1" ]; then
+    # Run doctor in quiet mode — only FAIL/WARN lines print. If it
+    # exits non-zero, re-run loud so the operator sees what failed.
+    if ! "$0" doctor --quiet >/dev/null 2>&1; then
+      echo ""
+      echo "minsky: pre-flight failed. Health-check details:"
+      echo ""
+      "$0" doctor || true
+      echo ""
+      echo "minsky: fix the FAIL lines above, then re-run \`minsky\` (or set MINSKY_SKIP_DOCTOR=1 to bypass)."
+      exit 1
+    fi
+  fi
+
+  # Determine the target host from args or cwd
+  _target_host=""
+  for _a in "$@"; do
+    case "$_a" in
+      --host) _next_is_host=1 ;;
+      --host=*) _target_host="${_a#--host=}" ;;
+      *) [ "${_next_is_host:-}" = "1" ] && _target_host="$_a" && _next_is_host="" ;;
+    esac
+  done
+
+  # Zero-arg scoping (TASKS.md `runany-zero-arg-entrypoint`): with NO explicit
+  # --host, scope the conductor to the cwd's filesystem shape. The pure
+  # resolver (scripts/runany-context.mjs) classifies cwd as a git-repo /
+  # nested-repos tree / plain-dir and emits the daemon argv:
+  #   - git-repo / plain-dir  → `--host <cwd>`      (single-host)
+  #   - nested-repos          → `--hosts-dir <cwd>` (walk every child repo)
+  # This is the only new code path — it composes the existing --host /
+  # --hosts-dir runner modes (rule #1) so `minsky` with zero args "just
+  # works" in any folder + all subfolders (operator directive 2026-05-16).
+  # The context root (cwd) is always the watch / liveness target; the daemon
+  # launch args vary by scope. Degrades to the prior single-host behaviour if
+  # the resolver is unavailable (rule #6 — a broken probe must not block the
+  # launch).
+  _launch_args=()
+  if [ -z "$_target_host" ]; then
+    _target_host="$(pwd)"
+    _runany_resolver="$MINSKY_REPO_PATH/scripts/runany-context.mjs"
+    if [ -f "$_runany_resolver" ]; then
+      # read the space-joined argv (`--host <p>` or `--hosts-dir <p>`).
+      _runany_argv="$(node "$_runany_resolver" "$_target_host" 2>/dev/null || echo "")"
+      if [ -n "$_runany_argv" ]; then
+        # Deliberate word-split of the two-token argv (`--host <p>` etc.).
+        # shellcheck disable=SC2206
+        _launch_args=($_runany_argv)
+      fi
+    fi
+  fi
+  # Fallback (explicit --host, or resolver unavailable): single host at cwd.
+  [ "${#_launch_args[@]}" -eq 0 ] && _launch_args=(--host "$_target_host")
+
+  if [ "$(uname)" = "Darwin" ] && [ -f "$HOME/Library/LaunchAgents/com.minsky.daemon.plist" ] && _minsky_autostart_enabled; then
+    MINSKY_INSTALL_DAEMON_QUIET=1 "$0" install-daemon "$_target_host" 2>/dev/null || true
+  fi
+
+  if _daemon_running_for_host "$_target_host"; then
+    _pid=$(cat "$MINSKY_DAEMON_PID")
+    echo "minsky: daemon already running (PID $_pid) for $(basename "$_target_host")"
+    echo "        attaching with watch... (Ctrl-C to detach, daemon keeps running)"
+    echo ""
+    sleep 1
+    exec "$0" watch "$_target_host"
+  fi
+
+  # No daemon running — start one and attach. Persistent supervisors are
+  # operator-explicit (`minsky install-daemon`) and are only refreshed above
+  # once the plist already exists.
+  echo "minsky: no daemon running for $(basename "$_target_host"). Starting (scope: ${_launch_args[0]})..."
+  "$0" --daemon "${_launch_args[@]}"
+
+  sleep 2
+  exec "$0" watch "$_target_host"
+fi
+
+# ── 4. Daemon mode (--daemon) ────────────────────────────────
+# `minsky --daemon [args...]` backgrounds the runner, logs to
+# ~/.minsky/daemon.log, writes a PID file, and exits immediately.
+# The process survives terminal close + IDE restart (SIGHUP-immune
+# from the trap above + fully detached from the controlling TTY).
+#
+# Lifecycle:
+#   minsky --daemon --hosts-dir <repos-parent>   → start
+#   minsky status                                → PID + uptime + log tail
+#   minsky logs                                  → tail -f daemon.log
+#   minsky stop                                  → SIGTERM → graceful drain
+if [ "${1:-}" = "--daemon" ]; then
+  shift  # consume --daemon, forward remaining args to minsky-run
+
+  # Guard: don't start a second daemon
+  if [ -f "$MINSKY_DAEMON_PID" ]; then
+    existing_pid=$(cat "$MINSKY_DAEMON_PID")
+    if kill -0 "$existing_pid" 2>/dev/null; then
+      echo "minsky: daemon already running (PID $existing_pid). Stop it first: minsky stop" >&2
+      exit 1
+    fi
+    # Stale PID from a crash/reboot — clean up
+    echo "minsky: cleaning stale PID $existing_pid (process not running)"
+    rm -f "$MINSKY_DAEMON_PID"
+  fi
+
+  mkdir -p "$MINSKY_STATE_DIR"
+
+  # Fresh-clone bootstrap guard (rule #6): refuse to background a daemon
+  # against an unbuilt tree. Without this the runner would write a
+  # node ERR_MODULE_NOT_FOUND storm into daemon.log before KeepAlive
+  # gives up. See TASKS.md `minsky-cli-fresh-clone-bootstrap`.
+  _minsky_assert_built "$MINSKY_REPO_PATH" || exit 1
+
+  # Crash-recovery for the host repo. Delegates to the
+  # `reset-host-if-crashed` subcommand which:
+  #   - keeps the working tree intact if `<sidecar>/graceful-stop`
+  #     exists (the previous `minsky stop` wrote it);
+  #   - stashes any dirty state with a recoverable label and then
+  #     checks out the default branch if the sentinel is missing
+  #     (crashed shutdown).
+  # The old in-line block ran `git clean -fd` which violates the
+  # global multi-agent git safety rules (deletes other agents'
+  # untracked files). Now: stash, never delete. (rule #17 fix,
+  # 2026-05-19; see TASKS.md `minsky-bin-git-clean-fd-multi-agent-
+  # safety-violation`.)
+  _host_arg=""
+  _prev_was_host=0
+  for _a in "$@"; do
+    if [ "$_prev_was_host" = "1" ]; then
+      _host_arg="$_a"
+      break
+    fi
+    [ "$_a" = "--host" ] && _prev_was_host=1 || _prev_was_host=0
+  done
+  if [ -n "$_host_arg" ] && [ -d "$_host_arg/.git" ]; then
+    "$0" reset-host-if-crashed \
+      --host "$_host_arg" \
+      --sentinel "$_host_arg/.minsky/graceful-stop" || true
+  fi
+
+  # Background the runner. stdin from /dev/null, stdout+stderr to the
+  # daemon log (append — preserves history across restarts). The
+  # subshell + disown detaches from the controlling terminal's process
+  # group so the node process is not a child of this shell.
+  # Path A Phase 7 cold-spawn guard (rule #6 stay-alive): when the
+  # Node runner has been gutted, fall through to the bash runner
+  # instead of execing `node` against a missing .mjs (which writes
+  # 59K MODULE_NOT_FOUND lines into the daemon log before KeepAlive
+  # gives up). See TASKS.md `daemon-cold-spawn-mjs-default-flip`.
+  if [ -f "$RUNNER_BIN" ] && [ "${MINSKY_NODE_RUNNER:-0}" != "0-explicit-bash" ]; then
+    MINSKY_NON_INTERACTIVE=1 node "$RUNNER_BIN" "$@" \
+      < /dev/null \
+      >> "$MINSKY_DAEMON_LOG" 2>&1 &
+  else
+    MINSKY_NON_INTERACTIVE=1 bash "$MINSKY_REPO_PATH/bin/minsky-run.sh" "$@" \
+      < /dev/null \
+      >> "$MINSKY_DAEMON_LOG" 2>&1 &
+  fi
+  daemon_pid=$!
+  disown "$daemon_pid" 2>/dev/null || true
+  echo "$daemon_pid" > "$MINSKY_DAEMON_PID"
+
+  echo "minsky daemon started (PID $daemon_pid)"
+  echo "  log: $MINSKY_DAEMON_LOG"
+  echo "  status: minsky status"
+  echo "  follow: minsky logs"
+  echo "  stop:   minsky stop"
+  exit 0
+fi
+
+# ── 5. Foreground mode (default) ─────────────────────────────
+# Forward every arg verbatim. The runner bin itself handles `--help`,
+# cwd auto-detect, countdown banner, autonomous defaults, etc.
+# SIGHUP-immune from the trap above.
+if [ "$USE_TRANSFORM" = "1" ]; then
+  # Vertical slice 3 dispatch (TASKS.md `minsky-default-8h-repo-
+  # transformation` P0): orchestrate bootstrap + baseline + run +
+  # report against $PWD. See bin/minsky-default-session.sh.
+  TRANSFORM_BIN="$MINSKY_REPO_PATH/bin/minsky-default-session.sh"
+  if [ ! -x "$TRANSFORM_BIN" ]; then
+    echo "minsky: --transform requested but $TRANSFORM_BIN is not executable. Run \`chmod +x $TRANSFORM_BIN\`." >&2
+    exit 1
+  fi
+  echo "minsky: --transform → orchestrating bootstrap + baseline + run + report against $PWD" >&2
+  exec bash "$TRANSFORM_BIN" "$PWD" "$@"
+fi
+if [ "$USE_BASH_RUNNER" = "1" ]; then
+  # Phase 7c: dispatch to the Path A bash port instead of the Node
+  # runner. Only the multi-host walker path is supported today; bash
+  # rejects unknown flags with exit 2. See `docs/plans/2026-05-24-
+  # path-a-aggressive-cut.md` § Phase 7c for the scope.
+  BASH_RUNNER_BIN="$MINSKY_REPO_PATH/bin/minsky-run.sh"
+  if [ ! -x "$BASH_RUNNER_BIN" ]; then
+    echo "minsky: --bash-runner requested but $BASH_RUNNER_BIN is not executable. Run \`chmod +x $BASH_RUNNER_BIN\`." >&2
+    exit 1
+  fi
+  echo "minsky: using bash runner ($BASH_RUNNER_BIN) — Phase 7c opt-in" >&2
+  exec bash "$BASH_RUNNER_BIN" "$@"
+fi
+# Foreground default. Same cold-spawn guard as the daemon path above:
+# when the Node runner is missing (Path A Phase 7 gut state),
+# fall through to the bash runner instead of execing `node`
+# against a non-existent .mjs. See TASKS.md
+# `daemon-cold-spawn-mjs-default-flip`.
+if [ -f "$RUNNER_BIN" ]; then
+  exec node "$RUNNER_BIN" "$@"
+fi
+BASH_RUNNER_FALLBACK="$MINSKY_REPO_PATH/bin/minsky-run.sh"
+# Fresh-clone bootstrap guard (rule #6): when neither runnable
+# entrypoint exists (partial/interrupted install left the tree
+# unbuilt), emit the actionable `pnpm install` hint instead of a raw
+# `bash: ...: No such file` / node module-resolution error. See
+# TASKS.md `minsky-cli-fresh-clone-bootstrap`.
+if [ ! -x "$BASH_RUNNER_FALLBACK" ]; then
+  _minsky_assert_built "$MINSKY_REPO_PATH"
+  exit 1
+fi
+exec bash "$BASH_RUNNER_FALLBACK" "$@"

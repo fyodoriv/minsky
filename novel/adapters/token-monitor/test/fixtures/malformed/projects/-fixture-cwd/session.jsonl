@@ -1,0 +1,3 @@
+{"type":"assistant","timestamp":"2026-05-04T12:00:00.000Z","message":{"id":"msg_100","usage":{"input_tokens":400,"output_tokens":600,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"service_tier":"standard"}},"requestId":"req_100"}
+{this is definitely not valid JSON, missing quotes and a closing brace
+{"type":"assistant","timestamp":"2026-05-04T12:30:00.000Z","message":{"id":"msg_101","usage":{"input_tokens":1000,"output_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"service_tier":"standard"}},"requestId":"req_101"}

@@ -1,0 +1,76 @@
+// Heal-helper registry.
+//
+// Each automated heal helper exports `detect()`, `apply()`, `verify()`
+// with helper-specific seam types. This file re-exports them plus a
+// `catalogue` map for the chaos test's `test.each` iteration.
+//
+// Adding a new heal helper: add its module here AND a Given/When/Then
+// scenario block to user-stories/007-agent-self-heals-catalogued-failures.md
+// BEFORE writing the helper's test file (AGENTS.md rule #3).
+
+export * as healAgentRateLimited from "./heal-agent-rate-limited.js";
+export * as healBriefTooLongForContextWindow from "./heal-brief-too-long-for-context-window.js";
+export * as healClaudeAccountRateLimit from "./heal-claude-account-rate-limit.js";
+export * as healCorruptStateJson from "./heal-corrupt-state-json.js";
+export * as healNetworkPartitionMidSpawn from "./heal-network-partition-mid-spawn.js";
+export * as healOllamaDown from "./heal-ollama-down.js";
+export * as healPartialConfigWrite from "./heal-partial-config-write.js";
+export * as healStalePid from "./heal-stale-pid.js";
+export * as healStaleTsbuildinfo from "./heal-stale-tsbuildinfo.js";
+export * as healStuckCommand from "./heal-stuck-command.js";
+export * as healWorktreeMissingNodeModules from "./heal-worktree-missing-node-modules.js";
+
+export type { ApplyResult, DetectResult, HealEvent, HealOutcome, VerifyResult } from "./types.js";
+
+/** Catalogue of automated heal helpers. The chaos test iterates this list. */
+export const automatedHealCatalogue = [
+  { id: "stale-pid", signal: "stale-pid", helperModule: "heal-stale-pid" },
+  {
+    id: "missing-node-modules",
+    signal: "missing-node-modules",
+    helperModule: "heal-worktree-missing-node-modules",
+  },
+  {
+    id: "stale-tsbuildinfo",
+    signal: "stale-tsbuildinfo",
+    helperModule: "heal-stale-tsbuildinfo",
+  },
+  { id: "stuck-command", signal: "stuck-command", helperModule: "heal-stuck-command" },
+  {
+    id: "corrupt-state-json",
+    signal: "corrupt-state-json",
+    helperModule: "heal-corrupt-state-json",
+  },
+  {
+    id: "partial-config-write",
+    signal: "partial-config-write",
+    helperModule: "heal-partial-config-write",
+  },
+  {
+    id: "agent-rate-limited",
+    signal: "agent-rate-limited",
+    helperModule: "heal-agent-rate-limited",
+  },
+  {
+    id: "ollama-down",
+    signal: "ollama-down",
+    helperModule: "heal-ollama-down",
+  },
+  {
+    id: "network-partition-mid-spawn",
+    signal: "network-partition-mid-spawn",
+    helperModule: "heal-network-partition-mid-spawn",
+  },
+  {
+    id: "brief-too-long-for-context-window",
+    signal: "brief-too-long-for-context-window",
+    helperModule: "heal-brief-too-long-for-context-window",
+  },
+  {
+    id: "claude-account-rate-limit",
+    signal: "claude-account-rate-limit",
+    helperModule: "heal-claude-account-rate-limit",
+  },
+] as const;
+
+export type AutomatedHealEntry = (typeof automatedHealCatalogue)[number];

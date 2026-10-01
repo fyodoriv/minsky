@@ -1,0 +1,62 @@
+id: rule-11-flake-detection-cli-2026-05-04
+hypothesis: |
+  Sub-task 2 of `rule-11-flake-detection-lint` (P0). Builds the
+  I/O boundary on top of sub-task 1's pure `detectFlakeRate` seam
+  (Martin, *Clean Architecture*, 2017, ch. 22 — pure function at
+  the centre, I/O at the edge). The CLI ingests `gh run list` JSON
+  via either:
+    (a) `--fixture <path>` — read a JSON array from disk; hermetic
+        for CI; sub-task 4 will gate the CI job on a cached fixture.
+    (b) `--workflows ci,lighthouse,...` — live `gh run list` per
+        workflow with a 30s timeout (rule #9's "every external call
+        has a cap" clause).
+  Both paths produce a `WorkflowRun[]` and call `detectFlakeRate`.
+  The CLI prints one line per `FlakeReport` to stdout
+  (`<workflow>:<job> rate=<n>/<d> (<pct>%)`) and exits 1 when at
+  least one report surfaces; 0 when clean; 2 on bad input.
+
+  No source-of-truth changes — sub-task 1's pure function is
+  imported unchanged. Sub-task 3 will layer `emitPatches` on top of
+  the same shim; sub-task 4 wires the CLI as a CI job.
+success: |
+  - `node scripts/check-rule-11-no-flaky-gates.mjs --fixture=test/fixtures/rule-11-flake-detection/clean.json`
+    exits 0 with `rule-11 ok:` on stdout.
+  - `node scripts/check-rule-11-no-flaky-gates.mjs --fixture=test/fixtures/rule-11-flake-detection/flaky.json`
+    exits 1 with `ci:lighthouse-mobile rate=2/7 (28.6%)` on stdout.
+  - `pnpm vitest run scripts/check-rule-11-no-flaky-gates.test.mjs`
+    runs ≥14 paired test cases (9 pure-fn from sub-task 1 + ≥5 new
+    CLI cases: argparse, formatReportLine, runCli clean / flaky /
+    usage), all green.
+  - `pnpm typecheck` and `pnpm exec biome check` on the touched
+    files exit 0.
+pivot: |
+  Two pivot paths pre-registered:
+    1. If `gh run list`'s JSON shape changes (a renamed field
+       breaks `WorkflowRun` parsing), the CLI's `ingestFromGh`
+       function is the only place the change lands. The pure
+       function above stays unchanged because the parsed
+       `WorkflowRun[]` shape is the seam, not the gh JSON shape.
+    2. If the live `gh run list` rate-limit blocks the 30-day
+       window across N workflows, sub-task 4 will pivot to a cached
+       ingestion model (a separate `flake-stats-collector.yml` runs
+       nightly and writes to `flake-stats/<workflow>-30d.json`; the
+       CI job reads from disk). The fixture path through this
+       sub-task's CLI is the existing affordance for that pivot.
+measurement: |
+  pnpm vitest run scripts/check-rule-11-no-flaky-gates.test.mjs --reporter=json 2>/dev/null | node -e 'let d=""; process.stdin.on("data", c=>d+=c); process.stdin.on("end", ()=>{ const j=JSON.parse(d); const a=require("assert"); a.ok(j.numFailedTests === 0, "no failed tests"); a.ok(j.numPassedTests >= 14, "at least 14 paired tests, got " + j.numPassedTests); });'
+anchor: |
+  Martin, R. C., *Clean Architecture*, Pearson, 2017, Ch. 22
+  ("The Clean Architecture" — pure-function seam at the centre,
+  I/O at the edge; sub-task 2's CLI is the *outer* ring around
+  sub-task 1's *inner* `detectFlakeRate`).
+  Memon, A., Gao, Z., Nguyen, B., et al., "Taming Google-Scale
+  Continuous Testing", *ICSE-SEIP* 2017 (the per-job same-SHA
+  pair primitive — Google's DETECTOR uses the same shape, gated
+  behind a CLI for operator inspection).
+  vision.md § 11 (rule #11 — the CLI is the operator's affordance
+  for the auto-detect ratchet; sub-task 4's CI wiring closes the
+  loop).
+  rule #2 (every external dep behind an interface — `gh` is the
+  dep; `ingestFromGh` is the seam; the pure function never sees
+  `gh`).
+timeout_seconds: 60

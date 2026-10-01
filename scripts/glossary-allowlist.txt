@@ -1,0 +1,161 @@
+# Allowlist for scripts/check-rule-5-glossary-discipline.mjs.
+#
+# One identifier per line. Blank lines and `#` comments ignored. Inline
+# comments (`term  # justification`) supported.
+#
+# Discipline (rule #10 ratchet rule + rule #1):
+#   - Add a term here ONLY when it is a standard CS / web acronym, a
+#     third-party package / file name we did NOT coin, or a kebab-case
+#     identifier in a system that has its own anchor (a TASKS.md task ID
+#     anchored in TASKS.md itself; a folder name).
+#   - Coined-by-Minsky class / interface / function names belong in
+#     `vision.md` § Pattern conformance index (rule #8 anchor → resolves
+#     rule #5 via the index). The lint accepts pattern-index hits as a
+#     valid anchor.
+#   - Coined-by-Minsky prose terms belong in the Glossary (rule #5 anchor).
+#   - Every entry must carry a one-line `#` justification.
+#
+# When in doubt: add the Glossary row OR the Pattern-index row. The
+# allowlist is the escape hatch, not the default.
+
+# --- Class / interface / function names planned but not yet in the
+#     pattern-conformance index. Move to the index when they ship. ---
+# Future class — supervisor primitive (Armstrong 2007).
+SupervisionTree
+# Future class — circuit-breaker primitive (Nygard 2007).
+CircuitBreaker
+# Future class — autonomic loop (Kephart & Chess 2003).
+MapeKLoop
+
+# --- TASKS.md task IDs (kebab-case). Anchored in TASKS.md itself; the
+#     index would never name them. Allowlisted as identifiers we own
+#     but coin within the task system, not the constitution. ---
+# Task: rule-#9 daily-layer per-PR experiment runner.
+ci-experiment-runner-v0
+# Task: rule-#9 weekly/monthly sustained-gain tracker.
+experiment-tracker-v0
+# Task: MAPE-K loop v0 (largest novel layer; future).
+mape-k-loop-v0
+# Task: quarterly dependency review for Q3 2026.
+review-q3-2026
+# Task: lighter OTEL backend evaluation.
+otel-lite-backend
+# Concept used in rule-#9 daily layer; the directory the runner writes to.
+experiment-store
+
+# --- Folder names. Anchored in the filesystem layout, not in prose. ---
+# Top-level folder: one file per user story (rule #3 / Cohn 2004).
+user-stories
+
+# --- Task IDs and workflow names introduced 2026-05-04. ---
+# TASKS.md task ID — substrate-migration ahead of the cross-repo-runner stack
+# (vision.md § 11; rule-#9 pre-registration of the migration's own EXPERIMENT.yaml
+# is the eat-own-dogfood acceptance test).
+experiments-directory-migration
+# CI workflow name + product (Google Lighthouse, the third-party performance
+# auditor; Lighthouse Mobile is its mobile-throttling-default profile). The
+# `lighthouse-mobile` job in `.github/workflows/lighthouse.yml` was downgraded
+# to informational on 2026-05-04 per rule #11 — see vision.md § 11.
+lighthouse-mobile
+# TASKS.md task ID — pre-registered next-tier pivot for the lighthouse-mobile
+# self-hosted runner move (rule-#11 proof). Anchored in TASKS.md.
+lighthouse-self-hosted-runner-pivot
+# TASKS.md task ID — P0 follow-up for vision.md § "Scope discipline" (rule #12);
+# the lint that mechanically enforces rule #12 on every PR. Anchored in
+# TASKS.md as `**ID**: scope-discipline-policy-lint`.
+scope-discipline-policy-lint
+
+# Future-lint name cited in vision.md rule #1 per-feature mandate (operator
+# directive 2026-05-05). The lint will block feature PRs missing a
+# research-replace-or-relocate-<feature-id> task; today the rule itself enforces.
+pr-replace-or-relocate-research
+
+# Stability-suite unit-file names cited in vision.md rule #6 (operator directive
+# 2026-05-05: "ensure that forever all stability features for minsky are enabled
+# by default"). Substrate exists at distribution/{systemd,launchd}/.
+minsky-supervisor.target
+minsky-watchdog.service
+
+# Security & privacy P0 task IDs cited in vision.md rule #13 (operator
+# directive 2026-05-06: "make security and privacy one of main priorities").
+secret-scanning-precommit-and-ci
+otel-no-pii-in-spans-lint
+supervisor-sandbox-syscall-restriction
+dashboard-localhost-only-by-default
+supply-chain-hardening-lockfile-sbom-slsa
+cloud-tier-external-security-audit-gate
+scan-secrets
+
+# systemd directive names — third-party (systemd) syntax cited verbatim per vision.md rule #13 sandbox bullet.
+ProtectSystem
+PrivateTmp
+RestrictAddressFamilies
+ProcessType
+agent-capability-delegation-scan
+pr-agent-delegation-scan-current
+
+# Skill primer names cited inline in vision.md to point readers at the corresponding
+# .claude/skills/<name>/ SKILL.md file. The anchor is the SKILL.md file itself.
+pr-merge-no-shortcuts
+
+# Skill primer names cited inline in vision.md to point readers at the corresponding
+# .claude/skills/<name>/ SKILL.md file. The anchor is the SKILL.md file itself.
+pr-merge-no-shortcuts
+
+# TASKS.md task IDs cited inline in vision.md § "Honest gaps". Each task ID is
+# kebab-case, anchored in TASKS.md itself (the canonical anchor per the
+# allowlist discipline above). 2026-05-23 strategic competitive deep-dive.
+benchmark-minsky-via-claude-on-humaneval
+enterprise-deployment-readiness-audit
+explore-multi-agent-ensembling-experiment
+gaia-benchmark-evaluation-substrate
+
+# pickHostTask is the exported function from novel/cross-repo-runner/src/ that
+# parses TASKS.md and returns the next pickable task. Cited inline in vision.md
+# § "What Minsky uniquely does" row 6 (TASKS.md as operator surface) — the
+# anchor is the source file itself (novel/cross-repo-runner/src/index.ts).
+pickHostTask
+
+# Task IDs filed 2026-05-24 in PR #788 (anchored in TASKS.md).
+launcher-agnostic-feature-parity-chaos-test  # P1 task in TASKS.md — implements story-014's chaos test
+local-models-stability-gate-90-percent  # P1 task in TASKS.md — implements story-015's M1.1 stability gate
+
+# Standard macOS launchd plist key (Apple launchd.plist(5) man page) — cited
+# in vision.md rule #19's anti-pattern list (a plist's `RunAtLoad: true` must
+# be paired with the `--with-supervisor` opt-in path). OS-level identifier,
+# not a Minsky concept, so it has no Glossary/Pattern-index entry.
+RunAtLoad
+
+# Skill primer directory names under `.claude/skills/<name>/` (and
+# `.devin/skills/<name>/`). The anchor for each is the SKILL.md file itself —
+# every `<name>` is a coined token whose definition lives in its primer. The
+# `check-skill-allowlist-coverage` lint (full stage) asserts EVERY skill
+# directory name appears below, so a forgotten entry fails in the same PR that
+# adds the skill rather than in a later PR that cites it in vision.md (the
+# 2026-05-21 PR #696/#704 cycle that motivated `glossary-allowlist-update-
+# discipline`). When you add a `.claude/skills/<name>/SKILL.md`, add `<name>`
+# here in the same PR.
+brief-engineering
+caveman
+ci-gate-check
+cli-consolidation
+competitor-research
+diagnose
+doubt-driven-development
+experiment-validate
+grill-task
+improve-codebase-architecture
+incremental-implementation
+karpathy-disciplines
+launchd-safe-paths
+live-fire-smoke
+minsky-supervisor
+openhands-shim-knobs
+poll-merge
+reader-priority-docs
+spec-driven-development
+task-slice
+task-spec
+triage
+worktree-handoff
+zoom-out

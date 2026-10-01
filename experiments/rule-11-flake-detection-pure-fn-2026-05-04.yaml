@@ -1,0 +1,77 @@
+id: rule-11-flake-detection-pure-fn-2026-05-04
+hypothesis: |
+  Rule #11 (vision.md § 11) declares that no flaky CI gate is a
+  load-bearing claim and mandates a structural response (stop-the-world
+  → fix-metric-not-change → pre-register-fix → land-proof → auto-detect).
+  Steps 1–4 are honoured by operator discipline; step 5 (auto-detect)
+  requires a deterministic lint that catches flakes mechanically. The
+  parent task `rule-11-flake-detection-lint` is decomposed into 4
+  one-commit-sized sub-tasks; this PR ships sub-task 1 — the *pure
+  decision function* `detectFlakeRate(runs: WorkflowRun[]):
+  FlakeReport[]` plus paired tests.
+
+  The pure function is the smallest deterministic seam (Martin, *Clean
+  Architecture*, 2017, ch. 22). Sub-tasks 2–4 add the I/O boundary
+  (`gh run list` ingestion + CLI), patch emission to `tmp/rule-11/`,
+  and CI wiring. Encoding the decision as a pure function up-front
+  means every later sub-task imports the same canonical seam and tests
+  against fixture data — when sub-task 2's pivot fires (e.g., gh API
+  shape changes), only the I/O boundary lands the pivot; the pure
+  function stays unchanged.
+
+  Algorithm: group runs by (workflow, job, headSha); for each (job,
+  sha) with ≥2 runs, classify it as a flake-pair when the
+  chronologically-ordered sequence is `failure → success`; per-job
+  rate = flake-pairs / total-pairs; surface a `FlakeReport` when rate
+  ≥ 10% AND total-pairs ≥ 5 (sample-size guard — Memon 2017 § 3 uses
+  10% as the cut-off; the 5-pair floor is the smallest sample with
+  predictive power).
+success: |
+  - `pnpm vitest run scripts/check-rule-11-no-flaky-gates.test.mjs
+    --reporter=json | jq -e '.numPassedTests >= 6 and
+    .numFailedTests == 0'` exits 0 (≥6 paired test cases — covers
+    above-threshold / below-threshold / sample-size-guard /
+    pair-ordering / empty / multi-job).
+  - `pnpm typecheck` exits 0 (no TS regressions; the new files type
+    cleanly under strict mode).
+  - `pnpm exec biome check scripts/check-rule-11-no-flaky-gates.mjs
+    scripts/check-rule-11-no-flaky-gates.test.mjs` exits 0 (cognitive-
+    complexity cap respected; format clean).
+  - The pure function exports `detectFlakeRate`,
+    `FLAKE_RATE_THRESHOLD`, `MIN_PAIRS_FOR_REPORT` — the shape
+    sub-task 2 imports.
+pivot: |
+  Two pivot paths pre-registered:
+    1. If the same-SHA failure→success pair-detection misses real
+       flakes because `gh run list` returns only the latest conclusion
+       per (sha, job) and overwrites prior failures, sub-task 2's I/O
+       boundary pivots to the GitHub Checks API (which preserves
+       both conclusions on a single SHA). The pure function shape is
+       unchanged because the input list is the same `WorkflowRun[]`.
+    2. If the 5-pair sample-size floor proves too strict (jobs that
+       ship rarely never accumulate 5 same-SHA pairs over 30 days),
+       lower `MIN_PAIRS_FOR_REPORT` to 3 and add a confidence
+       interval to the FlakeReport. The constant is exported for
+       exactly this reason.
+measurement: |
+  pnpm vitest run scripts/check-rule-11-no-flaky-gates.test.mjs --reporter=json 2>/dev/null | node -e 'let d=""; process.stdin.on("data", c=>d+=c); process.stdin.on("end", ()=>{ const j=JSON.parse(d); const a=require("assert"); a.ok(j.numFailedTests === 0, "no failed tests"); a.ok(j.numPassedTests >= 6, "at least 6 paired tests, got " + j.numPassedTests); });'
+anchor: |
+  Memon, A., Gao, Z., Nguyen, B., et al., "Taming Google-Scale
+  Continuous Testing", *ICSE-SEIP* 2017 (the per-job same-SHA pair
+  primitive — Google's DETECTOR system uses 10% as the empirical
+  cut-off for "the team has learned to ignore this gate").
+  Martin, R. C., *Clean Architecture*, Pearson, 2017, Ch. 22
+  ("The Clean Architecture" — pure-function seam at the centre,
+  I/O at the edge; the decomposition is named after this principle).
+  Forsgren, N., Humble, J., Kim, G., *Accelerate*, IT Revolution
+  Press, 2018, Ch. 3 (DORA test-reliability — flaky gates teach the
+  team to ignore failure; the 10% threshold is DORA's empirical
+  mark).
+  Beck, K., *Extreme Programming Explained*, Addison-Wesley, 1999,
+  Ch. 17 (CI as the constraint enforcer — rule #11's lint becomes
+  the constraint; the pure function is the smallest deterministic
+  primitive).
+  vision.md § 11 (rule #11 — no flaky metric is a load-bearing
+  claim; this lint is the mechanical ratchet that converts the rule
+  from operator-discipline into a CI invariant).
+timeout_seconds: 60

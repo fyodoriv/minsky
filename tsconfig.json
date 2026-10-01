@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.base.json",
+  "files": [],
+  "references": [
+    { "path": "./novel/adapters/a2a" },
+    { "path": "./novel/adapters/agent-runtime-openhands" },
+    { "path": "./novel/adapters/mcp" },
+    { "path": "./novel/adapters/notifier" },
+    { "path": "./novel/adapters/observability" },
+    { "path": "./novel/adapters/ollama" },
+    { "path": "./novel/adapters/prompt-optimizer" },
+    { "path": "./novel/adapters/sandbox" },
+    { "path": "./novel/adapters/token-monitor" },
+    { "path": "./novel/adapters/types" },
+    { "path": "./novel/claude-handoff-spec" },
+    { "path": "./novel/competitive-benchmark" },
+    { "path": "./novel/cross-repo-runner" },
+    { "path": "./novel/dashboard-web" },
+    { "path": "./novel/experiment-record" },
+    { "path": "./novel/mape-k-loop" },
+    { "path": "./novel/observer/heals" },
+    { "path": "./novel/tick-loop" },
+
+    { "path": "./scripts" },
+    { "path": "./user-stories" }
+  ]
+}

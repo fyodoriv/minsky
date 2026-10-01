@@ -1,0 +1,66 @@
+id: minsky-remote-task-submission-2026-06-02
+hypothesis: |
+  TASKS.md `minsky-remote-task-submission` claims that a minsky
+  installation can submit a self-observed finding (bug, limitation,
+  crash, flaky test) back to `fyodoriv/minsky` WITHOUT ever leaking
+  code, secrets, or file paths — and only after the operator approves
+  the exact anonymized payload.
+
+  This experiment claims: a pure DTO + redaction core
+  (`@minsky/tick-loop`'s `finding-reporter.ts`) plus a thin CLI
+  (`scripts/submit-finding.mjs`) makes that privacy guarantee
+  unit-testable in isolation, so every secret/PII shape class is
+  covered by a deterministic assertion rather than a hope. The bet
+  relies on three properties:
+
+    1. The redaction rule-set is co-defined with
+       `scripts/check-otel-no-pii.mjs`'s classifier, so the egress
+       boundary and the OTEL boundary agree on what a secret is — one
+       definition, two enforcement points (rule #2 — single seam).
+    2. A defense-in-depth `containsPii` re-scan runs AFTER redaction
+       and BEFORE any `gh issue create`, so a redaction miss fails the
+       submission closed rather than egressing a leak (rule #6).
+    3. Submission is preview-then-approve (`renderPreview` →
+       `[Y/n]`); declining sends nothing, and there is no auto-submit
+       path (opt-in telemetry — Mozilla Crash Reporter / VSCode).
+success: |
+  100% of the 9 secret/PII shape classes in `REDACTION_RULES`
+  (Anthropic/OpenAI key, GitHub PAT, fine-grained PAT, Slack token,
+  AWS access key, macOS home path, Linux home path, email, IPv4) are
+  redacted to `[redacted]`, AND `containsPii` returns false on every
+  anonymized finding the unit + integration suites build. Operational
+  threshold: `npx vitest run novel/tick-loop/src/finding-reporter.test.ts`
+  exits 0 with >= 25 assertions.
+pivot: |
+  Numeric pivot threshold: if the regex rule-set produces >= 2 false
+  negatives (a real secret survives redaction and reaches the egress
+  boundary undetected by `containsPii`) in any 30-day review window,
+  abandon regex redaction and switch to an allow-list projection —
+  emit ONLY the structured metadata (type, version, os, agent) plus a
+  fixed-vocabulary finding type, dropping free text entirely. (Margin
+  vs success is large: 2 misses vs the 0-miss success bar.)
+measurement: |
+  npx vitest run novel/tick-loop/src/finding-reporter.test.ts scripts/submit-finding.test.mjs test/integration/finding-reporter-anonymize.test.ts --reporter=json | jq -e '.numTotalTests >= 40 and .numFailedTests == 0'
+# Implementation artefacts (rule-12 scope-discipline cross-reference).
+# The hypothesis above is realised by these new public artefacts —
+# listed here so the rule-12 linter ties them back to this pre-
+# registered experiment and treats them as in-scope:
+#   - novel/tick-loop/package.json
+#   - novel/tick-loop/tsconfig.json
+#   - novel/tick-loop/README.md
+#   - novel/tick-loop/src/index.ts
+#   - novel/tick-loop/src/finding-reporter.ts
+#   - scripts/submit-finding.mjs
+anchor: |
+  Fowler, M., *Patterns of Enterprise Application Architecture*,
+  Addison-Wesley, 2002, Ch. 15 ("Distribution Patterns") — the Data
+  Transfer Object pattern: a projection object carries only the fields
+  safe to cross a boundary, decoupled from the internal record. The
+  `RawFinding` -> `AnonymizedFinding` projection is exactly this
+  shape, with redaction as the boundary transform. Privacy grounding:
+  GDPR Art. 25 (data protection by design and by default); opt-in
+  telemetry precedent in the Mozilla Crash Reporter and VSCode
+  telemetry (transparent + anonymized + approval-gated). Constitutional
+  anchor: rule #13 (vision.md § 13.7 — privacy by default; redact
+  before egress).
+replay_windows_days: [7, 30]

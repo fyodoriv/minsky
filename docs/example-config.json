@@ -1,0 +1,25 @@
+{
+  "_comment": "Annotated example ~/.minsky/config.json. Copy to ~/.minsky/config.json and edit. This file is strict JSON (jq-parseable); the _* keys are documentation-only and ignored by the runner. Every key here is read by bin/minsky-run.sh — see docs/configuration.md for the full key table and the env-var overrides that win per-run.",
+
+  "_comment_cloud_agent": "Which agent runs in cloud mode: openhands (default) | claude | devin | aider. Read at bin/minsky-run.sh (.cloud_agent // \"openhands\"). Env override: MINSKY_CLOUD_AGENT.",
+  "cloud_agent": "devin",
+
+  "cloud_agent_model": "claude-opus-4-7-max",
+
+  "_comment_local_llm": "Local-LLM fallback preference. Setting local_llm_enabled:true routes every iteration through the operator's local OpenAI-compatible endpoint (Ollama / LM Studio / MLX) with zero cloud tokens — no env vars required. Env override: MINSKY_LOCAL_LLM=1 forces it on for one run.",
+  "local_llm_enabled": false,
+  "local_llm": {
+    "_comment_model": "LiteLLM model id for the local backend. ollama_chat/<name> for Ollama; lm_studio/<name> for LM Studio. Read at bin/minsky-run.sh (.local_llm.model // \"ollama_chat/qwen3-coder:30b\").",
+    "model": "ollama_chat/qwen3-coder:30b",
+    "_comment_base_url": "Base URL of the local OpenAI-compatible server. Ollama default is 11434; LM Studio default is 1234. Read at bin/minsky-run.sh (.local_llm.base_url // \"http://localhost:11434\").",
+    "base_url": "http://localhost:11434"
+  },
+
+  "_comment_openhands": "OpenHands backend model (LiteLLM id) used when cloud_agent is openhands and local_llm_enabled is false. Read at bin/minsky-run.sh (.openhands.model // \"claude-opus-4-7\").",
+  "openhands": {
+    "model": "claude-opus-4-7"
+  },
+
+  "_comment_default_host": "The git repo minsky operates on by default. Override per-invocation with --host <path> or run --hosts-dir <parent> for fleet mode.",
+  "default_host": "/path/to/your/repo"
+}

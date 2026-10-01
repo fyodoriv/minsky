@@ -1,0 +1,76 @@
+id: rule-11-flake-detection-patch-emit-2026-05-04
+hypothesis: |
+  Sub-task 3 of `rule-11-flake-detection-lint`. Adds `emitPatches`
+  on top of sub-tasks 1 (pure decision) + 2 (CLI ingestion). When a
+  `FlakeReport` surfaces, the CLI emits two artefacts per report
+  into a per-flake `tmp/rule-11/` directory so the operator can
+  review and merge the fix without the lint mutating CI config
+  directly (rule #6 — let-it-crash; the human is the supervisor).
+
+  The two artefacts:
+    1. `<workflow>-<job>-task-block.md` — TASKS.md-shaped block
+       draft pre-registering the flake-fix per rule #9 (Hypothesis
+       / Pivot / Measurement / Anchor populated from the
+       FlakeReport metadata).
+    2. `<workflow>-<job>-workflow.patch` — human-readable
+       instruction file describing the `continue-on-error: true`
+       addition (matching the lighthouse-mobile downgrade shipped
+       in #125). Per the parent task's pre-registered Pivot, the
+       unified-diff form was rejected in favour of an instruction
+       file because YAML formatting varies enough across workflows
+       (tabs, anchors, multi-doc files) that a generated diff is
+       fragile. The instruction file is robust by construction.
+
+  Idempotent: re-emission with identical reports is a no-op
+  (existing files with identical content are skipped). The
+  parent task's failure-mode-table row "Two PRs ship the same
+  flake fix simultaneously" is closed by the `writeIfChanged`
+  primitive used inside `emitPatches`.
+
+  CLI gains a `--emit <dir>` flag so the operator (and sub-task 4
+  CI workflow) can opt in. Without `--emit`, the existing
+  surface-but-don't-emit behaviour from sub-task 2 is unchanged.
+success: |
+  - `pnpm vitest run scripts/check-rule-11-no-flaky-gates.test.mjs
+    --reporter=json | jq -e '.numPassedTests >= 22 and
+    .numFailedTests == 0'` exits 0 (≥22 paired test cases — 9 from
+    sub-task 1 + 7 from sub-task 2 + ≥6 new for emitPatches /
+    renderTaskBlock / renderWorkflowPatch / reportBasename / runCli
+    `--emit`).
+  - `pnpm typecheck` exits 0.
+  - `pnpm exec biome check` exits 0 across the touched files.
+  - `tmp/rule-11/.gitkeep` is tracked; `tmp/rule-11/*-task-block.md`
+    + `*-workflow.patch` are gitignored so accidental local
+    invocations don't pollute the repo.
+pivot: |
+  Two pivot paths pre-registered:
+    1. The parent task's Pivot already fired during this sub-task —
+       the unified-diff form was rejected in favour of an
+       instruction file. If even the instruction file proves too
+       opinionated (e.g., teams want to fix root-cause not
+       downgrade), retire the patch-emission entirely and let the
+       CLI surface only the FlakeReport line. The lint stays useful
+       as a detector even without the auto-fix scaffolding.
+    2. If `tmp/rule-11/` artefact pollution becomes a real problem
+       (operators forget to clean the dir between flake-fixes), add
+       a `--clean` flag that wipes the dir before emitting.
+       Idempotent semantics make this safe.
+measurement: |
+  pnpm vitest run scripts/check-rule-11-no-flaky-gates.test.mjs --reporter=json 2>/dev/null | node -e 'let d=""; process.stdin.on("data", c=>d+=c); process.stdin.on("end", ()=>{ const j=JSON.parse(d); const a=require("assert"); a.ok(j.numFailedTests === 0, "no failed tests"); a.ok(j.numPassedTests >= 22, "at least 22 paired tests, got " + j.numPassedTests); });'
+anchor: |
+  rule #11 (vision.md § 11 — auto-detect ratchet); the
+  emitPatches step is rule #11's "step 3 + 4 scaffolding"
+  layer — pre-register-fix + land-proof made cheap.
+  Beck, K., *Extreme Programming Explained*, Addison-Wesley,
+  1999, Ch. 17 (CI as the constraint enforcer; the patch IS the
+  constraint, the operator is the enforcer — the file is the
+  affordance).
+  Martin, R. C., *Clean Architecture*, Pearson, 2017, Ch. 22
+  (pure renderers `renderTaskBlock` + `renderWorkflowPatch` keep
+  the side-effect surface in `writeIfChanged` only — separation
+  of concerns).
+  Memon, A., et al., "Taming Google-Scale Continuous Testing",
+  *ICSE-SEIP* 2017 (the "team's trust in CI is the load-bearing
+  claim, not any single gate" anchor in the workflow-patch
+  prose).
+timeout_seconds: 60

@@ -1,0 +1,467 @@
+// Tests for the pure functions in check-rule-11-no-flaky-gates.mjs.
+// Pattern: rule #10 deterministic gate; xUnit paired fixtures (Meszaros 2007).
+//
+// Each test pins a single decision branch (above-threshold / below /
+// sample-size guard / pair ordering / empty) so a regression surfaces
+// as one targeted failure, not a vague suite-wide red.
+
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+
+import {
+  detectFlakeRate,
+  emitPatches,
+  FLAKE_RATE_THRESHOLD,
+  formatReportLine,
+  MIN_PAIRS_FOR_REPORT,
+  parseCliArgs,
+  renderTaskBlock,
+  renderWorkflowPatch,
+  reportBasename,
+  runCli,
+} from "./check-rule-11-no-flaky-gates.mjs";
+
+/**
+ * Minimal `WorkflowRun` factory — keeps fixtures readable. The `iso`
+ * counter generates strictly-increasing timestamps so pair ordering
+ * is deterministic.
+ *
+ * @param {string} workflowName
+ * @param {string} name
+ * @param {string} headSha
+ * @param {string} conclusion
+ * @param {number} iso  Monotonically-increasing counter (encoded as `0001`, `0002`, ...).
+ * @returns {import("./check-rule-11-no-flaky-gates.mjs").WorkflowRun}
+ */
+function run(workflowName, name, headSha, conclusion, iso) {
+  return {
+    workflowName,
+    name,
+    headSha,
+    conclusion,
+    createdAt: `2026-05-04T00:${String(iso).padStart(2, "0")}:00.000Z`,
+  };
+}
+
+/**
+ * Build N same-SHA pairs for a single (workflow, job). Each pair has
+ * one `failure` then one `success` if `flakey[i]` is true; otherwise
+ * two `success` runs (a "clean" pair).
+ *
+ * @param {string} workflowName
+ * @param {string} job
+ * @param {readonly boolean[]} flakey  Per-pair flag — true → flake pair.
+ * @returns {import("./check-rule-11-no-flaky-gates.mjs").WorkflowRun[]}
+ */
+function pairs(workflowName, job, flakey) {
+  /** @type {import("./check-rule-11-no-flaky-gates.mjs").WorkflowRun[]} */
+  const out = [];
+  flakey.forEach((isFlake, i) => {
+    const sha = `sha${String(i).padStart(3, "0")}`;
+    if (isFlake) {
+      out.push(run(workflowName, job, sha, "failure", i * 2 + 1));
+      out.push(run(workflowName, job, sha, "success", i * 2 + 2));
+    } else {
+      out.push(run(workflowName, job, sha, "success", i * 2 + 1));
+      out.push(run(workflowName, job, sha, "success", i * 2 + 2));
+    }
+  });
+  return out;
+}
+
+describe("detectFlakeRate", () => {
+  test("surfaces a job whose rate is ≥10 % across ≥5 pairs", () => {
+    // 11 % rate (1 flake / 9 pairs) — but only 9 pairs, so the rate
+    // calculation kicks in. We need ≥5 pairs (sample-size guard) AND
+    // rate ≥ 0.10. 1/9 ≈ 0.111 > 0.10 → surfaces.
+    const flakey = [true, false, false, false, false, false, false, false, false];
+    const reports = detectFlakeRate(pairs("ci", "lighthouse-mobile", flakey));
+    expect(reports).toHaveLength(1);
+    const r = reports[0];
+    if (r === undefined) throw new Error("unreachable: length 1");
+    expect(r).toMatchObject({
+      workflowName: "ci",
+      jobName: "lighthouse-mobile",
+      flakePairs: 1,
+      totalPairs: 9,
+    });
+    expect(r.rate).toBeCloseTo(1 / 9, 5);
+    expect(r.rate).toBeGreaterThanOrEqual(FLAKE_RATE_THRESHOLD);
+  });
+
+  test("does NOT surface a job whose rate is <10 % over ≥5 pairs", () => {
+    // 1 flake / 11 pairs ≈ 9.09 % — below the 10 % threshold.
+    const flakey = [true, false, false, false, false, false, false, false, false, false, false];
+    const reports = detectFlakeRate(pairs("ci", "stable-job", flakey));
+    expect(reports).toHaveLength(0);
+  });
+
+  test("does NOT surface a job with rate ≥10 % but <MIN_PAIRS_FOR_REPORT pairs (sample-size guard)", () => {
+    // 1 flake / 4 pairs = 25 % — but only 4 pairs, below MIN_PAIRS_FOR_REPORT.
+    const flakey = [true, false, false, false];
+    expect(flakey.length).toBeLessThan(MIN_PAIRS_FOR_REPORT);
+    const reports = detectFlakeRate(pairs("ci", "thin-evidence", flakey));
+    expect(reports).toHaveLength(0);
+  });
+
+  test("returns empty for empty input", () => {
+    expect(detectFlakeRate([])).toEqual([]);
+  });
+
+  test("ignores singleton runs (no pair to evaluate)", () => {
+    // 5 SHAs but each only has one run → 0 pairs total → no report
+    // even though 0/0 would NaN; the guard is `totalPairs >= 5`.
+    const runs = ["sha0", "sha1", "sha2", "sha3", "sha4"].map((sha, i) =>
+      run("ci", "single", sha, "failure", i + 1),
+    );
+    expect(detectFlakeRate(runs)).toEqual([]);
+  });
+
+  test("classifies success → failure as NOT a flake (only failure → success counts)", () => {
+    // Same SHA, ordered: success first, then failure. This is a
+    // genuine new failure on a re-run, not a flake recovered.
+    const runs = [
+      run("ci", "regression", "shaA", "success", 1),
+      run("ci", "regression", "shaA", "failure", 2),
+      run("ci", "regression", "shaB", "success", 3),
+      run("ci", "regression", "shaB", "success", 4),
+      run("ci", "regression", "shaC", "success", 5),
+      run("ci", "regression", "shaC", "success", 6),
+      run("ci", "regression", "shaD", "success", 7),
+      run("ci", "regression", "shaD", "success", 8),
+      run("ci", "regression", "shaE", "success", 9),
+      run("ci", "regression", "shaE", "success", 10),
+    ];
+    const reports = detectFlakeRate(runs);
+    expect(reports).toHaveLength(0);
+  });
+
+  test("surfaces only the flaky job in a mixed-job input", () => {
+    const flakeyRuns = pairs("ci", "lighthouse-mobile", [
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]); // 2/10 = 20 % — surfaces
+    const cleanRuns = pairs("ci", "stable-test", [false, false, false, false, false, false]);
+    // 0/6 = 0 % — does not surface
+    const reports = detectFlakeRate([...flakeyRuns, ...cleanRuns]);
+    expect(reports).toHaveLength(1);
+    const r = reports[0];
+    if (r === undefined) throw new Error("unreachable: length 1");
+    expect(r.jobName).toBe("lighthouse-mobile");
+    expect(r.rate).toBeCloseTo(0.2, 5);
+  });
+
+  test("respects createdAt ordering when classifying pairs (out-of-order input)", () => {
+    // Same SHA, two runs: ordered chronologically by createdAt the
+    // sequence is failure → success (a flake). Input order is
+    // shuffled to confirm `detectFlakeRate` sorts internally.
+    const runs = [
+      // Insert success first by array order, but with later createdAt.
+      run("ci", "ordering-test", "shaX", "success", 99),
+      run("ci", "ordering-test", "shaX", "failure", 1),
+      ...pairs("ci", "ordering-test", [false, false, false, false]),
+    ];
+    const reports = detectFlakeRate(runs);
+    // 1 flake / 5 pairs = 20 % — surfaces (≥10 % AND ≥5 pairs).
+    expect(reports).toHaveLength(1);
+    const r = reports[0];
+    if (r === undefined) throw new Error("unreachable: length 1");
+    expect(r.flakePairs).toBe(1);
+    expect(r.totalPairs).toBe(5);
+  });
+
+  test("treats jobs with the same name across different workflows as separate", () => {
+    const ciFlaky = pairs("ci", "build", [true, true, false, false, false, false]);
+    const lighthouseClean = pairs("lighthouse", "build", [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    const reports = detectFlakeRate([...ciFlaky, ...lighthouseClean]);
+    expect(reports).toHaveLength(1);
+    const r = reports[0];
+    if (r === undefined) throw new Error("unreachable: length 1");
+    expect(r.workflowName).toBe("ci");
+    expect(r.jobName).toBe("build");
+  });
+});
+
+describe("parseCliArgs", () => {
+  test("parses --fixture <space> value", () => {
+    expect(parseCliArgs(["--fixture", "/tmp/x.json"])).toEqual({
+      fixturePath: "/tmp/x.json",
+      workflowNames: [],
+    });
+  });
+
+  test("parses --fixture=value", () => {
+    expect(parseCliArgs(["--fixture=/tmp/x.json"])).toEqual({
+      fixturePath: "/tmp/x.json",
+      workflowNames: [],
+    });
+  });
+
+  test("parses --workflows ci,lighthouse", () => {
+    expect(parseCliArgs(["--workflows", "ci,lighthouse"])).toEqual({
+      fixturePath: undefined,
+      workflowNames: ["ci", "lighthouse"],
+    });
+  });
+});
+
+describe("formatReportLine", () => {
+  test("renders <workflow>:<job> rate=<n>/<d> (<pct>%)", () => {
+    expect(
+      formatReportLine({
+        workflowName: "ci",
+        jobName: "lighthouse-mobile",
+        flakePairs: 2,
+        totalPairs: 7,
+        rate: 2 / 7,
+      }),
+    ).toBe("ci:lighthouse-mobile rate=2/7 (28.6%)");
+  });
+});
+
+describe("runCli", () => {
+  test("prints clean message and exits 0 on a non-flaky fixture", () => {
+    /** @type {string[]} */
+    const lines = [];
+    const code = runCli(["--fixture", "test/fixtures/rule-11-flake-detection/clean.json"], (l) =>
+      lines.push(l),
+    );
+    expect(code).toBe(0);
+    expect(lines.join("\n")).toMatch(/^rule-11 ok:/);
+  });
+
+  test("prints one report line per flaky job and exits 1", () => {
+    /** @type {string[]} */
+    const lines = [];
+    const code = runCli(["--fixture", "test/fixtures/rule-11-flake-detection/flaky.json"], (l) =>
+      lines.push(l),
+    );
+    expect(code).toBe(1);
+    expect(lines).toEqual(["ci:lighthouse-mobile rate=2/7 (28.6%)"]);
+  });
+
+  test("prints usage and exits 2 when neither --fixture nor --workflows is provided", () => {
+    /** @type {string[]} */
+    const lines = [];
+    const code = runCli([], (l) => lines.push(l));
+    expect(code).toBe(2);
+    expect(lines.join("\n")).toMatch(/^usage:/);
+  });
+});
+
+describe("reportBasename", () => {
+  test("slugifies workflow + job to lowercase kebab", () => {
+    expect(
+      reportBasename({
+        workflowName: "CI",
+        jobName: "lighthouse-mobile",
+        flakePairs: 1,
+        totalPairs: 5,
+        rate: 0.2,
+      }),
+    ).toBe("ci-lighthouse-mobile");
+  });
+
+  test("collapses non-alphanumerics into a single hyphen", () => {
+    expect(
+      reportBasename({
+        workflowName: "ci/build",
+        jobName: "test:unit",
+        flakePairs: 1,
+        totalPairs: 5,
+        rate: 0.2,
+      }),
+    ).toBe("ci-build-test-unit");
+  });
+});
+
+describe("renderTaskBlock", () => {
+  test("populates rule-#9 fields from FlakeReport metadata", () => {
+    const block = renderTaskBlock({
+      workflowName: "ci",
+      jobName: "lighthouse-mobile",
+      flakePairs: 2,
+      totalPairs: 7,
+      rate: 2 / 7,
+    });
+    expect(block).toMatch(/^- \[ \] `ci-lighthouse-mobile-flake-fix` —/);
+    expect(block).toMatch(/\*\*ID\*\*: ci-lighthouse-mobile-flake-fix/);
+    expect(block).toMatch(/2\/7 \(28\.6%\)/);
+    expect(block).toMatch(/\*\*Hypothesis\*\*:.*ci:lighthouse-mobile/);
+    // All five rule-#9 fields present
+    for (const field of ["Hypothesis", "Pivot", "Measurement", "Anchor"]) {
+      expect(block).toMatch(new RegExp(`\\*\\*${field}\\*\\*:`));
+    }
+  });
+});
+
+describe("renderWorkflowPatch", () => {
+  test("references the offending workflow + job and the continue-on-error addition", () => {
+    const patch = renderWorkflowPatch({
+      workflowName: "lighthouse",
+      jobName: "lighthouse-mobile",
+      flakePairs: 1,
+      totalPairs: 6,
+      rate: 1 / 6,
+    });
+    expect(patch).toMatch(/Open `\.github\/workflows\/lighthouse\.yml`/);
+    expect(patch).toMatch(/job named `lighthouse-mobile`/);
+    expect(patch).toMatch(/continue-on-error: true/);
+    // Operator-guidance preamble present
+    expect(patch).toMatch(/Don't apply this if you can fix the root cause/);
+  });
+});
+
+describe("emitPatches", () => {
+  /** @type {string} */
+  let outDir;
+
+  beforeEach(() => {
+    outDir = mkdtempSync(join(tmpdir(), "rule-11-emit-"));
+  });
+
+  afterEach(() => {
+    rmSync(outDir, { recursive: true, force: true });
+  });
+
+  test("writes both files per report on first emit", () => {
+    const reports = [
+      {
+        workflowName: "ci",
+        jobName: "flaky-job",
+        flakePairs: 1,
+        totalPairs: 5,
+        rate: 0.2,
+      },
+    ];
+    const result = emitPatches(reports, outDir);
+    expect(result.written).toHaveLength(2);
+    expect(result.skipped).toHaveLength(0);
+    expect(readFileSync(join(outDir, "ci-flaky-job-task-block.md"), "utf-8")).toMatch(
+      /\*\*ID\*\*: ci-flaky-job-flake-fix/,
+    );
+    expect(readFileSync(join(outDir, "ci-flaky-job-workflow.patch"), "utf-8")).toMatch(
+      /continue-on-error: true/,
+    );
+  });
+
+  test("is idempotent: re-emit with the same reports skips both files", () => {
+    const reports = [
+      {
+        workflowName: "ci",
+        jobName: "flaky-job",
+        flakePairs: 2,
+        totalPairs: 10,
+        rate: 0.2,
+      },
+    ];
+    emitPatches(reports, outDir);
+    const taskMtime = statSync(join(outDir, "ci-flaky-job-task-block.md")).mtimeMs;
+    const result = emitPatches(reports, outDir);
+    expect(result.written).toHaveLength(0);
+    expect(result.skipped).toHaveLength(2);
+    // mtime preserved (no rewrite)
+    expect(statSync(join(outDir, "ci-flaky-job-task-block.md")).mtimeMs).toBe(taskMtime);
+  });
+
+  test("rewrites a file when its content drifted (e.g., operator-edited stub)", () => {
+    const reports = [
+      {
+        workflowName: "ci",
+        jobName: "flaky-job",
+        flakePairs: 1,
+        totalPairs: 5,
+        rate: 0.2,
+      },
+    ];
+    emitPatches(reports, outDir);
+    // Operator partially edits the auto-emitted stub:
+    writeFileSync(join(outDir, "ci-flaky-job-task-block.md"), "operator-touched", "utf-8");
+    const result = emitPatches(reports, outDir);
+    expect(result.written).toContain(join(outDir, "ci-flaky-job-task-block.md"));
+    expect(result.skipped).toContain(join(outDir, "ci-flaky-job-workflow.patch"));
+  });
+
+  test("emits one pair per report (multi-report fixture)", () => {
+    const reports = [
+      {
+        workflowName: "ci",
+        jobName: "a",
+        flakePairs: 1,
+        totalPairs: 5,
+        rate: 0.2,
+      },
+      {
+        workflowName: "lighthouse",
+        jobName: "b",
+        flakePairs: 1,
+        totalPairs: 6,
+        rate: 1 / 6,
+      },
+    ];
+    const result = emitPatches(reports, outDir);
+    expect(result.written).toHaveLength(4);
+  });
+});
+
+describe("runCli with --emit", () => {
+  /** @type {string} */
+  let outDir;
+
+  beforeEach(() => {
+    outDir = mkdtempSync(join(tmpdir(), "rule-11-cli-emit-"));
+  });
+
+  afterEach(() => {
+    rmSync(outDir, { recursive: true, force: true });
+  });
+
+  test("emits patches into --emit dir on a flaky fixture", () => {
+    /** @type {string[]} */
+    const lines = [];
+    const code = runCli(
+      ["--fixture", "test/fixtures/rule-11-flake-detection/flaky.json", "--emit", outDir],
+      (l) => lines.push(l),
+    );
+    expect(code).toBe(1);
+    // Both artefacts written for the single flake report
+    expect(readFileSync(join(outDir, "ci-lighthouse-mobile-task-block.md"), "utf-8")).toMatch(
+      /flake-fix/,
+    );
+    expect(readFileSync(join(outDir, "ci-lighthouse-mobile-workflow.patch"), "utf-8")).toMatch(
+      /continue-on-error/,
+    );
+    // Last stdout line summarises the emit
+    expect(lines[lines.length - 1]).toMatch(/^rule-11: emitted 2 file\(s\), skipped 0/);
+  });
+
+  test("does not emit when there are no flaky reports", () => {
+    /** @type {string[]} */
+    const lines = [];
+    const code = runCli(
+      ["--fixture", "test/fixtures/rule-11-flake-detection/clean.json", "--emit", outDir],
+      (l) => lines.push(l),
+    );
+    expect(code).toBe(0);
+    // No emit-summary line, only the clean message
+    expect(lines.find((l) => l.startsWith("rule-11: emitted"))).toBeUndefined();
+  });
+});

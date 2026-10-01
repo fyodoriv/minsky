@@ -1,0 +1,435 @@
+# Architecture
+
+> How Minsky's pieces fit together — the entry points, the layered model, the adapter pattern, and the dependency table that closes rule #2.
+
+Minsky is a background program you point at your code projects. It picks the most important unfinished task from each project's plain-text to-do list, asks a coding assistant to do it, and hands you a draft to review. This file shows how that machinery is wired.
+
+## What this file is
+
+The canonical wiring diagram for Minsky. It maps named code to named patterns (rule #8), names the entry points an operator or agent should read first, and lists every outside tool Minsky depends on behind a fixed interface (rule #2). Every choice here is downstream of `vision.md`, the project constitution — the numbered, non-negotiable project rules. If this file and the constitution disagree, the constitution wins and this file is wrong.
+
+**Current milestone**: M1 (Stable, Measurable, One-Command) — see [`MILESTONES.md`](./MILESTONES.md) for the roadmap and per-milestone capability tables. Decisions here serve M1 first; M2+ features are noted as future.
+
+The `## The dependency table` section below is **load-bearing**. A check parses it on every PR ([`scripts/check-rule-2-dep-coverage.mjs`](./scripts/check-rule-2-dep-coverage.mjs)). Do not rename the section, change the column order, or remove the header row.
+
+## What this file is not
+
+- **Not the constitution** — see [vision.md](./vision.md) for the 17 non-negotiable rules.
+- **Not a tutorial or quickstart** — see [README.md](./README.md) and [INSTALL.md](./INSTALL.md).
+- **Not the agent runbook** — see [AGENTS.md](./AGENTS.md) for how to work in the repo.
+- **Not the research log** — see [research.md](./research.md) for open exploration and tool evaluations.
+
+## Entry points (read this first)
+
+A few key terms, defined once and used throughout:
+
+- **agent** — the coding assistant Minsky drives to do the actual work (Claude Code, Devin, or Aider). Minsky is not an agent; it orchestrates agents.
+- **host** — one code project (one git repository) that Minsky works on. Walking several hosts in turn is the cross-repo fleet.
+- **iteration** — one round of work: pick a task, ask an agent to do it, capture the result, open a draft PR. The user-facing command for one round is `minsky run`.
+- **tick** — one wake-up of the loop on its timer (the control-loop period; Liu, *Real-Time Systems*, 2000).
+- **daemon** — a background program that keeps running on your machine after you start it, surviving terminal close and restarting on crash.
+
+The user-visible surface is a one-line bash shim that delegates to the cross-repo runner:
+
+- [`bin/minsky`](./bin/minsky) — the PATH-accessible CLI shim (`./bin/minsky`, `pnpm minsky`, or `minsky` once on PATH). Dispatches subcommands.
+- [`novel/cross-repo-runner/`](./novel/cross-repo-runner/) — the task-walker that picks the next task, spawns an agent, captures the iteration, and opens a draft PR. Bin entry: [`novel/cross-repo-runner/bin/minsky-run.mjs`](./novel/cross-repo-runner/bin/minsky-run.mjs).
+- [`distribution/launchd/`](./distribution/launchd/) and [`distribution/systemd/`](./distribution/systemd/) — the outer supervisor units that restart the daemon on crash, re-claim work, and survive reboots. These are the let-it-crash substrate (rule #6): prefer crashing loudly and letting the supervisor restart over silent retry.
+
+The agent is pluggable through the adapter pattern described below. Today the choices are `claude` (Claude Code), `devin` (Devin CLI), and `aider` (local with Ollama). Pick one via `~/.minsky/config.json` or the `MINSKY_CLOUD_AGENT` env var.
+
+*Historical note*: the original v0 architecture (referenced in some sections below) used a tool called OMC as the orchestrator and an `omc-tasksmd-bridge`. The v0.1 line replaced both with direct agent spawning plus the cross-repo runner's task picker. Sections that mention OMC are kept as historical context — the current substrate is the cross-repo runner.
+
+## Layered model
+
+> **Pattern:** Viable System Model (Beer, *Brain of the Firm*, 1972). Conformance: full. See `vision.md` § "Pattern conformance index" row 2.
+
+Minsky stacks in layers. Each layer runs at a different timescale and answers a different question.
+
+```text
+┌──────────────────────────────────────────────────────────────────┐
+│ IDENTITY  — who we are, slowest changing (constitutional)         │
+│   vision.md, principles.md (later: ethics.md)                     │
+├──────────────────────────────────────────────────────────────────┤
+│ INTELLIGENCE  — outside world & future                            │
+│   research.md, competitors/, user-stories/                        │
+├──────────────────────────────────────────────────────────────────┤
+│ CONTROL  — present management, the MAPE-K loop                    │
+│   mape-k-loop, error-budgets, constraint log, A/B optimizer       │
+├──────────────────────────────────────────────────────────────────┤
+│ COORDINATION  — anti-oscillation between operators                │
+│   tasks.md (queue), handoffs/ (blackboard), claim protocol        │
+├──────────────────────────────────────────────────────────────────┤
+│ OPERATIONS  — the actual doing                                    │
+│   OMC personas, MCP tools, hooks                                  │
+├──────────────────────────────────────────────────────────────────┤
+│ NERVOUS SYSTEM  — cross-cutting observability                     │
+│   OTEL traces/metrics/logs, dashboards (CLI/web/Watch)            │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+The three lower layers (Coordination, Operations, Nervous System) are mostly other people's tools. The three upper layers (Identity, Intelligence, Control) are mostly Minsky's own novel work.
+
+## The adapter pattern
+
+> **Pattern:** Adapter (structural) + Strategy (behavioral) per Gamma, Helm, Johnson, Vlissides, *Design Patterns*, 1994. Conformance: full. See `vision.md` § "Pattern conformance index" row 3.
+
+This is the most important section. An **adapter** is a small wrapper file that lets Minsky talk to one outside tool through a fixed interface, so the tool can be swapped without touching the rest of the code.
+
+**Every outside dependency is reached through an interface defined in `novel/adapters/`.** Business logic never imports a vendor library directly. This is what keeps "don't reinvent the wheel" (rule #1) tractable over a decade. Without interfaces, "use someone else's tool" calcifies into vendor lock-in.
+
+**Polyglot through process boundaries.** Adapter interfaces are TypeScript. The implementations behind them can wrap any language — Python subprocesses (OpenHands, DSPy, Agentless), OS daemons (systemd, launchd), HTTP services (Tailscale, ntfy), MCP servers, or bash scripts. The process boundary is the language seam. See [`language-strategy.md`](./language-strategy.md) for when to add a worker in a non-TS language.
+
+Each adapter is two files: an interface and one or more implementations.
+
+```text
+novel/adapters/
+  task-queue.ts             ← interface TaskQueue { next(), claim(id), complete(id), … }
+  task-queue.tasksmd.ts     ← implements via tasks-mcp
+
+  orchestrator.ts           ← interface Orchestrator { runTask(spec, mode), modes, … }
+  orchestrator.omc.ts       ← implements via OMC slash commands
+
+  token-monitor.ts          ← interface TokenMonitor { remaining(), willExceedBy(t), … }
+  token-monitor.maciek.ts   ← implements via Claude-Code-Usage-Monitor cache
+
+  notifier.ts               ← interface Notifier { push(event, level), … }
+  notifier.ntfy.ts          ← implements via ntfy.sh HTTP API
+
+  ollama.ts                 ← interface Ollama { warm(model), unload(model), ps(), selfTest() }
+  ollama.http.ts            ← implements via Ollama HTTP API (/api/generate + /api/ps)
+
+  remote-access.ts          ← interface RemoteAccess { … }
+  remote-access.tailscale.ts← implements via Tailscale CLI
+
+  observability.ts          ← interface Observability { trace(), metric(), log(), query() }
+  observability.otel.ts     ← implements via Claude Code's OTEL exporter
+
+  prompt-optimizer.ts       ← interface PromptOptimizer { runABTest(variants, metric), … }
+  prompt-optimizer.dspy.ts  ← implements via DSPy
+
+  supervisor.ts             ← interface Supervisor { start(unit), restart(unit), status(unit) }
+  supervisor.systemd.ts     ← implements via systemctl
+  supervisor.launchd.ts     ← implements via launchctl
+```
+
+Swapping a tool is local work. Replacing OMC with a hypothetical "Claude Code Agent Teams" upgrade: write `orchestrator.cc-agent-teams.ts`, switch the import, run integration tests. Done. Replacing Tailscale with WireGuard direct: write `remote-access.wireguard.ts`. Done.
+
+Each adapter is tested twice: **against the interface** (does the implementation satisfy the contract?) and **against the real tool** (does the real tool behave the way the adapter promises?). The second test catches upstream behavior changes early.
+
+## The dependency table
+
+| # | Layer | Interface | Current implementation | Replacement candidates | Risk |
+|---|-------|-----------|------------------------|------------------------|------|
+| 1 | Persona orchestration | `Orchestrator` | OMC v4.13.x | claude-flow, MS Agent Framework, custom | Low — OMC active, large community |
+| 2 | Inner loop primitive | `InnerLoop` | OMC Ralph mode + Anthropic ralph-wiggum plugin | frankbria/ralph-claude-code | Low — multiple implementations exist |
+| 3 | Task queue | `TaskQueue` | tasks.md + tasks-mcp (yours) | beads, taskmd-driangle | Self-owned, no risk |
+| 4 | Cross-repo Roam | `RoamCoordinator` | tasks.md `/next-task` Roam step | (novel to tasks.md) | Self-owned |
+| 5 | Token monitor | `TokenMonitor` | Claude-Code-Usage-Monitor (Maciek-roboblog) | Gronsten/claude-usage-monitor, custom | Low — multiple OSS options |
+| 6 | TUI dashboard | `LocalDashboard` | claude-dashboard (seunggabi) | claude-tmux-dashboard, custom | Low |
+| 7 | Mobile dashboard | `MobileDashboard` | claude-code-monitor (onikan27) | custom cross-platform web app | Medium — onikan27 is macOS only |
+| 8 | Remote VPN | `RemoteAccess` | Tailscale | WireGuard, ZeroTier, Cloudflare Tunnel | Low |
+| 9 | Push notifications | `Notifier` | ntfy.sh | Pushover, Telegram bot | Low |
+| 9a | Local LLM lifecycle | `Ollama` | Ollama HTTP API (`/api/generate` + `/api/ps`) for daemon-scoped warm/unload | LM Studio HTTP, MLX-LM server | Low — Ollama is the entrenched local-LLM serving daemon; the adapter is < 250 LOC and one Strategy. Closes [story 020](../user-stories/020-ollama-jit-warm-unload.md) — drops daemon-idle wired RAM from ~42 GB to ≤500 MB. |
+| 10 | Watch actions | `WatchActions` | Apple Shortcuts | (later: native WatchOS / Wear OS) | Medium — Apple-specific |
+| 11 | Process supervision | `Supervisor` | systemd (Linux) / launchd (macOS) | s6, runit, supervisord | Low |
+| 12 | Observability | `Observability` | Claude Code OTEL → local Loki/Tempo/Grafana | Honeycomb, Grafana Cloud | Low |
+| 13 | Prompt optimization | `PromptOptimizer` | DSPy (Stanford) + Promptfoo | OpenAI Evals, custom | Medium — DSPy still evolving |
+| 14 | Specification monitor | `SpecMonitor` | **Custom Claude Skill** (novel; extract as OSS) | (none yet — we may be first) | High — wholly ours |
+| 15 | Agent-to-agent protocol | `A2A` (`novel/adapters/a2a/`) | A2A v1.0.0 (Linux Foundation) via the OpenHands scaffold → google-a2a-python bridge (`novel/adapters/a2a.openhands.ts`) | AGNTCY, custom JSON-RPC transport | Medium — A2A spec stable (v1.0.0); the google-a2a-python bridge is still maturing, so the scaffold reports `yellow` until the 2026-06-01 OpenHands runtime lands |
+| 16 | Agent-to-tool protocol | `MCPAdapter` (`novel/adapters/mcp/`) | MCP v2025-11-25 (Anthropic) via the OpenHands scaffold → `@modelcontextprotocol/sdk` bridge (`novel/adapters/mcp/src/mcp.openhands.ts`) | direct OpenHands SDK tool primitives, custom JSON-RPC transport | Medium — MCP spec stable (v2025-11-25, ~100+ public servers); the `@modelcontextprotocol/sdk` bridge is pending, so the scaffold reports `yellow` until the 2026-06-01 OpenHands runtime lands. v2026-07-28 RC migration is the sibling `mcp-migration-to-2026-07-28-rc` task; version shims live below the 3-verb interface seam |
+| 17 | Preventive sandbox | `SandboxAdapter` (`novel/adapters/sandbox/`) | Docker CLI via `child_process` (`novel/adapters/sandbox/src/sandbox.docker.ts`) — container holds the workspace, `docker exec` runs commands, a bind-mount + `--read-only` root + `--cap-drop ALL` confine every effect to `/workspace` | Podman, gVisor (runsc), Firecracker microVM, the bash-runner default | Medium — opt-in via `untrusted: true` in `.minsky/repo.yaml`; off by default. When the Docker daemon is absent the adapter reports `yellow` (never a false `green`) and the host falls back to the bash-runner. Shape mirrors OpenHands' `app_server/sandbox/` (the `research-finding-docker-sandbox-adapter` task) |
+| 18 | Task source | `TaskSource` (`scripts/pick_task.py`) | tasks.md via `TasksMdTaskSource` (wraps the `parse_tasks_md` parity parser; the daemon's `bin/minsky-run.sh` picker reads through this port) | custom backends (a GitHub-Issues / Projects-v2 adapter is the `ghi-task-source-github-issues-impl` task) | Self-owned, no risk — the port is three verbs (`list_open_tasks` / `get_task` / `find`); a second backend is an additive impl, not a `pick_host_task` rewrite. Anchor: Cockburn, Ports & Adapters, 2005 |
+
+## The novel layers (what's actually ours)
+
+Five small packages. Each is MIT-licensed, each its own GitHub repo, each with a clean interface so other people's stacks can use them too. Minsky integrates them only through their published interfaces; Minsky is its own first downstream consumer.
+
+### `claude-budget-guard`
+
+A token-budget watchdog. It reads from the `TokenMonitor` adapter and exposes "remaining minutes / tokens / cost / weekly headroom" two ways:
+
+- A flag file (`/var/run/minsky/budget.flag`) for shell scripts.
+- A JSON API (`http://localhost:9876/budget`) for the dashboard and supervisor.
+
+Other parts (the supervisor, the Watch query) read these to decide whether to start a new tick. It is independent of OMC, tasks.md, and everything else.
+
+**Extracted from day one.** Useful to anyone running Claude Code on a budget.
+
+### `claude-handoff-spec`
+
+A small spec, modeled after AGENTS.md and tasks.md, for structured handoffs between personas. A **persona** is a role the agent takes on (researcher, planner, implementer, QA). The spec defines the format of a handoff record:
+
+- Status (ok | blocked | needs-rework)
+- Summary
+- Artifacts produced
+- Blockers (if any)
+- Suggested next personas
+- Pushback (if applicable)
+
+It ships a reference parser and a validator. OMC, claude-flow, MetaGPT, or any multi-agent system could adopt it. **The goal is to make the handoff format the way tasks.md is becoming the way for queues.**
+
+### `claude-spec-monitor` (advisory-only Skill)
+
+This is the runtime specification-monitoring layer — checking, at runtime, whether work conforms to the constitution. It is split per rule #10.
+
+The *load-bearing* share lives in the deterministic CI linters at `scripts/check-rule-{1..7}-*.mjs`, `scripts/check-pattern-index.mjs`, and `scripts/check-pr-self-grade.mjs`. Each is a required status check, each runs locally, and no LLM sits in the verdict chain.
+
+The *residual judgement* share — concerns that genuinely resist mechanisation (hypothesis vagueness, pivot=success collisions, non-primary anchors, unchecked measurement output, conformance-level mismatch) — lives in `novel/spec-monitor/` as an advisory-only Claude Skill (vision.md row 35). It is capped at ≤5 advisory rules and never gates CI. Adding a deterministic linter retires the matching Skill check (the rule-#10 ratchet).
+
+### `claude-mape-k-loop`
+
+The autonomic manager (Kephart & Chess, 2003): the self-improvement loop. **MAPE-K** stands for Monitor, Analyze, Plan, Execute, over a shared Knowledge base. The loop runs periodically — configurable: every Nth tick, every 6h, on demand, or when budget drops below a threshold — and does this:
+
+1. **Monitor**: observe via the `Observability` adapter.
+2. **Analyze**: read the deterministic-linter status (the rule-#10 lint set: `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs` + `scripts/check-pr-self-grade.mjs`) plus the advisory output of the `novel/spec-monitor/` Skill (advisory only — never gates), then identify the top constraint via Theory-of-Constraints discipline.
+3. **Plan**: if a persona prompt is implicated, propose variants.
+4. **Execute**: run an A/B test via the `PromptOptimizer` adapter and roll out the winner.
+5. **Knowledge**: log the change to `constraints.md`; commit.
+
+The loop is itself a Claude Code subagent, so it inherits supervision — a recursive supervision tree.
+
+### `omc-tasksmd-bridge`
+
+Bidirectional sync between tasks.md (canonical) and OMC's internal task list. It translates priorities, claims, and completions. It goes away when OMC adopts tasks.md upstream — **the success metric for this package is "this package becomes unnecessary."** The OMC issue proposing native tasks.md support is filed on day one.
+
+## Data flow per tick
+
+The normal, happy-path round of work, one tick at a time:
+
+```text
+                ┌─────────────────────┐
+                │ supervisor wakes    │  (cron or signal, every N min)
+                └──────────┬──────────┘
+                           │
+                ┌──────────▼──────────┐
+                │ budget-guard check  │
+                └──────────┬──────────┘
+              budget OK    │   below threshold
+                  ┌────────┴────────┐
+                  │                 │
+                  ▼                 ▼
+        ┌────────────────┐    ┌──────────────┐
+        │ continue tick  │    │ sleep, notify│
+        └────────┬───────┘    └──────────────┘
+                 │
+        ┌────────▼─────────────┐
+        │ spec-monitor         │  (advisory Skill — never gates; deterministic share runs in CI per rule #10)
+        └────────┬─────────────┘
+                 │
+        ┌────────▼─────────────┐
+        │ tasks.md /next-task  │  (your own /next-task command)
+        └────────┬─────────────┘
+                 │  (claimed task, with Tags + Acceptance)
+        ┌────────▼─────────────┐
+        │ omc-tasksmd-bridge   │  (translate to OMC invocation, choose mode)
+        └────────┬─────────────┘
+                 │
+        ┌────────▼─────────────┐
+        │ OMC runs the task    │  (autopilot | team | ralph)
+        │  - personas hand off │
+        │  - OTEL captured     │
+        └────────┬─────────────┘
+                 │
+        ┌────────▼─────────────┐
+        │ task completes       │  (commit, push, tasks.md cleared)
+        └────────┬─────────────┘
+                 │
+        ┌────────▼─────────────┐
+        │ mape-k reads spans   │  (updates constraint log; maybe A/B)
+        └────────┬─────────────┘
+                 │
+        ┌────────▼─────────────┐
+        │ notifier (if level)  │  (ntfy → iPhone/Watch)
+        └────────┬─────────────┘
+                 │
+                 └──── loop ───────────────────────────────► (back to start)
+```
+
+## Process supervision tree
+
+> **Pattern:** OTP supervision behaviour (Armstrong, *Programming Erlang*, 2007). Conformance: partial — restart strategies match; supervisor primitive is systemd / launchd, not BEAM. See `vision.md` § "Pattern conformance index" row 4 for the deviation rationale.
+
+The **supervisor** is the outer watchdog — systemd on Linux, launchd on macOS — that restarts Minsky if it dies and survives reboots. Every long-running process has a supervisor; if it dies, it restarts according to a policy. State lives on disk, so nothing is lost.
+
+```text
+systemd (Linux) or launchd (macOS)
+└── minsky-supervisor                        (Restart=always)
+    ├── budget-guard                         (Restart=always — must outlive tick failures)
+    ├── tick-loop                            (Restart=on-failure with backoff)
+    │   └── claude -p (per tick, ephemeral)  (no restart; supervisor relaunches loop)
+    ├── mape-k-loop                          (cron-triggered, less frequent)
+    ├── dashboard-web                        (Restart=always — UI must be reachable)
+    └── notifier-relay                       (Restart=always)
+```
+
+Restart policies:
+
+- `budget-guard` and `dashboard-web` use `one-for-one` — if they crash, only they restart.
+- `tick-loop` uses backoff (5s → 30s → 5min) to avoid hammering on systematic failures.
+- `mape-k-loop` is fire-and-forget per invocation; cron handles the watchdog schedule.
+
+**MAPE-K cadence** (the schedule cron drives `mape-k-loop` on) is a three-priority hybrid: event-triggered overrides beat the time-based watchdog, which beats the tick-iteration backstop. The supervisor wakes `mape-k-loop` via `SIGUSR1` on event triggers (any rule-#10 deterministic linter going red on `main`, or `budget-guard` at 85%); cron fires the time-based watchdog every 12h regardless; a backstop forces a pass every 1000 ticks. The full rationale, rejected alternatives (pure time-based, pure tick-based, pure event-triggered), token-cost estimate (≤5.7% of weekly Max5 budget — itself adaptive per `mape-k-loop`'s monthly self-calibration), and literature anchors (Liu 2000, Kephart & Chess 2003, Astrom & Wittenmark 1997, Beyer SRE 2016) live in `research.md` § "MAPE-K cadence". The numeric thresholds are configurable via `config/mape-k.json`; they are not constants in code, matching the adaptive-threshold discipline used by `budget-guard` (see `## Token economy`).
+
+## Observability
+
+Minsky emits OpenTelemetry (OTEL) — the open standard for traces, metrics, and logs — throughout. Claude Code natively emits OTEL and propagates `TRACEPARENT` to subprocesses, so every tool call by every persona nests under the tick that spawned it. End-to-end distributed tracing, free.
+
+Local stack:
+
+- **OpenObserve** is the single-binary backend for logs, traces, and metrics — the primary recommendation per `research.md` § "Lighter OTEL backend" (resolved 2026-05-03). Smallest disk footprint, simplest install, satisfies all three query-shape constraints.
+- **Runner-up**: the VictoriaMetrics + VictoriaLogs + VictoriaTraces triad — the first port of call if a pivot away from OpenObserve fires.
+- **Previously recommended** (kept for historical context until `observability-adapter-v0` ships against OpenObserve): Loki + Tempo + Prometheus + Grafana.
+
+Three dashboard tiers, each reading from the same OTEL backend through the `Observability` adapter:
+
+1. **CLI (claude-dashboard)** — for the developer at the terminal. k9s-style, shows all sessions, attach/detach.
+2. **Web (custom, ~300 lines, mobile-friendly)** — reachable via Tailscale. Shows the 10 success metrics from `vision.md`, the current task, recent handoffs, and the constraint of the week.
+3. **Watch (Apple Shortcuts → ntfy → glance widget)** — three numbers only:
+   - Tokens remaining in the current 5-hour window (color: green > 50%, yellow > 20%, red < 20%).
+   - Last task status (✓ or ✗ or ⏳).
+   - This week's constraint (one-word label).
+
+The Watch shows the smallest set of facts that answer "is the organism still alive and on track?". If the answer needs more than one glance, the design is wrong.
+
+## Token economy
+
+Tier scope: **Claude Code Max5**. The exact budgets in tokens, requests per minute, and weekly cap are not published by Anthropic for this tier and change over time, so Minsky never hardcodes them. Instead the system **observes** the current budget through the `TokenMonitor` adapter and reacts at *relative* thresholds. This keeps `claude-budget-guard` correct as Anthropic's numbers shift and as the operator upgrades or downgrades tiers.
+
+Hard constraints (observed at runtime; placeholders until verified):
+
+- 5h rolling window size: `<TBD: verify against anthropic.com/pricing>`
+- Weekly cap (introduced August 2025; tier- and version-dependent): `<TBD: verify against anthropic.com/pricing>`
+- Shared bucket with `claude.ai` usage on the same account: yes
+- Behavior on cap hit: HTTP 429 from the API, surfaced by the `Orchestrator` adapter
+
+Adaptive homeostasis (lives in `claude-budget-guard`; thresholds are *relative*, never absolute):
+
+- **Below 70%** of the observed 5h window: normal cadence; full model routing per `Orchestrator` rules.
+- **At 70%** of the 5h window: low-effort personas switch from Sonnet to Haiku (`graceful-degrade` per rule #7); OTEL span tagged `degraded=true`.
+- **At 85%** of the 5h window: pause new tick claims; let in-flight ticks finish (`circuit-break-and-notify` per rule #7); fire a single notification at level=warn.
+- **At weekly-cap warning** (Maciek's `TokenMonitor` surfaces this from its ML-based predictor): extend sleep cycles between ticks; favor Haiku.
+- **After window reset** (TokenMonitor reports remaining > 50% again): resume normal cadence; clear the `degraded=true` tag; emit OTEL counter `budget_guard.resume`.
+
+The numeric thresholds (70%, 85%) are configurable via `config/budget-guard.json`; they are not constants in code. The "observed peak" comes from the rolling max of `TokenMonitor.peakObserved()` over the last 30 days, recomputed at every reset.
+
+Sustainable rate target:
+
+- **≈30% of observed 5h-window peak per 5h window**, sustained. Rationale (Google SRE error-budget discipline, Beyer et al. 2016): leave 70% headroom for (a) human use of `claude.ai` on the same bucket, (b) unanticipated spikes from rule-#7 chaos tests, (c) recovery work after a `loud-crash-supervisor-restart`, and (d) the autonomic manager's MAPE-K cycles, which themselves consume tokens. The 30% figure is itself adaptive: the `mape-k-loop` adjusts it monthly based on observed weekly-cap distance and the sustained-rate trend in `vision.md` § Success criteria #2 (tokens-per-closed-user-story).
+
+Token-saving rules baked into adapters:
+
+- `Orchestrator`: plan with Opus, execute with Sonnet (`/model opusplan` pattern); Haiku for high-volume scripted runs and post-70% degraded mode.
+- `Orchestrator`: protect the prompt-cache prefix — don't add MCP servers or change models mid-session.
+- `Observability`: hooks for deterministic checks (zero LLM-context cost), not prompts.
+
+Failure modes and chaos verification: see `claude-budget-guard`'s README failure-modes section per rule #7, and `user-stories/004-budget-auto-pause.md` for the per-story failure table.
+
+## Bootstrap (`./install.sh`)
+
+The single command from zero to running. Idempotent. Re-runnable. Fails loud and early.
+
+Steps:
+
+1. Verify prerequisites: Claude Code CLI, brew (macOS) or apt (Linux), npm, tmux, systemd or launchd, gh.
+2. Install dependencies:
+   - `brew install` / `apt install` for system tools (Tailscale, jq, etc.).
+   - `npm install -g` for `@tasks-md/cli`, `tasks-mcp`.
+   - `pip install claude-monitor==3.1.0` (Python tool, pinned per `research.md` § "Token monitor").
+   - `claude plugin install oh-my-claudecode@v4.13.x` (pinned).
+   - `claude plugin install ralph-wiggum`.
+3. Configure:
+   - Tailscale auth (`tailscale up`).
+   - ntfy topic creation.
+   - OTEL endpoints (env vars in service files).
+   - MCP server registration in OMC.
+4. Render systemd/launchd unit files from templates with the user's paths.
+5. Initialize `tasks.md` if absent; install `/next-task` for Claude Code.
+6. Run smoke tests against each adapter (each adapter has a `selfTest()` method).
+7. Print:
+   - Local dashboard URL.
+   - Tailscale-reachable URL.
+   - ntfy topic name (for Apple Shortcut configuration).
+   - Status: GREEN / YELLOW / RED with explanation.
+
+## Versioning & dependency evolution
+
+Pin major versions of all dependencies. Test integration on every dep update. The bridges layer (especially `omc-tasksmd-bridge`) absorbs breaking changes upstream so business logic never sees them.
+
+Currently pinned (this list is the *index*, not a duplicate state — pins live in `package.json` and `.github/workflows/*.yml`):
+
+- `@tasks-md/lint@^0.7.0` — `.github/workflows/ci.yml:39` (per PR #44)
+- `markdownlint-cli2@0.22.1` — pinned in `package.json` devDependencies + `pnpm-lock.yaml`; both CI (`.github/workflows/ci.yml` markdownlint job) and local (`pnpm lint:md` script invoked by `scripts/run-pre-pr-lint-stack.mjs`) resolve to the same binary via `pnpm exec`. Previously drifted: CI hardcoded `npx -y markdownlint-cli2@0.15.0` while local used 0.22.1 — fixed in PR `fix/markdownlint-version-parity-ci-vs-local`.
+- `lighthouse@12.4.0` — `.github/workflows/lighthouse.yml:108` (per PR #66)
+- `@anthropic-ai/sdk@^0.92.0` — `novel/adapters/prompt-optimizer/package.json` (per PR #55)
+- `@opentelemetry/core@^1.30.0` — `novel/adapters/observability/package.json` (per PR #62)
+- `@biomejs/biome@1.9.4`, `typescript@5.7.2`, `vitest@2.1.9`, `lefthook@1.10.10`, `@vitest/coverage-v8@2.1.9`, `@types/node@25.6.0` — `package.json` devDependencies
+- `pnpm@9.12.0` — `packageManager` field, `package.json`
+
+Quarterly review (recorded in `research.md`):
+
+- For each dep: is there a better replacement now?
+- For each novel layer: is there an upstream tool that subsumes it?
+- For each adapter: is the interface still a good shape, or has the domain evolved?
+
+Replacement procedure:
+
+1. Add the new adapter implementation alongside the old (e.g., `orchestrator.NEW.ts`).
+2. Switch the import in `config/adapters.json`.
+3. Run integration tests.
+4. If pass: delete the old adapter; update `research.md` noting the swap, the rationale, and the date.
+
+## Open questions to resolve before implementation
+
+These don't block writing `vision.md` and `ARCHITECTURE.md`, but they do block writing code. They go into `TASKS.md` as P1 research tasks. *Items struck through are resolved by later PRs — kept here as historical anchors per `AGENTS.md` § "Documentation rules".*
+
+1. ~~**OMC handoff persistence** — does OMC's "shared task list" persist to disk in a parseable format, or only in process memory? Determines the complexity of `omc-tasksmd-bridge`.~~ **Resolved**: PRs #75/#77 — parseable on-disk persistence confirmed; `scripts/omc-roundtrip.mjs` enforces round-trip; see `research.md` § "OMC handoff persistence".
+2. ~~**Apple Watch surface** — does Shortcut + ntfy suffice, or do we eventually need a real WatchOS app? Defer; start with Shortcuts and measure dwell time (success metric #6).~~ **Resolved**: PR #54 — native WatchOS app evaluated, deferred behind 90 s/day wrist-dwell trigger sustained 14 d; see `research.md` § "Native WatchOS app".
+3. ~~**MAPE-K loop cadence** — every Nth tick? Time-based (every 6h)? Event-triggered (when error budget below X)? Probably all three with priority. Test in production.~~ **Resolved**: PRs #59 + #70 — cadence-lint quartet (5.7% token-budget cap, tick-loop backoff, MAPE-K backstop/watchdog, cadence-pivot) enforces deterministic prose-anchored CI lints; see `ARCHITECTURE.md` § "MAPE-K cadence" + vision.md row 59.
+4. ~~**Multi-machine** — initial scope is single-developer-machine. Multi-machine / team scope deferred to v1+.~~ **Resolved**: PR #45 — multi-machine scope deltas documented; see `research.md` § "Multi-machine scope".
+5. **OMC version pinning strategy** — strict patch pin (v4.13.4 exactly) vs minor-floating (v4.13.x)? Recommend minor-floating with an integration test gate, but verify their semver discipline first.
+6. **OTEL backend choice** — *Resolved 2026-05-03* (see `research.md` § "Lighter OTEL backend"): OpenObserve for v0 (single binary, smallest disk footprint, satisfies all three query-shape constraints); VictoriaMetrics triad as runner-up. The previously-considered Loki/Tempo/Prometheus/Grafana stack is heavier than necessary for a single-dev setup.
+
+## Competitive layer-by-layer
+
+What Minsky has at each layer versus the orchestrator-tier competitors (CrewAI, AutoGen, LangGraph, MetaGPT, OpenAI Agents SDK). Use this table to see the moat shape architecturally — where Minsky is the only system with the property, and where competitors have something Minsky doesn't.
+
+Symbol legend: ✅ has it, today; 🟡 partial / framework-level; ❌ doesn't have it; ⚪ rejected by design.
+
+| Layer | Minsky | CrewAI | AutoGen | LangGraph | MetaGPT | OpenAI Agents SDK |
+|---|---|---|---|---|---|---|
+| **Daemon (operator attaches and walks away)** | ✅ launchd / systemd supervisor | ❌ framework (Python lib) | ❌ framework (Python lib) | ❌ framework (Python lib) | ❌ framework (Python lib) | ❌ framework (Python lib) |
+| **Operator-machine identity (~/.gitconfig, ~/.config/gh/, ~/.ssh)** | ✅ `spawn(agent, args, { cwd: hostDir })` | ❌ platform identity (CrewAI Enterprise) | ❌ Python container identity | ❌ Python container identity | ❌ Python container identity | ❌ OpenAI account identity |
+| **State persistence with checkpointing** | 🟡 `.minsky/orchestrate.jsonl` (iteration-level, not graph-level) | ✅ `@persist` + JsonProvider / SqliteProvider | 🟡 GroupChat memory; no first-class persistence | ✅ Postgres / Sqlite / InMemory savers + thread_id | ❌ stateless per task | ✅ sessions + tracing |
+| **Multi-role / persona pipeline** | ✅ delegated to OpenHands' native MicroAgents + DelegateTool + TaskToolSet + AgentDefinition (per the Path C reshape — Minsky's `persona-spawner` adapter was deleted 2026-05-24) | ✅ Crew = roles | ✅ AssistantAgent / UserProxyAgent / GroupChat | ✅ graph nodes | ✅ Standardised Operating Procedure (PM / Architect / Engineer / QA) | ✅ handoffs |
+| **MAPE-K self-improvement loop** | ✅ `novel/mape-k-loop/` mines iteration ledger | ❌ static once shipped | ❌ static once shipped | ❌ static once shipped | ❌ static once shipped | ❌ static once shipped |
+| **Constitution + deterministic CI enforcement** | ✅ 17 rules + 53 pre-pr-lint stages + 65 CI jobs | ❌ no per-rule CI gate | ❌ no per-rule CI gate | ❌ no per-rule CI gate | ❌ no per-rule CI gate | 🟡 guardrails primitive (per-agent) |
+| **Cross-repo fleet (walk N hosts)** | ✅ `--hosts-dir <parent>` + round-robin | ❌ one Flow at a time | ❌ one team at a time | ❌ one graph at a time | ❌ one task at a time | ❌ one agent at a time |
+| **TASKS.md as operator surface** | ✅ plain markdown queue | ❌ Python code defines tasks | ❌ Python code defines agents | ❌ Python code defines graph | ❌ Python code defines roles | ❌ Python / TS code defines agents |
+| **Pre-registered hypothesis-driven development (rule #9)** | ✅ Hypothesis/Success/Pivot/Measurement/Anchor on every task | ❌ no equivalent | ❌ no equivalent | ❌ no equivalent | ❌ no equivalent | ❌ no equivalent |
+| **Headline benchmark (HumanEval / SWE-bench / GAIA)** | ❌ no number yet | ❌ no benchmark (adoption metrics only) | 🟡 GAIA SOTA March 2024 (no headline %) | ❌ third-party benchmarks only | ✅ HumanEval 0.859, MBPP 0.877 | ❌ no benchmark yet |
+| **Enterprise distribution (Fortune 500-scale)** | ❌ ~1 deployment | ✅ 60% Fortune 500 | 🟡 Microsoft-internal | 🟡 LangChain community | ❌ research-grade | 🟡 OpenAI ecosystem |
+| **Multi-agent ensembling within ONE task** | ❌ one agent per task | 🟡 Crew = multi-agent | ✅ GroupChat | ✅ graph nodes | ✅ assembly line | ✅ handoffs |
+| **Graph-based time-travel debugging** | ⚪ rejected (linear iteration ledger is the moat) | 🟡 checkpoint replay | ❌ no equivalent | ✅ get_state_history + replay | ❌ no equivalent | 🟡 trace replay |
+| **Python framework** | ⚪ rejected (TypeScript surface) | ✅ Python | ✅ Python | ✅ Python | ✅ Python | ✅ Python + TS |
+
+The full moat analysis lives at [`competitors/README.md`](competitors/README.md). The four ❌ rows in the Minsky column above are filed as TASKS.md follow-ups:
+
+- `benchmark-minsky-via-claude-on-humaneval` — close the headline-benchmark gap by running HumanEval on Minsky-via-Claude and publishing the score.
+- `enterprise-deployment-readiness-audit` — close the distribution gap; M2-gated (M1's job is to make Minsky stable + measurable, not to chase enterprise sales).
+- `explore-multi-agent-ensembling-experiment` — investigate whether the Augment Code pattern (Sonnet driver + o1 ensembler) lifts Minsky-via-Claude's HumanEval score; M2-gated.
+- `gaia-benchmark-evaluation-substrate` — add `bin/minsky benchmark gaia` to compare to AutoGen's claimed GAIA SOTA.
+
+The two ⚪ rows (graph-based time-travel + Python framework) are rejected by design — `vision.md` § "Honest gaps" explains the trade-offs.
+
+## Reading next
+
+- `MILESTONES.md` — product roadmap, per-milestone capability tables, what Minsky will never do
+- `vision.md` — the constitution this document serves; § "What Minsky uniquely does" enumerates the six moats
+- `AGENTS.md` — how any agent should behave when working in this repo (includes rule #15: milestone alignment gate)
+- `TASKS.md` — current work queue (137 open tasks; milestone-alignment-gate task is always first)
+- `METRICS.md` — 10 canonical metrics (currently stubs — M1 wires real observations)
+- `research.md` — living dependency scan
+- `competitors/README.md` — strategic landscape + moat synthesis (read AFTER `vision.md` § "What Minsky uniquely does")
+- `competitors/<id>.md` — per-vendor research files
+- `user-stories/012-operator-machine-identity-moat.md` + `user-stories/013-daemon-not-framework-moat.md` — moats 1 and 2 as user stories
+- `user-stories/` — one file per story with metric, integration test, proof

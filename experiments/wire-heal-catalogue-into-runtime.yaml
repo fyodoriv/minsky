@@ -1,0 +1,61 @@
+id: wire-heal-catalogue-into-runtime
+hypothesis: |
+  The M1.13 automated-heal catalogue (`novel/observer/heals` — 11
+  helpers, all chaos-validated with MTTR < 5min) is dead weight today:
+  nothing in the production runtime imports it, so `.minsky/
+  heal-events.jsonl` has never been written and `node scripts/
+  heal-mttr-report.mjs --window=30d --json` reports `source: "no-data"`.
+
+  This experiment claims: binding the catalogue to production seams in
+  `scripts/heal-dispatch.mjs` and firing it at the pre-walk boundary of
+  `bin/minsky-run.sh --loop` makes injected catalogued failure classes
+  (stale-pid, corrupt-state-json, partial-config-write) heal without
+  human intervention AND writes the first production HealEvent rows —
+  the MTTR ledger goes from no-data to ≥1 row. The bet relies on:
+
+    1. The detect→apply→verify trio is already idempotent and
+       chaos-proven; only the seam binding (real fs / process.kill /
+       real paths) is new surface.
+    2. The dispatcher's exit-0-always contract (rule #6) means the
+       wiring is strictly additive risk-wise — a dispatcher bug can log
+       noise but cannot make the supervisor loop worse.
+    3. The pre-walk boundary runs every tick, so any stale-pid /
+       corrupt-state / partial-config incident is healed within one
+       tick interval (≤ 5min) instead of waiting for an operator.
+success: |
+  ≥1 fired-heal row (attempted ≥ 1) in the 30d window once a catalogued
+  failure occurs in production, with ≥50% of attempted heals reaching
+  outcome=healed. Gate command:
+  `node scripts/heal-mttr-report.mjs --window=30d --json | jq -e '.[0].attempted >= 1'`
+  Pre-production proxy (passes in this PR): the integration test
+  injects dead-pid 99999 + truncated state.json into a fixture host and
+  asserts the ledger row lands with duration_ms < 300000.
+pivot: |
+  If after 14 days of `--loop` production operation the healed share of
+  attempted dispatches is below 25% (e.g. verify keeps failing because
+  the CLI-boundary seams are wrong about real paths), abandon the
+  CLI-per-tick dispatch approach and move dispatch into the observer
+  process where runtime context (live pid table, spawn stderr) is
+  available. Decision boundary: healed/attempted < 25% over any rolling
+  14-day window with attempted ≥ 4. (Margin vs the 50% success
+  threshold: 25 percentage points ≫ 1%.)
+measurement: |
+  npx vitest run test/integration/heal-dispatch.test.ts && node scripts/heal-mttr-report.mjs --window=30d --json | jq -e '.[0].window == "30d"'
+# Implementation artefacts (rule-12 scope-discipline cross-reference):
+#   - scripts/heal-dispatch.mjs (production seam binding + dispatcher)
+#   - bin/minsky-run.sh (pre-walk wire-in, --loop mode)
+#   - test/integration/heal-dispatch.test.ts (injected-failure proof)
+#   - user-stories/007-agent-self-heals-catalogued-failures.md (scenarios)
+# Production observation (post-merge, flips the M1.13 row to ✅):
+#   node scripts/heal-mttr-report.mjs --window=30d --json
+#   → source flips from "no-data" to "heal-events".
+anchor: |
+  Beyer, B., Jones, C., Petoff, J., Murphy, N.R. (eds.), *Site
+  Reliability Engineering*, O'Reilly, 2016, ISBN 978-1491929124, Ch. 6
+  "Effective Troubleshooting" + Ch. 11 "Being On-Call" — automated
+  remediation must be wired into the serving path, not just rehearsed;
+  MTTR is the SLI. Constitutional anchors: rule #6 (graceful degrade —
+  the dispatcher never makes the loop worse); rule #17 (proactive
+  healing — detect→apply→verify wired at the boundary where failures
+  occur); rule #9 (this pre-registration).
+replay_windows_days: [30]

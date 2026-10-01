@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Minsky tick-loop — launchd LaunchAgent for macOS.
+
+Pattern: OTP "transient" restart (Armstrong 2007). launchd's `KeepAlive`
+with `SuccessfulExit=false` is the closest equivalent: keep alive only if
+the process exited non-zero — analogous to systemd's `Restart=on-failure`.
+
+Placeholders substituted by setup.sh via envsubst:
+  ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+
+Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.minsky.tick-loop.plist
+  launchctl enable gui/$(id -u)/com.minsky.tick-loop
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.minsky.tick-loop</string>
+
+    <!-- ProcessType=Standard is the operator-machine-budget-autoscale contract
+         (vision.md rule #15): the worker is the process the machine budget is
+         ABOUT, so it must NOT be QoS-throttled. macOS throttles CPU/IO for
+         `Background` QoS, which makes any non-trivial budget physically
+         unreachable (launchd.plist(5)). `scripts/check-machine-budget.mjs`
+         hard-fails CI if this ever drifts back to `Background`. The durable
+         host-side follow-up for this change lives in the dotfiles TASKS.md
+         (rule #1 — propagate, don't hand-maintain a one-off). -->
+    <key>ProcessType</key>
+    <string>Standard</string>
+
+    <key>WorkingDirectory</key>
+    <string>${MINSKY_HOME}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MINSKY_HOME</key>
+        <string>${MINSKY_HOME}</string>
+        <!-- Endpoint-safe PATH: dotfiles shims before /usr/bin/{jq,python3}.
+             run-tick-loop.sh also sources lib-launchd-path.sh; this plist
+             PATH is belt-and-suspenders for sandbox-exec children. -->
+        <key>PATH</key>
+        <string>${HOME}/apps/tooling/dotfiles/bin:${HOME}/apps/dotfiles/bin:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <!-- Safe-rollout window closed 2026-05-04 — Minsky-on-itself
+             validated end-to-end (launchd plist paths fixed #143; macOS
+             portability fixes #144; node-PATH-resolution #145; stdout
+             flush #146). Production default is now `ProcessSpawnStrategy`
+             (real `claude --print` per iteration). To re-enter dry-run
+             temporarily (e.g., for a chaos test or a fresh-install
+             smoke), set `MINSKY_TICK_DRY_RUN=1` here, `pnpm minsky:setup`
+             to reload, then drop it again. -->
+        <!-- Daily-changelog umbrella opt-in (acceptance criterion (3) of
+             `daily-changelog-for-humans`). Enables BOTH `runDaemon` seams
+             the CLI constructs under this single env var: the changelog-mode
+             `claude --print` author (per-day, gated by `## YYYY-MM-DD` H2 in
+             CHANGELOG.md) AND the per-day metric-snapshot capture
+             (`pnpm changelog:snapshot --date <date>`, gated by
+             `.minsky/metric-snapshots/<date>.json` presence). Both gates are
+             idempotent — exactly one fire per UTC date — so leaving this on
+             across many iterations is safe by design (rule #2 — file
+             presence IS the "this happened" record). Drop these two keys
+             to revert to substrate-inert. -->
+        <key>MINSKY_CHANGELOG_ENABLE</key>
+        <string>1</string>
+        <!-- Post-task CTO-audit umbrella opt-in (sub-step (d) of
+             `post-task-cto-audit`). Constructs the `CtoAuditSeam` the
+             daemon dispatches into after every successfully-completed
+             iteration that shipped a real change (commit on the branch
+             OR PR opened — noop iterations are gated out by
+             `shouldRunCtoAudit`). The audit spawns a separate
+             `claude --print` invocation with a CTO-mode prompt header
+             (`CTO_PROMPT_HEADER`) that asks for the single highest-
+             leverage next task; output is committed to TASKS.md on a
+             dedicated branch (`audit/<UTC-date>-<original-task-id>`)
+             and a PR is opened with label `minsky:cto-audit` for
+             operator review (sub-step (e)). The cap-1-per-task contract
+             (sub-step (f)) is enforced by a file-backed lock at
+             `<MINSKY_HOME>/.minsky/cto-audit-lock/<task-id>` that
+             survives daemon restart. Per-iteration override: set
+             `MINSKY_CTO_AUDIT=off` to skip a single fire without
+             unwinding the seam (sub-step (c)). Operator runbook:
+             `docs/post-task-cto-audit.md`. Pivot trigger (rule #9):
+             >5 audit-PRs/day means tighten the brief; <1/week sustained
+             4 weeks means retire. -->
+        <key>MINSKY_CTO_AUDIT_ENABLE</key>
+        <string>1</string>
+        <!-- Supervisor-sandbox mode (vision.md § 13.3 — third minimum-bar
+             item of rule #13). Resolver substrate ships in
+             `novel/tick-loop/src/sandbox-mode.ts` (PR #332); startup banner
+             consumes it (PR #335). Unset / `'off'` is the substrate-inert
+             default — no `sandbox-exec` profile applied. Operator ramp path:
+             uncomment the two lines below with value `'warn-only'` for the
+             14-day soak (logs every disallowed access, blocks nothing);
+             flip to `'enforce'` after the soak. An unrecognised value
+             (typo) falls back to `'off'` and surfaces a WARNING line in
+             the supervisor log (rule #6 visible-not-silent). Substrate-
+             inert until later slices wire the `sandbox-exec` profile —
+             flipping to `enforce` today does not actually sandbox anything. -->
+        <!-- <key>MINSKY_SANDBOX</key>
+             <string>off</string> -->
+        <!-- Task-rotation auto-cleanup (PR #862 wired the seam,
+             this flag activates it). When set, the daemon's
+             iteration loop runs `runTaskRotation` after every
+             successful merge — auto-removes TASKS.md task blocks
+             whose substrate shipped (matched by merged-PR title or
+             explicit `**Status**: shipped` field). Closes the
+             "substrate shipped, default not flipped" anti-pattern
+             observed in 4 manual orphan-cleanup PRs (#861, #864,
+             #870, #872 — three of which were filed manually because
+             this var was 0). Rule #16 (default by default).
+             Reversible — unset + reload to revert. -->
+        <key>MINSKY_TASK_ROTATION_ENABLE</key>
+        <string>1</string>
+        <!-- Opt-in gate mirrored by run-tick-loop.sh; unset/0 = dormant. -->
+        <key>MINSKY_TICK_LOOP_ENABLED</key>
+        <string>0</string>
+    </dict>
+
+    <!-- Supervisor sandbox (vision.md § 13.3 minimum-bar item 3 —
+         `supervisor-sandbox-syscall-restriction`). The supervisor + every
+         `claude --print` / `node` / `git` child it spawns runs inside the
+         `(deny default)` SBPL profile `com.minsky.tick-loop.sb`, cutting its
+         filesystem reach down to the repo + `~/.claude/projects` + `~/.minsky`
+         and its network reach to localhost + outbound HTTPS. A read of any
+         path outside the allow-list (`~/.ssh`, `~/.aws`, `~/Documents`) fails
+         with EPERM — see scripts/chaos-sandbox-disallowed-read.mjs.
+
+         The `-D` flags supply the profile's `(param ...)` placeholders:
+           MINSKY_HOME → the repo's writable subtree (envsubst'd by the installer)
+           HOME        → resolves `~/.claude`, `~/.minsky`, `~/.gitconfig`
+         Both are in the installer's envsubst whitelist (`${MINSKY_HOME} ${HOME}`).
+         The per-user temp dir is covered by the profile's `/private/var/folders`
+         subpath, so no TMPDIR param is needed.
+
+         Escape hatch (Beyer SRE 2016 Ch. 17): to disable the sandbox in 30s
+         (e.g., debugging a false EPERM), revert ProgramArguments to invoke
+         `/bin/bash <run-tick-loop.sh>` directly — `MINSKY_SANDBOX=off` is the
+         documented intent (docs/security/supervisor-sandbox.md § "Staged
+         rollout"). Pinned by scripts/check-supervisor-sandbox-hardening.mjs:
+         this `sandbox-exec -f .../com.minsky.tick-loop.sb` reference may not be
+         silently removed without the lint going red. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/sandbox-exec</string>
+        <string>-D</string>
+        <string>MINSKY_HOME=${MINSKY_HOME}</string>
+        <string>-D</string>
+        <string>HOME=${HOME}</string>
+        <string>-f</string>
+        <string>${MINSKY_HOME}/distribution/launchd/com.minsky.tick-loop.sb</string>
+        <string>/bin/bash</string>
+        <string>${MINSKY_HOME}/distribution/systemd/run-tick-loop.sh</string>
+    </array>
+
+    <!-- Restart only on non-zero exit (transient policy per Armstrong 2007). -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Dormant by default (2026-06-17). Operator enables via
+         `minsky enable-autostart` (or legacy `minsky enable-tick-loop`
+         for tick-loop only). Disabled=true prevents RunAtLoad at login
+         until explicitly opted in. -->
+    <key>Disabled</key>
+    <true/>
+
+    <!-- Backoff between respawn attempts; caps API hammering on systematic failures. -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>${MINSKY_HOME}/.minsky/tick-loop.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>${MINSKY_HOME}/.minsky/tick-loop.err.log</string>
+</dict>
+</plist>

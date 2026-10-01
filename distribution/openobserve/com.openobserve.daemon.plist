@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+OpenObserve daemon — launchd LaunchAgent for macOS (Minsky observability backend).
+
+Pattern: OTP "permanent" restart (Armstrong 2007). The OTLP receiver is
+expected to stay alive; `KeepAlive=true` matches systemd's `Restart=always`.
+
+Placeholders substituted by setup.sh / install-openobserve.sh consumers:
+  ${HOME}   — user's home directory (POSIX standard)
+
+Default endpoints once running:
+  - UI / OTLP HTTP receiver:  http://127.0.0.1:5080
+  - Health probe:             http://127.0.0.1:5080/healthz
+  - PromQL instant query:     http://127.0.0.1:5080/api/default/prometheus/api/v1/query
+
+Install:
+  cp distribution/openobserve/com.openobserve.daemon.plist ~/Library/LaunchAgents/
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.openobserve.daemon.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.openobserve.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>${HOME}/.local/bin/openobserve</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>${HOME}/.openobserve/data</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ZO_ROOT_USER_EMAIL</key>
+        <string>root@minsky.local</string>
+        <key>ZO_ROOT_USER_PASSWORD</key>
+        <string>Complexpass#123</string>
+        <key>ZO_DATA_DIR</key>
+        <string>${HOME}/.openobserve/data</string>
+        <key>ZO_HTTP_PORT</key>
+        <string>5080</string>
+    </dict>
+
+    <!-- Permanent restart policy: the OTLP receiver should always be up. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Backoff between respawn attempts; caps churn on systematic failures. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>${HOME}/.openobserve/openobserve.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>${HOME}/.openobserve/openobserve.err.log</string>
+</dict>
+</plist>

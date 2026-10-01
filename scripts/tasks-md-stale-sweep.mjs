@@ -1,0 +1,425 @@
+#!/usr/bin/env node
+// @ts-check
+// <!-- scope: human-approved tasks-md-hygiene per tasks-md-stale-sweep -->
+//
+// tasks-md-stale-sweep — find TASKS.md entries whose described
+// fix has ALREADY shipped, so the next agent doesn't waste pre-claim
+// inspection time rediscovering the closure.
+//
+// HEURISTIC (single, conservative, evidence-based):
+//   For each unblocked, unclaimed task:
+//     1. Parse the `**Files**:` field for cited paths.
+//     2. For each cited path that exists on disk: grep its content
+//        for the task `**ID**:` value.
+//     3. If a citation is found, flag the task as a likely-shipped
+//        candidate and print the file path + line where the citation
+//        appears.
+//   The citation signal is strong: 6 of 6 PRs in the 2026-05-28 session
+//   that closed stale markers had the same shape — the fix had landed
+//   with an inline comment citing the task ID, and the marker just
+//   outlived the implementation.
+//
+// CONSERVATIVE: skips tasks with `**Blocked**:` or `**Blocked by**:`
+// (those are handled by separate workflows). Never auto-removes the
+// task block — `--dry-run` is the only mode. Operators (or the next
+// agent's pre-claim inspection) confirm + remove.
+//
+// USAGE:
+//   node scripts/tasks-md-stale-sweep.mjs --dry-run
+//
+// EXIT CODES:
+//   0 — no candidates flagged (no work)
+//   0 — candidates flagged (informational; exit-zero so this can
+//       be wired into pre-pr-lint advisory mode without failing CI)
+//
+// ANCHORS: rule #17 (proactive healing — file the recurring pattern
+// as work); operator session pattern 2026-05-28 (6 stale markers
+// across one session, PRs #946 #947 #948 #951 #952 #955).
+
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(HERE, "..");
+
+/**
+ * @typedef {object} TaskBlock
+ * @property {string} id
+ * @property {string} firstLine
+ * @property {string} body
+ */
+
+/**
+ * @typedef {"citation" | "missing-paths"} StaleReason
+ *
+ * - `"citation"`: at least one cited file contains an inline mention
+ *   of the task ID (the canonical "fix shipped + marker outlived"
+ *   signal). See `findCitations`.
+ * - `"missing-paths"`: ALL paths in `**Files**:` are absent from
+ *   disk. Surfaced 2026-05-28 by PR #961 (4 research-replace-or-
+ *   relocate-* tasks whose target directories had been deleted in
+ *   earlier Path-A phases). The substrate's deletion IS the
+ *   executed verdict; the research task no longer has a target.
+ */
+
+/**
+ * @typedef {object} StaleCandidate
+ * @property {string} id
+ * @property {string} firstLineSnippet
+ * @property {StaleReason} reason
+ * @property {{path: string, line: number, snippet: string}[]} evidence
+ * @property {string[]} [missingPaths]   set when reason="missing-paths"
+ */
+
+/**
+ * Parse TASKS.md into task blocks. A block starts at a checkbox line
+ * (`- [ ] \`<id>\` …`) and continues until the next checkbox or end.
+ *
+ * @param {string} body
+ * @returns {TaskBlock[]}
+ */
+export function parseTaskBlocks(body) {
+  /** @type {TaskBlock[]} */
+  const out = [];
+  const lines = body.split("\n");
+  /** @type {string[]} */
+  let buf = [];
+  let firstLine = "";
+  const flush = () => {
+    if (buf.length === 0) return;
+    const block = buf.join("\n");
+    const idMatch = /\*\*ID\*\*:\s*([a-z0-9-]+)/.exec(block);
+    const titleMatch = /^- \[ \]\s+`([a-z0-9-]+)`/.exec(firstLine);
+    const id = idMatch?.[1] ?? titleMatch?.[1] ?? "(unknown)";
+    out.push({ id, firstLine, body: block });
+    buf = [];
+    firstLine = "";
+  };
+  for (const line of lines) {
+    if (/^- \[ \]\s+`/.test(line)) {
+      flush();
+      firstLine = line;
+      buf.push(line);
+    } else if (buf.length > 0) {
+      buf.push(line);
+    }
+  }
+  flush();
+  return out;
+}
+
+const PATH_SHAPED_RE =
+  /\/|\.\w{2,5}$|^(bin|scripts|novel|src|user-stories|distribution|docs|tests)\//;
+
+/**
+ * Extract `**Files**:` paths from a task body. Returns absolute path
+ * strings (resolved against repoRoot). Handles both inline form
+ * `**Files**: a.ts, b.ts` and continuation-line form.
+ *
+ * @param {string} taskBody
+ * @returns {string[]}
+ */
+export function extractFilePaths(taskBody) {
+  const filesMatch = /\*\*Files\*\*:\s*([^\n]+(?:\n {4,}[^\n]+)*)/m.exec(taskBody);
+  if (!filesMatch || filesMatch[1] === undefined) return [];
+  const raw = filesMatch[1];
+  /** @type {string[]} */
+  const paths = [];
+  for (const match of raw.matchAll(/`([^`]+)`/g)) {
+    const value = match[1];
+    if (value === undefined) continue;
+    const candidate = value.trim();
+    if (PATH_SHAPED_RE.test(candidate)) {
+      paths.push(candidate);
+    }
+  }
+  return paths;
+}
+
+/**
+ * Check if a task body has a non-empty `**Blocked**:` or
+ * `**Blocked by**:` field.
+ *
+ * @param {string} taskBody
+ * @returns {boolean}
+ */
+export function isBlocked(taskBody) {
+  return /\*\*Blocked( by)?\*\*:\s*\S/.test(taskBody);
+}
+
+/**
+ * Check if the task's first line has a `(@agent-name)` claim.
+ *
+ * @param {string} firstLine
+ * @returns {boolean}
+ */
+export function isClaimed(firstLine) {
+  return /\(@/.test(firstLine);
+}
+
+/**
+ * Negative-signal regex: when the citing line contains one of these
+ * patterns near the task ID, it likely RECORDS that the task is still
+ * unshipped. Treat those as NOT a fix-shipped signal.
+ *
+ * Pattern categories:
+ *   - "filed as / follow-up / TODO / FIXME": comment recording the
+ *     task creation
+ *   - "deferred / wishlist / backlog / pending / future": comment
+ *     parking the work
+ *   - "not yet implemented / supported / stub / placeholder": comment
+ *     marking the in-place stub
+ *   - "remaining gap / tracked as / until it ships / gap to":
+ *     prose recording that the task is the unshipped slice (surfaced
+ *     2026-05-28 against INSTALL.md:20 + 5 similar cites)
+ *   - "see also / see TASKS.md": reference for context, not closure
+ */
+const NEGATIVE_SIGNAL_RE =
+  /\b(filed as|follow-?up|TODO|FIXME|HACK|deferred|wishlist|backlog|pending|future|will land|next session|not yet implemented|not yet supported|stub|placeholder|remaining gap|tracked as|until it ships|gap to|see also|see TASKS\.md)\b/i;
+
+/**
+ * Read a file's text, returning null on missing or unreadable.
+ *
+ * @param {string} absPath
+ * @returns {string | null}
+ */
+function readFileOrNull(absPath) {
+  if (!existsSync(absPath)) return null;
+  try {
+    return readFileSync(absPath, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find citations of `taskId` inside `content`, filtering out lines
+ * that match NEGATIVE_SIGNAL_RE in the line ±1 context.
+ *
+ * @param {string} taskId
+ * @param {string} content
+ * @param {string} cleanPath
+ * @returns {{path: string, line: number, snippet: string}[]}
+ */
+function citationsInContent(taskId, content, cleanPath) {
+  /** @type {{path: string, line: number, snippet: string}[]} */
+  const hits = [];
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line === undefined || !line.includes(taskId)) continue;
+    const prev = lines[Math.max(0, i - 1)] ?? "";
+    const next = lines[i + 1] ?? "";
+    if (NEGATIVE_SIGNAL_RE.test(`${prev}\n${line}\n${next}`)) continue;
+    hits.push({
+      path: cleanPath,
+      line: i + 1,
+      snippet: line.trim().slice(0, 140),
+    });
+  }
+  return hits;
+}
+
+/**
+ * For a given task ID, find inline citations across the cited files.
+ * Returns ONLY fix-shipped-shaped citations (excludes negative-signal
+ * lines like "filed as a follow-up: <task-id>").
+ *
+ * @param {string} taskId
+ * @param {string[]} paths     resolved paths relative to repoRoot
+ * @param {string} repoRoot
+ * @returns {{path: string, line: number, snippet: string}[]}
+ */
+export function findCitations(taskId, paths, repoRoot) {
+  /** @type {{path: string, line: number, snippet: string}[]} */
+  const hits = [];
+  for (const relPath of paths) {
+    // Strip trailing line refs like `foo.mjs:48` → `foo.mjs`.
+    const cleanPath = relPath.replace(/:\d+$/, "");
+    const content = readFileOrNull(resolve(repoRoot, cleanPath));
+    if (content === null) continue;
+    hits.push(...citationsInContent(taskId, content, cleanPath));
+  }
+  return hits;
+}
+
+/**
+ * @param {TaskBlock} task
+ * @returns {boolean}
+ */
+function isSweepable(task) {
+  if (task.id === "(unknown)") return false;
+  if (isBlocked(task.body)) return false;
+  if (isClaimed(task.firstLine)) return false;
+  return true;
+}
+
+/**
+ * For each path in `paths`, check whether the resolved file or
+ * directory still exists on disk. Returns the subset that's missing
+ * AND whose PARENT DIRECTORY is also missing (the substrate-deleted
+ * shape, not the new-work-to-create shape).
+ *
+ * Surfaced 2026-05-28 by PR #961: 4 research-replace-or-relocate-*
+ * tasks all cited paths inside `novel/<pkg>/` directories that had
+ * been deleted in earlier Path-A phases. The substrate's deletion IS
+ * the executed verdict — no work remains.
+ *
+ * False-positive guard (added 2026-05-28 after over-flagging
+ * cto-audit-merge-rate-metric, which cites NEW files to be created
+ * in an existing directory): a missing leaf file inside an existing
+ * parent directory is new-work, not stale-substrate. Only count a
+ * path as missing if its parent directory is ALSO gone — that means
+ * the substrate (the containing package / data dir) was deleted.
+ *
+ * Path-resolution rule: strip trailing `:N` line refs (same as
+ * findCitations), then check via existsSync against repoRoot.
+ *
+ * @param {string[]} paths     paths relative to repoRoot
+ * @param {string} repoRoot
+ * @returns {string[]}         the subset whose parent dir is also missing
+ */
+export function findMissingFilesPaths(paths, repoRoot) {
+  /** @type {string[]} */
+  const missing = [];
+  for (const relPath of paths) {
+    const cleanPath = relPath.replace(/:\d+$/, "");
+    const abs = resolve(repoRoot, cleanPath);
+    if (existsSync(abs)) continue;
+    // Parent directory must also be missing — that's the substrate-
+    // deleted signal. A missing leaf in an existing dir is new-work.
+    const parentDir = dirname(abs);
+    if (existsSync(parentDir)) continue;
+    missing.push(cleanPath);
+  }
+  return missing;
+}
+
+/**
+ * Pure entry point — given TASKS.md content + a repo root, return the
+ * list of stale-marker candidates with evidence.
+ *
+ * A task is flagged as stale if EITHER:
+ *   (a) `**Files**:` paths contain inline citations of the task ID
+ *       (the "fix shipped + marker outlived" signal), OR
+ *   (b) ALL `**Files**:` paths are missing from disk (the substrate-
+ *       deleted-but-task-block-survived signal). Surfaced 2026-05-28
+ *       by PR #961.
+ *
+ * @param {string} tasksMdContent
+ * @param {string} repoRoot
+ * @returns {StaleCandidate[]}
+ */
+export function sweepStaleTasksMdMarkers(tasksMdContent, repoRoot) {
+  const blocks = parseTaskBlocks(tasksMdContent);
+  /** @type {StaleCandidate[]} */
+  const candidates = [];
+  for (const task of blocks) {
+    if (!isSweepable(task)) continue;
+    const paths = extractFilePaths(task.body);
+    if (paths.length === 0) continue;
+
+    // Signal (b): all paths missing → substrate-deleted candidate.
+    const missingPaths = findMissingFilesPaths(paths, repoRoot);
+    if (missingPaths.length === paths.length) {
+      candidates.push({
+        id: task.id,
+        firstLineSnippet: task.firstLine.slice(0, 120),
+        reason: "missing-paths",
+        evidence: [],
+        missingPaths,
+      });
+      continue;
+    }
+
+    // Signal (a): citation in surviving file → fix-shipped candidate.
+    const evidence = findCitations(task.id, paths, repoRoot);
+    if (evidence.length === 0) continue;
+    candidates.push({
+      id: task.id,
+      firstLineSnippet: task.firstLine.slice(0, 120),
+      reason: "citation",
+      evidence,
+    });
+  }
+  return candidates;
+}
+
+// ── CLI ─────────────────────────────────────────────────────────────
+
+/**
+ * Robust "was this module run directly?" check. The naive
+ * `import.meta.url === \`file://${process.argv[1]}\`` form breaks on macOS
+ * because the URL encoding diverges from the raw path (e.g. spaces,
+ * symlinks, /private/ prefix). Compare the resolved file paths instead.
+ *
+ * @returns {boolean}
+ */
+function isInvokedAsScript() {
+  if (process.argv[1] === undefined) return false;
+  try {
+    return fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {StaleCandidate} c
+ */
+function printCandidate(c) {
+  process.stdout.write(`  task: ${c.id}  [${c.reason}]\n`);
+  process.stdout.write(`    summary: ${c.firstLineSnippet}…\n`);
+  if (c.reason === "citation") {
+    process.stdout.write("    citations found in:\n");
+    for (const e of c.evidence) {
+      process.stdout.write(`      ${e.path}:${e.line}  — ${e.snippet}\n`);
+    }
+  } else if (c.reason === "missing-paths") {
+    process.stdout.write("    ALL cited **Files** paths are absent from disk:\n");
+    for (const p of c.missingPaths ?? []) {
+      process.stdout.write(`      ${p}  (gone)\n`);
+    }
+  }
+  process.stdout.write("\n");
+}
+
+const FOOTER =
+  "To close: read each task's full block, verify the reason matches the\n" +
+  "actual repo state (substrate deleted OR fix shipped + marker outlived),\n" +
+  "then remove the task block from TASKS.md (commit: 'chore(tasks):\n" +
+  "close <task-id> — <reason>').\n";
+
+function runCli() {
+  const dryRun = process.argv.includes("--dry-run");
+  if (!dryRun) {
+    process.stderr.write("usage: node scripts/tasks-md-stale-sweep.mjs --dry-run\n");
+    process.stderr.write(
+      "  (read-only sweep; auto-remove is not implemented — operators confirm + delete)\n",
+    );
+    process.exit(2);
+  }
+  const tasksMdPath = resolve(REPO_ROOT, "TASKS.md");
+  if (!existsSync(tasksMdPath)) {
+    process.stderr.write(`TASKS.md not found at ${tasksMdPath}\n`);
+    process.exit(1);
+  }
+  const content = readFileSync(tasksMdPath, "utf8");
+  const candidates = sweepStaleTasksMdMarkers(content, REPO_ROOT);
+  if (candidates.length === 0) {
+    process.stdout.write("tasks-md-stale-sweep: 0 likely-shipped candidates found.\n");
+    process.exit(0);
+  }
+  process.stdout.write(
+    `tasks-md-stale-sweep: ${candidates.length} likely-shipped candidate(s):\n\n`,
+  );
+  for (const c of candidates) printCandidate(c);
+  process.stdout.write(FOOTER);
+  process.exit(0);
+}
+
+if (isInvokedAsScript()) {
+  runCli();
+}

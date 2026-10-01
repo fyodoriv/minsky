@@ -1,0 +1,2673 @@
+#!/usr/bin/env bats
+# tests/minsky-run.bats — Path A Phase 7 parity tests for bin/minsky-run.sh
+#
+# What this pins:
+# - JSONL schema parity with `IterationRecord` in
+#   `novel/cross-repo-runner/src/iteration-record.ts`. Every line MUST
+#   carry exactly these keys: ts, experiment_id, host_repo, branch,
+#   verdict, pr_url, notes. Drift here breaks 30+ downstream consumers
+#   (stability.mjs, iteration-ship-rate.ts, competitive-benchmark, etc).
+# - Per-host write path: `<host>/.minsky/experiment-store/cross-repo/<task-id>.jsonl`.
+# - --dry-run never spawns openhands and emits `verdict: "planned"`.
+# - Empty TASKS.md hosts emit `verdict: "drained"` with `notes: "no eligible task"`
+#   (a bookkeeping event, excluded from the stability SLI denominator).
+# - --self-check exits 0 even when openhands isn't installed (operator-friendly).
+# - The picker is invoked with `--open-pr-branches=` so the daemon
+#   self-heals after a salvage-merge (2026-05-16 example-service-plugin
+#   regression).
+#
+# Run: bats tests/minsky-run.bats
+
+setup() {
+  REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
+  MINSKY_RUN="$REPO_ROOT/bin/minsky-run.sh"
+  TMPDIR_TEST="$(mktemp -d -t minsky-run-test.XXXXXX)"
+  HOSTS_DIR="$TMPDIR_TEST/hosts"
+  mkdir -p "$HOSTS_DIR"
+  # Build a fake config the script can load.
+  CONFIG_FILE="$TMPDIR_TEST/config.json"
+  printf '{"openhands":{"model":"claude-opus-4-7"}}' > "$CONFIG_FILE"
+  export MINSKY_CONFIG="$CONFIG_FILE"
+}
+
+teardown() {
+  rm -rf "$TMPDIR_TEST"
+}
+
+# --- Helpers --------------------------------------------------------------
+
+make_host() {
+  local name="$1"
+  local tasks_md="$2"
+  local dir="$HOSTS_DIR/$name"
+  mkdir -p "$dir"
+  # Init a bare repo so walk_hosts() detects the host as a git checkout.
+  # TASKS.md stays uncommitted — the walker reads from disk, not git.
+  # (User's global gitignore intentionally ignores TASKS.md; `git add -f`
+  # would work but it's noise the script doesn't need.)
+  (cd "$dir" && git init -q && git config user.email "t@t" && git config user.name "t")
+  # A base commit, so the runner can create the agent's isolated worktree (it
+  # refuses to spawn in the host's own checkout).
+  (cd "$dir" && git -c core.hooksPath=/dev/null commit -q --allow-empty -m "chore: init")
+  printf '%s' "$tasks_md" > "$dir/TASKS.md"
+  # Bootstrap the host so the runner's `invariant_host_bootstrapped`
+  # accepts it (Invariant 6; parity with TS `loadHostConfig`). Minimum
+  # fixture: just the `.minsky/repo.yaml` marker file. Tests that
+  # specifically exercise the unbootstrapped path use a different
+  # fixture (or set MINSKY_SKIP_BOOTSTRAP_CHECK=1).
+  mkdir -p "$dir/.minsky"
+  cat > "$dir/.minsky/repo.yaml" <<EOF
+host_repo: "test/$name"
+default_branch: "main"
+tasks_md_path: "TASKS.md"
+EOF
+  echo "$dir"
+}
+
+complete_task_block() {
+  cat <<'EOF'
+# Tasks
+
+## P0
+
+- [ ] Pick me first
+  - **ID**: pick-me-first
+  - **Hypothesis**: shipping this proves the picker works
+  - **Success**: PR opens
+  - **Pivot**: <0.1
+  - **Measurement**: pytest tests/
+  - **Anchor**: rule #9
+EOF
+}
+
+# --- 1. Help + self-check --------------------------------------------------
+
+@test "--help prints usage and exits 0" {
+  run "$MINSKY_RUN" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage: minsky-run"* ]]
+  [[ "$output" == *"--hosts-dir"* ]]
+  [[ "$output" == *"--dry-run"* ]]
+}
+
+@test "--self-check exits 0 when pick_task.py is present" {
+  run "$MINSKY_RUN" --self-check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pick_task.py present"* ]]
+}
+
+@test "unknown flag exits 2" {
+  run "$MINSKY_RUN" --no-such-flag
+  [ "$status" -eq 2 ]
+}
+
+# --- 1b. Config JSON invariant ------------------------------------------------
+
+@test "invalid JSON config names the file in the error message" {
+  # Pin for watchdog-invariant-config-not-valid-json-spam: error must include
+  # the absolute path so operators can identify which file failed.
+  printf '{not valid json' > "$CONFIG_FILE"
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"INVARIANT FAIL: config not valid JSON: $CONFIG_FILE"* ]]
+}
+
+# --- 2. --hosts-dir validation --------------------------------------------
+
+@test "missing --hosts-dir fails the invariant" {
+  run "$MINSKY_RUN" --dry-run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"INVARIANT FAIL"* ]] || [[ "$output" == *"--hosts-dir required"* ]]
+}
+
+# --- 3. Empty hosts dir ----------------------------------------------------
+
+@test "empty --hosts-dir reports 'no host repos' and exits 0" {
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no host repos"* ]] || [[ "$output" == *"found 0"* ]]
+}
+
+# --- 4. Dry-run JSONL schema parity ---------------------------------------
+
+@test "--dry-run emits a JSONL line with the IterationRecord schema" {
+  host="$(make_host one "$(complete_task_block)")"
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  jsonl="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$jsonl" ]
+  # Schema parity — same 7 keys as IterationRecord in iteration-record.ts.
+  line="$(head -1 "$jsonl")"
+  echo "JSONL: $line"
+  echo "$line" | jq -e 'has("ts") and has("experiment_id") and has("host_repo")
+                       and has("branch") and has("verdict")
+                       and has("pr_url") and has("notes")' >/dev/null
+  # Field values match dry-run plan.
+  [ "$(echo "$line" | jq -r .experiment_id)" = "pick-me-first" ]
+  [ "$(echo "$line" | jq -r .verdict)" = "planned" ]
+  [ "$(echo "$line" | jq -r .branch)" = "feat/pick-me-first" ]
+  # pr_url is JSON null, not the string "null".
+  [ "$(echo "$line" | jq -r '.pr_url | type')" = "null" ]
+  # notes mentions dry-run.
+  [[ "$(echo "$line" | jq -r .notes)" == *"dry-run"* ]]
+}
+
+@test "each iteration emits a glanceable summary line on daemon.log (task daemon-log-lacks-iteration-detail)" {
+  # Before this task, daemon.log only showed the JSONL-write breadcrumb;
+  # the operator had to cat the experiment-store JSONL to learn the
+  # verdict. record_iteration now also emits one `iteration #N: ...` line
+  # per record so `tail -5 ~/.minsky/daemon.log` shows iteration health.
+  host="$(make_host one "$(complete_task_block)")"
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  # The summary line is on stderr (daemon.log) and carries the five fields
+  # the task names: task, agent, verdict, duration, pr.
+  [[ "$output" == *"iteration #1: task=pick-me-first"* ]]
+  [[ "$output" == *"verdict=planned"* ]]
+  [[ "$output" == *"agent="* ]]
+  [[ "$output" == *"duration="* ]]
+  [[ "$output" == *"pr=null"* ]]
+}
+
+@test "iteration summary line count matches the JSONL record count (measurement parity)" {
+  # The task's measurement is `grep -c 'iteration #' daemon.log` equals the
+  # JSONL record count. Both are produced by record_iteration, so a 1:1
+  # ratio is structural — assert it over a multi-iteration walk.
+  make_host one "$(complete_task_block)" > /dev/null
+  make_host two "$(complete_task_block)" > /dev/null
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  summary_count="$(printf '%s\n' "$output" | grep -c 'iteration #' || true)"
+  # Pure-bash glob walk (the runner avoids `find` because it's shimmed to
+  # `fd` on some operator machines — see walk_hosts's globbing comment).
+  shopt -s nullglob
+  jsonl_count=0
+  for jf in "$HOSTS_DIR"/*/.minsky/experiment-store/cross-repo/*.jsonl; do
+    jsonl_count=$((jsonl_count + $(grep -c '"verdict"' "$jf" || true)))
+  done
+  shopt -u nullglob
+  [ "$summary_count" = "$jsonl_count" ]
+  [ "$summary_count" -ge 2 ]
+}
+
+# --- 5. No-eligible-task path ---------------------------------------------
+
+@test "empty TASKS.md produces 'drained' verdict with no-eligible-task note" {
+  host="$(make_host empty "$(printf '# Tasks\n\n## P0\n\n')")"
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  jsonl="$host/.minsky/experiment-store/cross-repo/_no-task.jsonl"
+  [ -f "$jsonl" ]
+  line="$(head -1 "$jsonl")"
+  [ "$(echo "$line" | jq -r .verdict)" = "drained" ]
+  [ "$(echo "$line" | jq -r .experiment_id)" = "" ]
+  [[ "$(echo "$line" | jq -r .notes)" == *"no eligible task"* ]]
+}
+
+@test "empty host writes exactly 1 drained record per pass even when iterations-per-host>1" {
+  # Skip-empty-hosts behaviour: when a host has no eligible task, the
+  # walker breaks the inner round-robin loop after recording ONE drained
+  # record, instead of emitting iterations-per-host copies. Matches the
+  # TypeScript host-walker.ts implementation (rule #1 — port behavior).
+  host="$(make_host empty "$(printf '# Tasks\n\n## P0\n\n')")"
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 3
+  [ "$status" -eq 0 ]
+  jsonl="$host/.minsky/experiment-store/cross-repo/_no-task.jsonl"
+  [ -f "$jsonl" ]
+  # Exactly 1 line — not 3 — because the walker skipped ahead.
+  line_count="$(wc -l < "$jsonl" | tr -d ' ')"
+  [ "$line_count" = "1" ]
+}
+
+# --- 6. Iteration-count clamp ---------------------------------------------
+
+@test "--max-iterations clamps total iterations across hosts" {
+  make_host one   "$(complete_task_block)" > /dev/null
+  make_host two   "$(complete_task_block)" > /dev/null
+  make_host three "$(complete_task_block)" > /dev/null
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run \
+       --iterations-per-host 1 --max-iterations 2
+  [ "$status" -eq 0 ]
+  # Should have produced exactly 2 JSONL files (one per host visited).
+  # Use /usr/bin/find directly — operator dotfiles shim `find`→`fd` which
+  # doesn't share BSD-find flags.
+  found=$(/usr/bin/find "$HOSTS_DIR" -name "*.jsonl" -path "*/experiment-store/cross-repo/*" | wc -l | tr -d ' ')
+  [ "$found" -eq 2 ]
+}
+
+# --- 6b. --tick-interval-ms throttle (the bash-skeleton per-batch sleep flag) -
+
+@test "--tick-interval-ms with positive N inserts a sleep before returning" {
+  # Pre-registered measurement from the task body: 1000ms sleep =>
+  # ≥1 second elapses end-to-end (with one host, one iteration, dry-run).
+  make_host one "$(complete_task_block)" > /dev/null
+  local start_ts end_ts elapsed
+  start_ts=$(date +%s)
+  run "$MINSKY_RUN" --host "$HOSTS_DIR/one" --dry-run \
+       --iterations-per-host 1 --tick-interval-ms 1000
+  end_ts=$(date +%s)
+  [ "$status" -eq 0 ]
+  elapsed=$((end_ts - start_ts))
+  # Wall-clock can include the iteration itself (fast — dry-run is ~50ms)
+  # plus the 1s sleep, so ≥1 second is the minimum bound.
+  [ "$elapsed" -ge 1 ]
+  # Throttle log line is on stderr per the implementation.
+  echo "$output" | grep -q "tick-interval-ms throttle: sleeping 1s"
+}
+
+@test "--tick-interval-ms 0 (default) doesn't sleep" {
+  # Pre-registered: default 0 = no sleep; a 2-iteration drain should
+  # complete in well under 5 seconds (the legacy TS daemon's old cadence).
+  # This pins the default-behavior contract: opt-in throttle only.
+  make_host one "$(complete_task_block)" > /dev/null
+  local start_ts end_ts elapsed
+  start_ts=$(date +%s)
+  run "$MINSKY_RUN" --host "$HOSTS_DIR/one" --dry-run \
+       --iterations-per-host 1
+  end_ts=$(date +%s)
+  [ "$status" -eq 0 ]
+  elapsed=$((end_ts - start_ts))
+  [ "$elapsed" -lt 5 ]
+  # Throttle log should NOT appear.
+  ! echo "$output" | grep -q "tick-interval-ms throttle"
+}
+
+@test "--tick-interval-ms=N (equals form) is supported" {
+  make_host one "$(complete_task_block)" > /dev/null
+  run "$MINSKY_RUN" --host "$HOSTS_DIR/one" --dry-run \
+       --iterations-per-host 1 --tick-interval-ms=1000
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "tick-interval-ms throttle: sleeping 1s"
+}
+
+# --- 7. Open-PR filter wires through pick_task.py -------------------------
+
+@test "pick_task.py is invoked with --open-pr-branches" {
+  # We can't simulate `gh pr list` cleanly inside bats without a shim, so
+  # we instead assert that the picker call site uses the right flag by
+  # inspecting the script source. This pins the flag wiring against the
+  # 2026-05-16 regression class without needing a live gh fixture.
+  grep -q -- "--open-pr-branches=" "$MINSKY_RUN"
+}
+
+@test "pick_task.py is also invoked with --all-prs-json (duplicate-PR detection parity)" {
+  # The bash runner's branch-based dedup misses two classes:
+  #   (a) daemon-authored close-out PRs whose branch names have
+  #       timestamp suffixes (`daemon/<id>/<task-id>-2026-05-19T123456`)
+  #       — `feat/<id>` never matches.
+  #   (b) merged-recently PRs — branch-based only looks at OPEN PRs.
+  #
+  # `--all-prs-json=<path>` is the title-matching + merged-recent path
+  # (parity with the TS `decideDuplicate` substrate from PR #309). This
+  # test pins the wire-up so the call site can't silently regress to
+  # branch-only detection.
+  grep -q -- "--all-prs-json=" "$MINSKY_RUN"
+}
+
+# --- 7.5. Bootstrap invariant (parity with TS loadHostConfig) -------------
+
+@test "iterate_host refuses an unbootstrapped host (no .minsky/repo.yaml)" {
+  # Build a host WITHOUT the bootstrap marker. The runner must refuse
+  # to iterate and emit the operator-actionable hint pointing at
+  # bin/minsky-bootstrap.sh. Parity with the TS runner's loadHostConfig.
+  local dir="$HOSTS_DIR/unbootstrapped"
+  mkdir -p "$dir"
+  (cd "$dir" && git init -q && git config user.email "t@t" && git config user.name "t")
+  # A base commit, so the runner can create the agent's isolated worktree (it
+  # refuses to spawn in the host's own checkout).
+  (cd "$dir" && git -c core.hooksPath=/dev/null commit -q --allow-empty -m "chore: init")
+  printf '%s' "$(complete_task_block)" > "$dir/TASKS.md"
+  # Intentionally NO `.minsky/repo.yaml`.
+
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  # The runner exits non-zero only on invariant failure for the WHOLE
+  # walk; per-host invariant failures are recorded as "aborted" and
+  # the walk continues. We assert the error message appears.
+  [[ "$output" == *"host is not bootstrapped"* ]]
+  [[ "$output" == *"minsky-bootstrap.sh"* ]]
+}
+
+@test "MINSKY_SKIP_BOOTSTRAP_CHECK=1 bypasses the bootstrapped-host invariant" {
+  # Operator escape hatch: post-bootstrap migration window where an
+  # existing host has experiment-store data but pre-dates the sidecar
+  # convention. The override lets the runner iterate without aborting.
+  local dir="$HOSTS_DIR/migrate"
+  mkdir -p "$dir"
+  (cd "$dir" && git init -q && git config user.email "t@t" && git config user.name "t")
+  # A base commit, so the runner can create the agent's isolated worktree (it
+  # refuses to spawn in the host's own checkout).
+  (cd "$dir" && git -c core.hooksPath=/dev/null commit -q --allow-empty -m "chore: init")
+  printf '%s' "$(complete_task_block)" > "$dir/TASKS.md"
+  # No .minsky/repo.yaml — same as the test above.
+
+  MINSKY_SKIP_BOOTSTRAP_CHECK=1 run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" \
+    --dry-run --iterations-per-host 1
+  [[ "$output" != *"host is not bootstrapped"* ]]
+  # The iteration record should land — proves the runner actually
+  # iterated rather than just silently passing the invariant.
+  [ -f "$dir/.minsky/experiment-store/cross-repo/pick-me-first.jsonl" ]
+}
+
+@test "iterate_host injects GH_HOST=github.com when host remote is github.com" {
+  # Parity port of `novel/cross-repo-runner/src/gh-host-resolve.ts`.
+  # Without this, on Example machines the bash runner would inherit
+  # `gh auth status`'s default (github.example.com) and 401 ≥6× per
+  # iteration against a github.com host. Rule #17 (proactive healing).
+  shim_dir="$TMPDIR_TEST/shim-gh"
+  mkdir -p "$shim_dir"
+  gh_env_dump="$TMPDIR_TEST/gh-env-dump.txt"
+  # Shim gh: record the GH_HOST it sees on every call, then noop with
+  # sane defaults for the queries the runner makes.
+  cat > "$shim_dir/gh" <<EOF
+#!/usr/bin/env bash
+echo "call=\$*  GH_HOST=\${GH_HOST:-<unset>}" >> "$gh_env_dump"
+case "\$1 \$2" in
+  "repo view") echo "test-org/host-fixture" ;;
+  "pr list")   echo '[]' ;;
+  *)           : ;;
+esac
+exit 0
+EOF
+  chmod +x "$shim_dir/gh"
+
+  # Host with a github.com remote — the resolver should pick this up.
+  host="$(make_host gh-host-com "$(complete_task_block)")"
+  (cd "$host" && git remote add origin git@github.com:test-org/host-fixture.git)
+
+  PATH="$shim_dir:$PATH" run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" \
+    --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  # The shim recorded at least one gh call with GH_HOST=github.com.
+  # Three calls expected per iteration: pr list (open), pr list (all),
+  # repo view (from record_iteration).
+  grep -q "GH_HOST=github.com" "$gh_env_dump"
+  ! grep -q "GH_HOST=<unset>" "$gh_env_dump"
+}
+
+@test "iterate_host injects GH_HOST=github.example.com when host remote is github.example.com" {
+  # The same proactive-healing logic in reverse: an Example host gets
+  # the Example registry. Confirms the resolver isn't hard-coded to
+  # github.com and that it actually parses the remote URL.
+  shim_dir="$TMPDIR_TEST/shim-gh"
+  mkdir -p "$shim_dir"
+  gh_env_dump="$TMPDIR_TEST/gh-env-dump.txt"
+  cat > "$shim_dir/gh" <<EOF
+#!/usr/bin/env bash
+echo "call=\$*  GH_HOST=\${GH_HOST:-<unset>}" >> "$gh_env_dump"
+case "\$1 \$2" in
+  "repo view") echo "team/example-repo" ;;
+  "pr list")   echo '[]' ;;
+  *)           : ;;
+esac
+exit 0
+EOF
+  chmod +x "$shim_dir/gh"
+
+  host="$(make_host gh-host-example "$(complete_task_block)")"
+  (cd "$host" && git remote add origin https://github.example.com/team/example-repo.git)
+
+  PATH="$shim_dir:$PATH" run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" \
+    --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  grep -q "GH_HOST=github.example.com" "$gh_env_dump"
+  ! grep -q "GH_HOST=github.com" "$gh_env_dump"
+}
+
+@test "iterate_host leaves GH_HOST unset when host has no git remote" {
+  # Graceful-degrade (rule #7): when neither $GH_HOST nor a remote
+  # is available, the resolver returns the empty string and the runner
+  # must NOT inject GH_HOST — gh uses its own default.
+  shim_dir="$TMPDIR_TEST/shim-gh"
+  mkdir -p "$shim_dir"
+  gh_env_dump="$TMPDIR_TEST/gh-env-dump.txt"
+  cat > "$shim_dir/gh" <<EOF
+#!/usr/bin/env bash
+echo "call=\$*  GH_HOST=\${GH_HOST:-<unset>}" >> "$gh_env_dump"
+case "\$1 \$2" in
+  "repo view") echo "fallback/repo" ;;
+  "pr list")   echo '[]' ;;
+  *)           : ;;
+esac
+exit 0
+EOF
+  chmod +x "$shim_dir/gh"
+
+  # Host with NO remote — git remote get-url origin returns nonzero.
+  host="$(make_host gh-host-bare "$(complete_task_block)")"
+  # No `git remote add` — intentional.
+
+  # Strip any ambient GH_HOST from the test environment so the
+  # resolver's env-source path can't win and pollute the result.
+  PATH="$shim_dir:$PATH" GH_HOST="" run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" \
+    --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  # Every gh call saw GH_HOST=<unset> — confirms the runner did NOT
+  # set the env var (fall through to gh's own default).
+  grep -q "GH_HOST=<unset>" "$gh_env_dump"
+  ! grep -q "GH_HOST=github" "$gh_env_dump"
+}
+
+@test "explicit GH_HOST env wins over the host's git remote (operator escape hatch)" {
+  # The TS resolver gives env precedence over the git-remote probe.
+  # This is the operator escape hatch — set GH_HOST in the runner's
+  # environment to force every iteration's gh calls to a specific
+  # registry, regardless of what each host's remote points at.
+  shim_dir="$TMPDIR_TEST/shim-gh"
+  mkdir -p "$shim_dir"
+  gh_env_dump="$TMPDIR_TEST/gh-env-dump.txt"
+  cat > "$shim_dir/gh" <<EOF
+#!/usr/bin/env bash
+echo "call=\$*  GH_HOST=\${GH_HOST:-<unset>}" >> "$gh_env_dump"
+case "\$1 \$2" in
+  "repo view") echo "test-org/fixture" ;;
+  "pr list")   echo '[]' ;;
+  *)           : ;;
+esac
+exit 0
+EOF
+  chmod +x "$shim_dir/gh"
+
+  host="$(make_host gh-host-override "$(complete_task_block)")"
+  # Host points at github.com but the operator override should force
+  # github.example.com — this proves the precedence order works.
+  (cd "$host" && git remote add origin git@github.com:test-org/fixture.git)
+
+  PATH="$shim_dir:$PATH" GH_HOST="github.example.com" run "$MINSKY_RUN" \
+    --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  grep -q "GH_HOST=github.example.com" "$gh_env_dump"
+  ! grep -q "GH_HOST=github.com$" "$gh_env_dump"
+}
+
+@test "spawn_agent falls back to the OpenHands SDK shim when canonical CLI is absent" {
+  # The canonical `openhands solve` CLI ships June 1, 2026 (Agent
+  # Canvas Initiative). Until then — on every operator machine — the
+  # bash runner must fall back to the existing Python shim at
+  # novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py
+  # which the TS substrate has been using since Path C reshape. Without
+  # this dispatcher, every spawn against today's machines would exit
+  # 127 (command not found) and the autonomous loop would produce no
+  # PRs (rule #6 — fail loud).
+  #
+  # Fixture: a fake shim that records its argv. We do NOT install a
+  # fake `openhands` binary, so spawn_agent.py sees no openhands on
+  # PATH and falls back. The fake shim records the (translated) argv
+  # so we can assert (a) the dispatcher picked the shim, (b) it used
+  # the SHIM flag names (--brief-file / --repo, NOT --task-file /
+  # --workspace).
+  shim_record="$TMPDIR_TEST/shim-record.txt"
+  fake_shim="$TMPDIR_TEST/fake-shim.py"
+  cat > "$fake_shim" <<EOF
+#!/usr/bin/env python3
+import sys
+with open("$shim_record", "w") as f:
+    f.write("SHIM_INVOKED\n")
+    for arg in sys.argv[1:]:
+        f.write(f"ARG={arg}\n")
+sys.exit(0)
+EOF
+  chmod +x "$fake_shim"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host shim-fallback "$(complete_task_block)")"
+
+  # Wrapper: scrub openhands from PATH so spawn_agent.py falls back to
+  # the shim. Use a custom --shim-path via MINSKY_SPAWN_SHIM_PATH (no
+  # such env exists yet; we override by patching spawn_agent's
+  # DEFAULT_SHIM_PATH for the test by copying our fake shim to that
+  # location). Simpler: rebuild a tmp scripts/ that has spawn_agent.py
+  # AND a novel/.../minsky-openhands-spawn.py replacement.
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+# Scrub openhands from PATH so the dispatcher must fall back.
+NEW_PATH="\$(echo "\$PATH" | tr ':' '\n' | while IFS= read -r p; do [[ -x "\$p/openhands" ]] || printf '%s\n' "\$p"; done | paste -sd: -)"
+export PATH="\$NEW_PATH"
+# Point the invariant + dispatcher at the fake shim (test hook).
+export MINSKY_OPENHANDS_SHIM_PATH="$fake_shim"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-shim-fb.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+# Place a wrapper spawn_agent.py that hard-codes our fake shim path.
+cat > "\$TMP_SCRIPT/spawn_agent.py" <<PYEOF
+#!/usr/bin/env python3
+import os, sys
+# Force shim path to our fixture, then re-exec the real spawn_agent.
+os.execv(sys.executable, [sys.executable, "$REPO_ROOT/scripts/spawn_agent.py", "--shim-path", "$fake_shim", *sys.argv[1:]])
+PYEOF
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  # The fake shim was invoked — proves the dispatcher fell back rather
+  # than crashing with "openhands not found".
+  [ -f "$shim_record" ]
+  grep -q "SHIM_INVOKED" "$shim_record"
+  # The dispatcher translated the flags correctly for the shim.
+  grep -q "ARG=--brief-file" "$shim_record"
+  grep -q "ARG=--repo" "$shim_record"
+  grep -q "ARG=--model" "$shim_record"
+  # Canonical flags MUST NOT appear (proves the translation worked).
+  ! grep -q "ARG=--task-file" "$shim_record"
+  ! grep -q "ARG=--workspace" "$shim_record"
+}
+
+@test "spawn_agent receives MINSKY_HOST_ROOT / MINSKY_TASK_ID / MINSKY_BRANCH_NAME env vars" {
+  # Parity port of TS `spawn-plan.ts` § `env: { MINSKY_HOST_ROOT, ... }`.
+  # Without these, the host's 12 rule lints that key off MINSKY_HOST_ROOT
+  # can't find the host's `.minsky/` substrate — breaks Acceptance
+  # criterion #6 of user-stories/006-runner-on-any-repo.md.
+  #
+  # Fixture: a fake openhands binary that dumps its env vars to a
+  # known path. Run a single iteration; assert all three vars reach
+  # the spawned agent.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  env_dump="$TMPDIR_TEST/agent-env-dump.txt"
+  cat > "$shim_dir/openhands" <<EOF
+#!/usr/bin/env bash
+# Dump only the MINSKY_* vars we care about (filters env noise).
+env | grep -E '^MINSKY_(HOST_ROOT|TASK_ID|BRANCH_NAME)=' > $env_dump || true
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host minsky-env-vars "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-env.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  [ -f "$env_dump" ]
+  # All three MINSKY_* env vars reached the agent.
+  grep -q "^MINSKY_HOST_ROOT=$host/.minsky$" "$env_dump"
+  grep -q "^MINSKY_TASK_ID=pick-me-first$" "$env_dump"
+  grep -q "^MINSKY_BRANCH_NAME=feat/pick-me-first$" "$env_dump"
+}
+
+# --- 8. Round-robin iterates each host fairly ------------------------------
+
+@test "watchdog kills a hanging openhands and records spawn-failed with timeout notes" {
+  # Watchdog resolution order: Python wrapper (preferred, no deps) →
+  # GNU timeout → gtimeout → unbounded. The Python wrapper is in-repo
+  # at scripts/spawn_with_watchdog.py, so this test runs everywhere
+  # Python ≥3.3 + bash are available (which is every supported platform).
+
+  # Inject a fake `openhands` that hangs forever. Wire the dynamic-
+  # timeout config to a 2s ceiling for the test (override the floor via
+  # the BATS env so we don't have to wait 120s for the real MIN_WATCHDOG_S).
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+# Fake openhands — hangs forever. Used by tests/minsky-run.bats to assert
+# the watchdog fires.
+sleep 99999
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  # Fake dynamic_timeout.py — always returns 2s, so the watchdog fires
+  # in ≤3s wall-time even on slow machines. Save the original on a
+  # known path so the wrapper can stay tight.
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(2)  # 2-second watchdog for tests
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host hangy "$(complete_task_block)")"
+
+  # Run minsky-run.sh with the shimmed openhands AND shimmed picker dir.
+  # The script reads pick_task.py from `$(dirname "${BASH_SOURCE[0]}")/../scripts/`
+  # so we copy our test's dynamic_timeout.py over that path's neighbour
+  # via a wrapper. Simpler: use a small wrapper script.
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+# Shadow scripts/dynamic_timeout.py for this run only. Keep
+# spawn_with_watchdog.py from the real repo since it's deterministic.
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-shim.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+# Create a parallel bin/ that points to the shimmed scripts.
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  # Wall-clock must be small (well under 99999s) — the watchdog fired.
+  [ "$status" -eq 0 ]
+  jsonl="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$jsonl" ]
+  line="$(head -1 "$jsonl")"
+  echo "JSONL: $line"
+  # Verdict must be spawn-failed; notes must mention the timeout.
+  [ "$(echo "$line" | jq -r .verdict)" = "spawn-failed" ]
+  [[ "$(echo "$line" | jq -r .notes)" == *"timeout"* ]]
+  # Recorded duration in ms must be ≥ 2000 (watchdog at 2s) and ≤ 30000 (sanity).
+  ms="$(echo "$line" | jq -r .notes | grep -oE '[0-9]+ms' | head -1 | tr -d ms)"
+  [ "$ms" -ge 1900 ]
+  [ "$ms" -le 30000 ]
+}
+
+@test "brief file passed to openhands contains task block + FINAL STEP overlay" {
+  # Works on every platform: brief is built by scripts/build_brief.py
+  # BEFORE the watchdog wraps the openhands invocation. The Python
+  # spawn_with_watchdog.py (tier 1) handles the timeout portably.
+
+  # Shim openhands to (a) copy the brief contents to a known path
+  # before exiting, (b) hang forever so the watchdog fires.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  brief_dump="$TMPDIR_TEST/brief-dump.md"
+  cat > "$shim_dir/openhands" <<EOF
+#!/usr/bin/env bash
+# Find the brief file from argv (--task-file <path>) and copy it.
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    --task-file) cp "\$2" "$brief_dump" 2>/dev/null || true; shift 2 ;;
+    *) shift ;;
+  esac
+done
+sleep 99999
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(2)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host briefy "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-brief.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  [ -f "$brief_dump" ]
+  # Substantive content: task ID header + the FINAL STEP block.
+  grep -q "^# Task: pick-me-first$" "$brief_dump"
+  grep -q "## Hypothesis (rule #9)" "$brief_dump"
+  grep -q "FINAL STEP" "$brief_dump"
+  grep -q "gh pr create" "$brief_dump"
+  # The brief is not the 4-line stub anymore.
+  [ "$(wc -l < "$brief_dump" | tr -d ' ')" -gt 20 ]
+  # Acceptance criterion of user-stories/006-runner-on-any-repo.md:
+  # "$host/.minsky/experiments/<task-id>.yaml is materialised with all
+  # 5 rule-#9 fields populated from the task row". This is the parity
+  # port of the TS runner's `synthesiseExperimentYaml` call site.
+  local host_dir
+  host_dir="$(dirname "$(dirname "$brief_dump")")"
+  # Brief dump lives in shim-bin/dump dir; the actual host is under
+  # $HOSTS_DIR. The runner targets the only host in $HOSTS_DIR.
+  local host_under_test
+  host_under_test="$(ls -d "$HOSTS_DIR"/*/ | head -1)"
+  host_under_test="${host_under_test%/}"
+  [ -f "$host_under_test/.minsky/experiments/pick-me-first.yaml" ]
+  grep -q "^id: pick-me-first" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
+  grep -q "^hypothesis: |" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
+  grep -q "^success:" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
+  grep -q "^pivot:" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
+  grep -q "^measurement:" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
+  grep -q "^anchor: |" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
+}
+
+@test "extract_pr_url captures github.example.com URLs (was broken; bash regex only matched github.com)" {
+  # Pre-fix: bash one-liner `grep -oE 'https://github\.com/...'` would
+  # silently miss every github.example.com PR URL. Every successful
+  # Example-host iteration recorded pr_url=null. Parity port of
+  # `extractPrUrl` from novel/cross-repo-runner/src/runner.ts.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+
+  # Fake openhands: write a stdout that contains an Example-host PR URL
+  # the old regex couldn't match, then exit 0 (success path).
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Working..."
+echo "Created PR: https://github.example.com/team/example-app-plugin/pull/12345"
+echo "Done."
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  # Force a tiny watchdog and shim dynamic_timeout.py so the test is
+  # fast (matches the watchdog/brief-test pattern in this file).
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(60)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-example "$(complete_task_block)")"
+
+  # Wrapper: copy needed scripts into a parallel scripts/ dir so the
+  # shimmed `dynamic_timeout.py` works alongside the real ones (matches
+  # the watchdog test wrapper pattern).
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-prurl.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  # The iteration record was written with the github.example.com PR URL
+  # (proves the parity port replaces the broken github.com-only regex).
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  grep -q '"pr_url":"https://github.example.com/team/example-app-plugin/pull/12345"' "$record_file"
+  # And the verdict is "validated" (openhands exited 0 → success path).
+  grep -q '"verdict":"validated"' "$record_file"
+}
+
+@test "extract_pr_url picks the LAST PR URL when stdout cites multiple (parity vs head -1)" {
+  # Parity port behavior: the old bash regex used `head -1` (first
+  # match), but the TS substrate's `extractPrUrl` returns the LAST
+  # match. When the agent's stdout cites a related PR before printing
+  # the newly-created one at the end, the new behavior captures the
+  # right URL.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Related work: https://github.com/old/repo/pull/1"
+echo "Working..."
+echo "Opened https://github.com/new/repo/pull/999"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(60)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-multi "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-prurl2.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  # Captures the LAST URL (the newly-created PR), not the first
+  # (the cited related PR).
+  grep -q '"pr_url":"https://github.com/new/repo/pull/999"' "$record_file"
+  ! grep -q '"pr_url":"https://github.com/old/repo/pull/1"' "$record_file"
+}
+
+@test "non-zero exit with a salvageable PR URL records validated (task runner-records-validated-when-pr-opened-despite-nonzero-exit)" {
+  # Real fleet path: the watchdog SIGTERMs the agent AFTER it ran
+  # `gh pr create` (it opened+merged the PR, then kept polling CI and
+  # got killed). Pre-fix, the generic non-zero branch recorded
+  # `spawn-failed, pr_url=""` the instant exit_code != 0 — throwing away
+  # the PR URL still in the stdout log and undercounting the
+  # cross-repo-pr-rate / agent-merge-rate metrics. Now the non-zero
+  # branch salvages the URL via scripts/extract_pr_url.py and records
+  # `validated` with a `signaled-but-pr-opened` marker.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+
+  # Fake openhands: print a PR URL, then exit non-zero (simulates the
+  # agent opening a PR then being killed / crashing on a follow-up step).
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Working..."
+echo "Opened https://github.com/team/example-app/pull/4242"
+echo "Polling CI..."
+exit 1
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(60)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-nonzero "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-prurl-nz.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  line="$(head -1 "$record_file")"
+  echo "JSONL: $line"
+  # The salvaged URL is recorded and the verdict is upgraded to validated.
+  [ "$(echo "$line" | jq -r .pr_url)" = "https://github.com/team/example-app/pull/4242" ]
+  [ "$(echo "$line" | jq -r .verdict)" = "validated" ]
+  # The notes field carries the signaled-but-pr-opened marker.
+  [[ "$(echo "$line" | jq -r .notes)" == *"signaled-but-pr-opened"* ]]
+}
+
+@test "non-zero exit with NO PR URL still records spawn-failed (salvage preserves today's behavior)" {
+  # Negative case: a genuine spawn failure (no PR opened) must keep the
+  # spawn-failed verdict. Proves the salvage only fires when an
+  # extractable URL is present and doesn't false-validate empty stdout.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Working..."
+echo "Crashed before opening a PR"
+exit 1
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(60)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-nonzero-none "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-prurl-nznone.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  line="$(head -1 "$record_file")"
+  echo "JSONL: $line"
+  # No salvageable URL → verdict stays spawn-failed, pr_url is JSON null.
+  [ "$(echo "$line" | jq -r .verdict)" = "spawn-failed" ]
+  [ "$(echo "$line" | jq -r '.pr_url | type')" = "null" ]
+  [[ "$(echo "$line" | jq -r .notes)" != *"signaled-but-pr-opened"* ]]
+}
+
+@test "pr_url backstop: query gh pr list --head when stdout has no URL (parity port of TS ensurePrUrl stage 2)" {
+  # Real silent-failure path: agent runs successfully, commits + pushes,
+  # but stdout doesn't contain a parseable PR URL (e.g. truncated by
+  # the bounded log buffer, OR the webhook auto-opened the PR while
+  # the agent's `gh pr create` was still in flight). Pre-PR: bash
+  # runner recorded `pr_url=null` even though a PR existed.
+  #
+  # Fixture: a fake openhands that succeeds but emits no PR URL on
+  # stdout. A fake `gh` that responds to `pr list --head <branch>` with
+  # a JSON envelope containing the URL the runner should backstop to.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Working..."
+echo "Done — committed and pushed (URL fell off the tail)"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  # Fake gh: matches the bash runner's exact invocation shape:
+  #   `gh pr list --head <branch> --state open --json url --jq '.[0].url // ""'`
+  # Also responds to `gh repo view --json nameWithOwner --jq .nameWithOwner`
+  # which record_iteration calls (or it'll wedge).
+  cat > "$shim_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr list")
+    # Find --head flag and emit the URL the test expects.
+    for ((i=1; i<=$#; i++)); do
+      if [[ "${!i}" == "--head" ]]; then
+        next=$((i+1))
+        branch="${!next}"
+        # Return a backstop URL (mirrors what gh would return for the
+        # branch's open PR).
+        echo "https://github.example.com/team/backstop-recovery/pull/77"
+        exit 0
+      fi
+    done
+    echo "" ; exit 0 ;;
+  "repo view")
+    echo "team/backstop-recovery" ; exit 0 ;;
+  *)
+    : ; exit 0 ;;
+esac
+EOF
+  chmod +x "$shim_dir/gh"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-backstop "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-prbs.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  # The backstop query recovered the PR URL even though stdout had none.
+  grep -q '"pr_url":"https://github.example.com/team/backstop-recovery/pull/77"' "$record_file"
+  # Iteration is still verdict=validated (openhands exited 0).
+  grep -q '"verdict":"validated"' "$record_file"
+}
+
+@test "pr_url stage 3: gh pr create backstop when branch pushed but agent skipped gh pr create" {
+  # Parity port of TS `ensurePrUrl` stage 3 + `defaultBackstopTitle`/
+  # `defaultBackstopBody`. When the agent committed + pushed the
+  # branch but didn't run `gh pr create` (a known claude-opus regression
+  # documented in `devin-spawn-no-pr-opened` pivot 2026-05-18), the
+  # runner opens the PR itself and records the URL.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Agent committed and pushed but did not call gh pr create"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  # Fake gh + git: branch exists on origin; gh pr list returns nothing
+  # (stage 2 misses); gh pr create returns the backstop URL.
+  pr_create_record="$TMPDIR_TEST/pr-create-record.txt"
+  cat > "$shim_dir/gh" <<EOF
+#!/usr/bin/env bash
+case "\$1 \$2" in
+  "pr list")
+    # Empty array → jq '.[0].url // ""' → "" → stage 2 misses.
+    echo "" ; exit 0 ;;
+  "pr create")
+    # Record what flags + body the backstop sent so the test can
+    # assert the format.
+    {
+      echo "PR_CREATE_INVOKED"
+      for arg in "\$@"; do echo "ARG=\$arg"; done
+    } > "$pr_create_record"
+    echo "https://github.com/team/repo/pull/12345"
+    exit 0 ;;
+  "repo view")
+    echo "team/repo" ; exit 0 ;;
+  *)
+    : ; exit 0 ;;
+esac
+EOF
+  chmod +x "$shim_dir/gh"
+
+  # Fake git: ls-remote --exit-code --heads → success (branch exists).
+  # Real git is used for the make_host repo init; this shim ONLY runs
+  # for ls-remote (other git commands fall through via PATH).
+  cat > "$shim_dir/git" <<'EOF'
+#!/usr/bin/env bash
+# When called with `-C <host> ls-remote --exit-code --heads origin <branch>`,
+# return success to simulate the branch existing. For all other git
+# invocations, exec the real git binary (find it on PATH minus our shim).
+for arg in "$@"; do
+  if [[ "$arg" == "ls-remote" ]]; then
+    exit 0
+  fi
+done
+# Locate real git: scan PATH for a `git` that's not this shim.
+SHIM_DIR="$(dirname "$0")"
+IFS=: read -ra DIRS <<< "$PATH"
+for d in "${DIRS[@]}"; do
+  [[ "$d" == "$SHIM_DIR" ]] && continue
+  if [[ -x "$d/git" ]]; then
+    exec "$d/git" "$@"
+  fi
+done
+echo "git: real binary not found" >&2
+exit 127
+EOF
+  chmod +x "$shim_dir/git"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-stage3 "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+# Put our shim FIRST so the shim git wins for ls-remote.
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-pr3.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  # Stage 3 successfully created a PR.
+  grep -q '"pr_url":"https://github.com/team/repo/pull/12345"' "$record_file"
+  # The backstop invocation used the right flag set.
+  [ -f "$pr_create_record" ]
+  grep -q "PR_CREATE_INVOKED" "$pr_create_record"
+  grep -q "ARG=--base" "$pr_create_record"
+  grep -q "ARG=main" "$pr_create_record"
+  grep -q "ARG=--head" "$pr_create_record"
+  grep -q "ARG=feat/pick-me-first" "$pr_create_record"
+  grep -q "ARG=--title" "$pr_create_record"
+  # Title contains the task id (matches TS defaultBackstopTitle).
+  grep -q "chore(minsky): open PR for pick-me-first" "$pr_create_record"
+  # Body contains the rule-#9 self-grade block (required by
+  # check-pr-self-grade.mjs — backstop PRs must pass the same lint).
+  grep -q "Hypothesis self-grade" "$pr_create_record"
+  grep -q "Predicted:" "$pr_create_record"
+  grep -q "Match:" "$pr_create_record"
+}
+
+@test "pr_url stage 3: skipped when branch wasn't pushed (no backstop PR for ghost branches)" {
+  # Stage 3 must NOT call `gh pr create` when the agent didn't actually
+  # push the branch (e.g. agent crashed before commit). Otherwise we'd
+  # be filing PRs against empty branches, polluting the queue. The
+  # branch-existence check via `git ls-remote --exit-code` is the gate.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Agent did nothing"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  pr_create_record="$TMPDIR_TEST/pr-create-NOT-invoked.txt"
+  cat > "$shim_dir/gh" <<EOF
+#!/usr/bin/env bash
+case "\$1 \$2" in
+  "pr list") echo "" ; exit 0 ;;
+  "pr create")
+    # This MUST NOT run — write a sentinel the test checks for absence.
+    echo "PR_CREATE_INVOKED_UNEXPECTEDLY" > "$pr_create_record"
+    echo "https://nope.example/pull/1"
+    exit 0 ;;
+  "repo view") echo "team/nopush" ; exit 0 ;;
+  *) : ; exit 0 ;;
+esac
+EOF
+  chmod +x "$shim_dir/gh"
+
+  # Fake git: ls-remote --exit-code returns 2 (branch does NOT exist).
+  cat > "$shim_dir/git" <<'EOF'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  if [[ "$arg" == "ls-remote" ]]; then
+    exit 2
+  fi
+done
+SHIM_DIR="$(dirname "$0")"
+IFS=: read -ra DIRS <<< "$PATH"
+for d in "${DIRS[@]}"; do
+  [[ "$d" == "$SHIM_DIR" ]] && continue
+  if [[ -x "$d/git" ]]; then
+    exec "$d/git" "$@"
+  fi
+done
+exit 127
+EOF
+  chmod +x "$shim_dir/git"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-no-push "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-nopush.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  # Stage 3 was skipped — record stays pr_url=null.
+  grep -q '"pr_url":null' "$record_file"
+  # Sentinel file MUST NOT exist — proves gh pr create didn't fire.
+  [ ! -f "$pr_create_record" ]
+}
+
+@test "pr_url backstop: stays null when neither stdout nor gh has a PR (graceful degrade)" {
+  # The opposite path: agent succeeds, no stdout URL, gh returns no
+  # matching open PR. The backstop returns empty string from
+  # `--jq '.[0].url // ""'` and the iteration record stores pr_url=null
+  # (the legacy behaviour). This proves the backstop doesn't crash on
+  # the no-match path (rule #7 graceful-degrade).
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Agent did nothing"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  # Fake gh: pr list returns empty array → jq '.[0].url // ""' → "".
+  cat > "$shim_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr list")
+    # Empty array — no PR matches the branch.
+    echo "" ; exit 0 ;;
+  "repo view")
+    echo "team/nopr" ; exit 0 ;;
+  *)
+    : ; exit 0 ;;
+esac
+EOF
+  chmod +x "$shim_dir/gh"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-no-match "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-pbnm.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  # pr_url is the JSON null literal (not the string "null") — matches
+  # record_iteration's null-handling for empty pr_url.
+  grep -q '"pr_url":null' "$record_file"
+}
+
+@test "bin/minsky --bash-runner dispatches to bin/minsky-run.sh (Phase 7c)" {
+  # Test the dispatch in isolation by extracting + sourcing only the
+  # flag-parser + dispatch section of `bin/minsky`. Bypasses the
+  # MINSKY_REPO resolver (pre-existing bash-quoting issue on macOS;
+  # filed as scout if CI exercises it).
+  test_script="$TMPDIR_TEST/minsky-flag-test.sh"
+  cat > "$test_script" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+# Stub the resolver — assume MINSKY_REPO_PATH is already set.
+MINSKY_REPO_PATH="${MINSKY_REPO_PATH_OVERRIDE:?must be set in test}"
+
+# --- Replica of the --bash-runner flag parser from bin/minsky --------
+MINSKY_ARGS=()
+USE_BASH_RUNNER="${MINSKY_BASH_RUNNER:-0}"
+for arg in "$@"; do
+  if [ "$arg" = "--local" ]; then
+    : # noop in this unit test
+  elif [ "$arg" = "--bash-runner" ]; then
+    USE_BASH_RUNNER=1
+  else
+    MINSKY_ARGS+=("$arg")
+  fi
+done
+if [ "${#MINSKY_ARGS[@]}" -gt 0 ]; then set -- "${MINSKY_ARGS[@]}"; else set --; fi
+
+# --- Replica of the dispatch from bin/minsky -------------------------
+if [ "$USE_BASH_RUNNER" = "1" ]; then
+  BASH_RUNNER_BIN="$MINSKY_REPO_PATH/bin/minsky-run.sh"
+  [ -x "$BASH_RUNNER_BIN" ] || { echo "minsky: --bash-runner requested but $BASH_RUNNER_BIN is not executable" >&2; exit 1; }
+  echo "DISPATCH=bash-runner ARGS=[$*]"
+else
+  echo "DISPATCH=node-runner ARGS=[$*]"
+fi
+EOF
+  chmod +x "$test_script"
+
+  export MINSKY_REPO_PATH_OVERRIDE="$REPO_ROOT"
+
+  # 1. Default: dispatch to node-runner
+  run "$test_script" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DISPATCH=node-runner"* ]]
+  [[ "$output" == *"ARGS=[--help]"* ]]
+
+  # 2. --bash-runner: dispatch to bash-runner + flag stripped
+  run "$test_script" --bash-runner --hosts-dir /tmp/x --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DISPATCH=bash-runner"* ]]
+  [[ "$output" == *"ARGS=[--hosts-dir /tmp/x --dry-run]"* ]]
+
+  # 3. MINSKY_BASH_RUNNER=1 env: dispatch to bash-runner without the flag
+  MINSKY_BASH_RUNNER=1 run "$test_script" --hosts-dir /tmp/y
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DISPATCH=bash-runner"* ]]
+
+  # 4. --bash-runner with mixed flags: only --bash-runner stripped
+  run "$test_script" --bash-runner --local --hosts-dir /tmp/z
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DISPATCH=bash-runner"* ]]
+  [[ "$output" == *"ARGS=[--hosts-dir /tmp/z]"* ]]
+}
+
+@test "run-daemon.sh dispatches to bash runner when MINSKY_BASH_RUNNER=1 (Phase 7b'-prep)" {
+  # Phase 7b'-prep: the supervisor script must support the bash-runner
+  # opt-in so the operator can dogfood the bash port via the existing
+  # systemd/launchd daemon plumbing. Tests the dispatch logic by
+  # extracting the relevant block and asserting it picks the right
+  # branch for each MINSKY_BASH_RUNNER value.
+  test_script="$TMPDIR_TEST/run-daemon-test.sh"
+  fake_bash_runner="$TMPDIR_TEST/fake-bash-runner.sh"
+  fake_node_runner="$TMPDIR_TEST/fake-node-runner.mjs"
+  fake_host="$TMPDIR_TEST/fake-host"
+  mkdir -p "$fake_host"
+  # Stub the bash + node runners — each just prints which one it is.
+  cat > "$fake_bash_runner" <<'EOF'
+#!/usr/bin/env bash
+echo "BASH_RUNNER_INVOKED hosts_dir=$2"
+exit 0
+EOF
+  chmod +x "$fake_bash_runner"
+  cat > "$fake_node_runner" <<'EOF'
+console.log(`NODE_RUNNER_INVOKED args=${process.argv.slice(2).join(",")}`);
+process.exit(0);
+EOF
+
+  # Replica of the dispatch block in distribution/systemd/run-daemon.sh.
+  cat > "$test_script" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+HOST="$fake_host"
+if [ "\${MINSKY_BASH_RUNNER:-0}" = "1" ]; then
+  HOST_PARENT="\$(dirname "\$HOST")"
+  exec bash "$fake_bash_runner" --hosts-dir "\$HOST_PARENT"
+fi
+exec node "$fake_node_runner" --host "\$HOST" --loop
+EOF
+  chmod +x "$test_script"
+
+  # 1. Default (no env) → node-runner branch
+  run "$test_script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NODE_RUNNER_INVOKED"* ]]
+  [[ "$output" == *"--host"* ]]
+  [[ "$output" == *"--loop"* ]]
+
+  # 2. MINSKY_BASH_RUNNER=1 → bash-runner branch with hosts-dir = parent
+  MINSKY_BASH_RUNNER=1 run "$test_script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BASH_RUNNER_INVOKED"* ]]
+  [[ "$output" == *"hosts_dir=$TMPDIR_TEST"* ]]
+
+  # 3. MINSKY_BASH_RUNNER=0 (explicit) → node-runner branch
+  MINSKY_BASH_RUNNER=0 run "$test_script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NODE_RUNNER_INVOKED"* ]]
+}
+
+@test "bin/minsky-bootstrap.sh materializes sidecar with inferred owner/repo (Phase 11)" {
+  # Phase 11: the bash bootstrap replaces 1.6K LOC of TS inference with
+  # template substitution + 6 git/file-system actions. This pins the
+  # SSH-URL normalization + the 6-action plan from one fixture host.
+  bootstrap="$REPO_ROOT/bin/minsky-bootstrap.sh"
+  [ -x "$bootstrap" ]
+
+  fixture="$TMPDIR_TEST/bootstrap-fixture"
+  mkdir -p "$fixture"
+  (cd "$fixture" && git init -q && git config user.email t@t && git config user.name t && \
+     git symbolic-ref HEAD refs/heads/main && \
+     git remote add origin git@github.com:fyodoriv/test-host.git)
+  printf '{"scripts":{"check":"echo ok"}}' > "$fixture/package.json"
+  printf '# Tasks\n\n## P0\n' > "$fixture/TASKS.md"
+
+  XDG_CONFIG_HOME="$TMPDIR_TEST/xdg" run "$bootstrap" "$fixture"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sidecar materialized"* ]]
+
+  # Sidecar layout
+  [ -f "$fixture/.minsky/repo.yaml" ]
+  [ -L "$fixture/.minsky/vision.md" ]
+  [ -d "$fixture/.minsky/experiments" ]
+
+  # SSH-URL normalization → owner/repo
+  grep -q '^host_repo: "fyodoriv/test-host"$' "$fixture/.minsky/repo.yaml"
+
+  # Inferred fields
+  grep -q '^tasks_md_path: "TASKS.md"$' "$fixture/.minsky/repo.yaml"
+  grep -q '^pre_commit_command: "pnpm run check"$' "$fixture/.minsky/repo.yaml"
+  grep -q '^default_branch: "main"$' "$fixture/.minsky/repo.yaml"
+
+  # Global gitignore registration
+  grep -q '^\.minsky/$' "$TMPDIR_TEST/xdg/git/ignore"
+
+  # Next-steps hint surfaces the killer-feature command after bootstrap
+  # (closes the "what do I do now?" operator-onboarding gap).
+  [[ "$output" == *"Next steps:"* ]]
+  [[ "$output" == *"minsky --transform"* ]]
+  [[ "$output" == *"baseline-only"* ]]
+  [[ "$output" == *"report-only"* ]]
+}
+
+@test "bin/minsky-bootstrap.sh normalizes HTTPS-style remote URLs to owner/repo" {
+  bootstrap="$REPO_ROOT/bin/minsky-bootstrap.sh"
+  fixture="$TMPDIR_TEST/https-fixture"
+  mkdir -p "$fixture"
+  (cd "$fixture" && git init -q && git config user.email t@t && git config user.name t && \
+     git remote add origin https://github.com/foo/bar.git)
+
+  XDG_CONFIG_HOME="$TMPDIR_TEST/xdg2" run "$bootstrap" "$fixture"
+  [ "$status" -eq 0 ]
+  grep -q '^host_repo: "foo/bar"$' "$fixture/.minsky/repo.yaml"
+}
+
+@test "bin/minsky-bootstrap.sh --doctor is read-only and lists inferred signals" {
+  bootstrap="$REPO_ROOT/bin/minsky-bootstrap.sh"
+  fixture="$TMPDIR_TEST/doctor-fixture"
+  mkdir -p "$fixture"
+  (cd "$fixture" && git init -q && git config user.email t@t && git config user.name t && \
+     git remote add origin git@github.com:foo/doctor-target.git)
+
+  run "$bootstrap" --doctor "$fixture"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"host_repo:"* ]]
+  [[ "$output" == *"foo/doctor-target"* ]]
+  [[ "$output" == *".minsky/ exists:     no"* ]]
+
+  # Doctor mode MUST NOT write the sidecar.
+  [ ! -d "$fixture/.minsky" ]
+}
+
+@test "bin/minsky-bootstrap.sh is idempotent (second run does not corrupt)" {
+  bootstrap="$REPO_ROOT/bin/minsky-bootstrap.sh"
+  fixture="$TMPDIR_TEST/idempotent-fixture"
+  mkdir -p "$fixture"
+  (cd "$fixture" && git init -q && git config user.email t@t && git config user.name t && \
+     git remote add origin git@github.com:foo/idem.git)
+
+  XDG_CONFIG_HOME="$TMPDIR_TEST/xdg3" run "$bootstrap" "$fixture"
+  [ "$status" -eq 0 ]
+  first_hash="$(shasum "$fixture/.minsky/repo.yaml" | awk '{print $1}')"
+
+  XDG_CONFIG_HOME="$TMPDIR_TEST/xdg3" run "$bootstrap" "$fixture"
+  [ "$status" -eq 0 ]
+  second_hash="$(shasum "$fixture/.minsky/repo.yaml" | awk '{print $1}')"
+
+  # Same input → same repo.yaml (no clock-dependent fields).
+  [ "$first_hash" = "$second_hash" ]
+
+  # Global gitignore registered ONCE (idempotent append).
+  occurrences="$(grep -c '^\.minsky/$' "$TMPDIR_TEST/xdg3/git/ignore" | tr -d ' ')"
+  [ "$occurrences" = "1" ]
+}
+
+@test "bin/minsky-bootstrap.sh exits 1 on missing host-dir" {
+  bootstrap="$REPO_ROOT/bin/minsky-bootstrap.sh"
+  run "$bootstrap" /this/path/does/not/exist
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"host-dir not found"* ]]
+}
+
+@test "bin/minsky-bootstrap.sh exits 2 on missing arg" {
+  bootstrap="$REPO_ROOT/bin/minsky-bootstrap.sh"
+  run "$bootstrap"
+  [ "$status" -eq 2 ]
+}
+
+@test "bin/minsky-default-session.sh --help prints usage and exits 0" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  [ -x "$session" ]
+  run "$session" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"--baseline-only"* ]]
+  [[ "$output" == *"--report-only"* ]]
+}
+
+@test "bin/minsky-default-session.sh exits 2 on missing host-dir arg" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  run "$session"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"host-dir required"* ]]
+}
+
+@test "bin/minsky-default-session.sh exits 1 when host-dir does not exist" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  run "$session" /this/path/definitely/does/not/exist
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"host-dir not found"* ]]
+}
+
+@test "bin/minsky-default-session.sh exits 2 on unknown flag" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  run "$session" /tmp --frobnicate
+  [ "$status" -eq 2 ]
+}
+
+@test "bin/minsky-default-session.sh --baseline-only writes baseline + exits without running" {
+  # Smoke vertical slice 3: confirms bootstrap → baseline capture
+  # composition works end-to-end on a fixture host.
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-baseline"
+  mkdir -p "$fixture"
+  (cd "$fixture" && git init -q && git symbolic-ref HEAD refs/heads/main && \
+     git config user.email t@t && git config user.name t && \
+     git remote add origin git@github.com:foo/bar.git)
+  printf '# Tasks\n' > "$fixture/TASKS.md"
+  printf '# fake\n' > "$fixture/README.md"
+
+  XDG_CONFIG_HOME="$TMPDIR_TEST/xdg-bo" run "$session" "$fixture" --baseline-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"baseline-only mode"* ]]
+
+  # Bootstrap + baseline + sidecar all materialized
+  [ -f "$fixture/.minsky/repo.yaml" ]
+  [ -f "$fixture/.minsky/baseline.json" ]
+
+  # JSON is well-formed and has the documented schema
+  python3 -c "import json,sys; d=json.load(open('$fixture/.minsky/baseline.json')); assert d['schema_version']==1; assert 'code' in d; assert 'docs' in d"
+}
+
+@test "bin/minsky-default-session.sh --report-only requires existing baseline" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-no-baseline"
+  mkdir -p "$fixture/.minsky"
+  # No baseline.json present.
+  run "$session" "$fixture" --report-only
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--report-only requires existing"* ]]
+}
+
+@test "bin/minsky --help prints usage block and lists --transform without starting daemon" {
+  # Real UX gap fix: before this PR, `minsky --help` fell through the
+  # subcommand case → smart-auto-attach → tried to start the daemon.
+  # Now there's a real --help handler that prints the docstring and
+  # exits 0, listing every flag including --transform (the killer-
+  # feature command added in PR #815).
+  MINSKY_REPO="$REPO_ROOT" run "$REPO_ROOT/bin/minsky" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"--transform"* ]]
+  [[ "$output" == *"--daemon"* ]]
+  [[ "$output" == *"--bash-runner"* ]]
+  # The leading "# " from the source-of-truth docstring must be
+  # stripped from the output.
+  [[ "$output" != *"# Usage:"* ]]
+  # No daemon-starting noise.
+  [[ "$output" != *"daemon started"* ]]
+  [[ "$output" != *"no daemon running"* ]]
+}
+
+@test "bin/minsky -h is an alias for --help" {
+  MINSKY_REPO="$REPO_ROOT" run "$REPO_ROOT/bin/minsky" -h
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"--transform"* ]]
+}
+
+@test "bin/minsky trend dispatches to scripts/transform_trend.py with PWD as --repo" {
+  # Subcommand wraps the MAPE-K Analyse script. The CLI flag defaults
+  # --repo to $PWD so operators don't have to type it.
+  fixture="$TMPDIR_TEST/trend-fixture"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/transform-runs.jsonl" <<EOF
+{"after_ts":"t1","code":{"total_files_walked":{"delta":2},"test_file_count":{"delta":1},"loc_by_language":{"ts":{"delta":10}}},"lint":{"after_exit_code":0},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+EOF
+
+  MINSKY_REPO="$REPO_ROOT" run bash -c "cd '$fixture' && '$REPO_ROOT/bin/minsky' trend 2>&1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"transform-runs trend"* ]]
+  [[ "$output" == *"1 session recorded"* ]]
+}
+
+@test "bin/minsky recommend dispatches to scripts/transform_recommend.py with PWD as --repo" {
+  fixture="$TMPDIR_TEST/recommend-fixture"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/transform-runs.jsonl" <<EOF
+{"after_ts":"t1","code":{"total_files_walked":{"delta":2},"test_file_count":{"delta":0},"loc_by_language":{"ts":{"delta":30}}},"lint":{"after_exit_code":0},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+{"after_ts":"t2","code":{"total_files_walked":{"delta":1},"test_file_count":{"delta":0},"loc_by_language":{"ts":{"delta":20}}},"lint":{"after_exit_code":1},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+EOF
+
+  MINSKY_REPO="$REPO_ROOT" run bash -c "cd '$fixture' && '$REPO_ROOT/bin/minsky' recommend 2>&1"
+  [ "$status" -eq 0 ]
+  # 50 LOC growth + 0 tests + lint regression → expect 2 patterns
+  [[ "$output" == *"test-coverage-gap"* ]]
+  [[ "$output" == *"lint-regression"* ]]
+}
+
+@test "bin/minsky recommend --append <tasks-md> --yes forwards to transform_recommend.py and writes TASKS.md" {
+  # Closes the MAPE-K Execute phase: `recommend --append` lets the
+  # operator turn detected patterns into concrete TASKS.md entries
+  # under explicit `--yes` gate. The bin/minsky CLI verb must
+  # forward both flags transparently through "$@".
+  fixture="$TMPDIR_TEST/recommend-append-fixture"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/transform-runs.jsonl" <<EOF
+{"after_ts":"t1","code":{"total_files_walked":{"delta":2},"test_file_count":{"delta":0},"loc_by_language":{"ts":{"delta":30}}},"lint":{"after_exit_code":0},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+{"after_ts":"t2","code":{"total_files_walked":{"delta":1},"test_file_count":{"delta":0},"loc_by_language":{"ts":{"delta":20}}},"lint":{"after_exit_code":1},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+EOF
+  cat > "$fixture/TASKS.md" <<'EOF'
+# Tasks
+
+## P3
+
+- [ ] Existing placeholder task
+  - **ID**: existing-placeholder
+EOF
+
+  MINSKY_REPO="$REPO_ROOT" run bash -c "cd '$fixture' && '$REPO_ROOT/bin/minsky' recommend --append TASKS.md --yes 2>&1"
+  [ "$status" -eq 0 ]
+  # Append marker must land in TASKS.md
+  grep -q '<!-- transform-recommend: appended' "$fixture/TASKS.md"
+  # Existing task is preserved (no clobber)
+  grep -q 'existing-placeholder' "$fixture/TASKS.md"
+  # At least one recommended pattern ID landed
+  grep -qE '(test-coverage-gap|lint-regression)' "$fixture/TASKS.md"
+}
+
+@test "bin/minsky knowledge dispatches to scripts/transform_knowledge.py with --hosts-dir" {
+  parent="$TMPDIR_TEST/knowledge-parent"
+  for h in alpha bravo; do
+    mkdir -p "$parent/$h/.minsky"
+    cat > "$parent/$h/.minsky/transform-runs.jsonl" <<EOF
+{"after_ts":"t1","code":{"total_files_walked":{"delta":1},"test_file_count":{"delta":1},"loc_by_language":{"ts":{"delta":5}}},"lint":{"after_exit_code":0},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+EOF
+  done
+
+  MINSKY_REPO="$REPO_ROOT" run "$REPO_ROOT/bin/minsky" knowledge --hosts-dir "$parent"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 hosts indexed"* ]]
+  [[ "$output" == *"alpha"* ]]
+  [[ "$output" == *"bravo"* ]]
+}
+
+@test "bin/minsky trend forwards --json flag" {
+  fixture="$TMPDIR_TEST/trend-json-fixture"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/transform-runs.jsonl" <<EOF
+{"after_ts":"t1","code":{"total_files_walked":{"delta":1},"test_file_count":{"delta":0},"loc_by_language":{"ts":{"delta":5}}},"lint":{"after_exit_code":0},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+EOF
+
+  MINSKY_REPO="$REPO_ROOT" run bash -c "cd '$fixture' && '$REPO_ROOT/bin/minsky' trend --json 2>&1"
+  [ "$status" -eq 0 ]
+  # Output must be valid JSON with schema_version=1.
+  echo "$output" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['schema_version']==1; assert d['session_count']==1"
+}
+
+@test "bin/minsky --transform dispatches to bin/minsky-default-session.sh against \$PWD" {
+  # Vertical slice 3 dispatch wiring: confirms `minsky --transform`
+  # from any folder routes to the orchestrator with PWD as the host.
+  # Uses the worktree's actual bin/minsky + bin/minsky-default-session.sh
+  # (both already in place — no stubbing). The `--baseline-only` flag
+  # short-circuits the run loop, so the test exercises the dispatch
+  # chain end-to-end without needing openhands.
+  workdir="$TMPDIR_TEST/transform-workdir"
+  mkdir -p "$workdir"
+  # Make the workdir look like a git repo so bootstrap+baseline work.
+  (cd "$workdir" && git init -q && git symbolic-ref HEAD refs/heads/main && \
+     git config user.email t@t && git config user.name t && \
+     git remote add origin git@github.com:foo/transform-fixture.git)
+  printf '# Tasks\n' > "$workdir/TASKS.md"
+  printf '# fake\n' > "$workdir/README.md"
+
+  MINSKY_REPO="$REPO_ROOT" XDG_CONFIG_HOME="$TMPDIR_TEST/xdg-tx" \
+    run bash -c "cd '$workdir' && '$REPO_ROOT/bin/minsky' --transform --baseline-only 2>&1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"orchestrating bootstrap + baseline + run + report"* ]]
+  [[ "$output" == *"baseline-only mode"* ]]
+
+  # Bootstrap + baseline both ran end-to-end against PWD.
+  [ -f "$workdir/.minsky/repo.yaml" ]
+  [ -f "$workdir/.minsky/baseline.json" ]
+}
+
+@test "bin/minsky-default-session.sh prints trend + recommend summary when ledger has 2+ records" {
+  # Step 6 contract: after the report renders + appends, the
+  # orchestrator surfaces the MAPE-K Analyse (trend) + Plan
+  # (recommend) blocks inline. Closes the M→A→P chain in real-time.
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-summary"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/baseline.json" <<EOF
+{"ts":"2026-05-25T00:00:00+00:00","repo":"$fixture","code":{"total_files_walked":0,"test_file_count":0,"loc_by_language":{}},"docs":{"markdown_file_count":0,"has_readme":false,"has_agents_md":false,"has_claude_md":false,"has_vision_md":false,"has_tasks_md":false},"lint":{"exit_code":null},"build":{"exit_code":null},"dependencies":{"package_manager":"none","outdated_count":null},"schema_version":1}
+EOF
+  printf '# README\n' > "$fixture/README.md"
+
+  # Accumulate 3 ledger records via 3 silent sessions...
+  for _ in 1 2 3; do
+    "$session" "$fixture" --report-only --no-summary > /dev/null 2>&1
+  done
+
+  # ... then run a 4th session WITHOUT --no-summary; the trend +
+  # recommend blocks should appear in the output.
+  run "$session" "$fixture" --report-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"trend (last 10 sessions)"* ]]
+  [[ "$output" == *"transform-runs trend"* ]]
+  [[ "$output" == *"recommendations"* ]]
+}
+
+@test "bin/minsky-default-session.sh --no-summary suppresses trend + recommend output" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-nosummary"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/baseline.json" <<EOF
+{"ts":"2026-05-25T00:00:00+00:00","repo":"$fixture","code":{"total_files_walked":0,"test_file_count":0,"loc_by_language":{}},"docs":{"markdown_file_count":0,"has_readme":false,"has_agents_md":false,"has_claude_md":false,"has_vision_md":false,"has_tasks_md":false},"lint":{"exit_code":null},"build":{"exit_code":null},"dependencies":{"package_manager":"none","outdated_count":null},"schema_version":1}
+EOF
+  printf '# README\n' > "$fixture/README.md"
+  for _ in 1 2 3; do
+    "$session" "$fixture" --report-only --no-summary > /dev/null 2>&1
+  done
+
+  run "$session" "$fixture" --report-only --no-summary
+  [ "$status" -eq 0 ]
+  # No trend / recommend blocks
+  [[ "$output" != *"trend (last 10 sessions)"* ]]
+  [[ "$output" != *"recommendations"* ]]
+}
+
+@test "bin/minsky-default-session.sh --json suppresses trend + recommend (downstream tools want clean JSON)" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-json-nosummary"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/baseline.json" <<EOF
+{"ts":"2026-05-25T00:00:00+00:00","repo":"$fixture","code":{"total_files_walked":0,"test_file_count":0,"loc_by_language":{}},"docs":{"markdown_file_count":0,"has_readme":false,"has_agents_md":false,"has_claude_md":false,"has_vision_md":false,"has_tasks_md":false},"lint":{"exit_code":null},"build":{"exit_code":null},"dependencies":{"package_manager":"none","outdated_count":null},"schema_version":1}
+EOF
+  printf '# README\n' > "$fixture/README.md"
+  for _ in 1 2; do
+    "$session" "$fixture" --report-only --no-summary > /dev/null 2>&1
+  done
+
+  run "$session" "$fixture" --report-only --json
+  [ "$status" -eq 0 ]
+  # Even though ledger has 2+ records, --json mode suppresses the
+  # trailing summary so downstream tools get clean JSON payload.
+  [[ "$output" != *"trend (last 10 sessions)"* ]]
+  [[ "$output" != *"recommendations"* ]]
+}
+
+@test "bin/minsky-default-session.sh appends every session to .minsky/transform-runs.jsonl ledger" {
+  # MAPE-K Monitor surface: every session's delta accrues in the
+  # per-host ledger so the operator can see trends over time without
+  # recomputing each session in isolation. Append-only invariant:
+  # N sessions → N JSONL lines.
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-ledger"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/baseline.json" <<EOF
+{"ts":"2026-05-25T00:00:00+00:00","repo":"$fixture","code":{"total_files_walked":0,"test_file_count":0,"loc_by_language":{}},"docs":{"markdown_file_count":0,"has_readme":false,"has_agents_md":false,"has_claude_md":false,"has_vision_md":false,"has_tasks_md":false},"lint":{"exit_code":null},"build":{"exit_code":null},"dependencies":{"package_manager":"none","outdated_count":null},"schema_version":1}
+EOF
+  printf '# README\n' > "$fixture/README.md"
+
+  # Run 3 report-only sessions; ledger should accumulate 3 lines.
+  for i in 1 2 3; do
+    run "$session" "$fixture" --report-only
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"report appended to"* ]]
+  done
+
+  ledger="$fixture/.minsky/transform-runs.jsonl"
+  [ -f "$ledger" ]
+  line_count="$(wc -l < "$ledger" | tr -d ' ')"
+  [ "$line_count" = "3" ]
+
+  # Each line parses as JSON with schema_version=1
+  while IFS= read -r line; do
+    echo "$line" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); assert d['schema_version']==1"
+  done < "$ledger"
+}
+
+@test "bin/minsky-default-session.sh --json emits structured JSON report" {
+  # Forward --json to scripts/minsky_report.py; confirms the report
+  # is parseable JSON instead of the human-readable text.
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-json"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/baseline.json" <<EOF
+{"ts":"2026-05-25T00:00:00+00:00","repo":"$fixture","code":{"total_files_walked":0,"test_file_count":0,"loc_by_language":{}},"docs":{"markdown_file_count":0,"has_readme":false,"has_agents_md":false,"has_claude_md":false,"has_vision_md":false,"has_tasks_md":false},"lint":{"exit_code":null},"build":{"exit_code":null},"dependencies":{"package_manager":"none","outdated_count":null},"schema_version":1}
+EOF
+  printf '# README\n' > "$fixture/README.md"
+
+  run "$session" "$fixture" --report-only --json
+  [ "$status" -eq 0 ]
+  # Strip stderr noise; just the stdout should be JSON.
+  # bats captures stdout+stderr together in $output, so we re-run
+  # capturing just stdout to verify the JSON contract.
+  stdout_only="$("$session" "$fixture" --report-only --json 2>/dev/null)"
+  # Must parse as JSON with the documented schema fields.
+  python3 -c "
+import json,sys
+d = json.loads(r'''$stdout_only''')
+assert d['schema_version'] == 1
+assert 'code' in d
+assert 'before_ts' in d
+print('json shape ok')
+"
+}
+
+@test "bin/minsky-default-session.sh --report-only emits delta against existing baseline" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-report"
+  mkdir -p "$fixture/.minsky"
+  # Synthetic baseline.
+  cat > "$fixture/.minsky/baseline.json" <<EOF
+{"ts":"2026-05-25T00:00:00+00:00","repo":"$fixture","code":{"total_files_walked":0,"test_file_count":0,"loc_by_language":{}},"docs":{"markdown_file_count":0,"has_readme":false,"has_agents_md":false,"has_claude_md":false,"has_vision_md":false,"has_tasks_md":false},"lint":{"exit_code":null},"build":{"exit_code":null},"dependencies":{"package_manager":"none","outdated_count":null},"schema_version":1}
+EOF
+
+  # Add a file so the report shows a delta.
+  printf '# README\n' > "$fixture/README.md"
+
+  run "$session" "$fixture" --report-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"minsky report"* ]]
+  [[ "$output" == *"baseline: 2026-05-25T00:00:00+00:00"* ]]
+  # The "after" snapshot saw the README we just added.
+  [[ "$output" == *"has_readme: False → True"* ]]
+}
+
+@test "restart-sentinel exits 75 and clears the sentinel file (Phase 7-closing parity)" {
+  # Mirrors host-loop.ts checkRestartRequest/clearRestartRequest semantics.
+  # The TS side returns stop reason "restart-requested"; the bash side
+  # exits 75 (EX_TEMPFAIL) which launchd's `KeepAlive` interprets as
+  # "restart the daemon, the binary may have changed".
+  host_a="$(make_host alpha "$(complete_task_block | sed s/pick-me-first/restart-1/)")"
+
+  sentinel="$TMPDIR_TEST/restart-requested"
+  printf '{"ts":"2026-05-24T20:00:00Z","reason":"post-merge auto-install","changedFiles":["bin/minsky-run.sh"]}' > "$sentinel"
+
+  MINSKY_RESTART_SENTINEL_PATH="$sentinel" \
+    run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 2
+
+  [ "$status" -eq 75 ]
+  [[ "$output" == *"restart-requested sentinel found"* ]]
+  [[ "$output" == *"reason=post-merge auto-install"* ]]
+
+  # Sentinel must be cleared after detection.
+  [ ! -f "$sentinel" ]
+}
+
+@test "restart-sentinel absent → loop proceeds normally" {
+  # Negative test: sentinel that does NOT exist must not affect normal
+  # operation. Run with a bogus path; the loop iterates normally.
+  host_a="$(make_host alpha "$(complete_task_block | sed s/pick-me-first/no-sentinel/)")"
+
+  MINSKY_RESTART_SENTINEL_PATH="$TMPDIR_TEST/does-not-exist" \
+    run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"restart-requested"* ]]
+}
+
+@test "round-robin iterates each host the expected number of times" {
+  host_a="$(make_host alpha "$(complete_task_block | sed s/pick-me-first/task-a/)")"
+  host_b="$(make_host bravo "$(complete_task_block | sed s/pick-me-first/task-b/)")"
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 2
+  [ "$status" -eq 0 ]
+  # Each host's JSONL file should have exactly 2 lines.
+  [ "$(wc -l < "$host_a/.minsky/experiment-store/cross-repo/task-a.jsonl" | tr -d ' ')" = "2" ]
+  [ "$(wc -l < "$host_b/.minsky/experiment-store/cross-repo/task-b.jsonl" | tr -d ' ')" = "2" ]
+}
+
+# --- CTO audit on drain (PR #856 slice 2) ---------------------------------
+
+@test "CTO audit fires on drain when MINSKY_CTO_AUDIT_ON_DRAIN=1 (opt-in)" {
+  # Parity port slice 2 of TS host-cto-audit.ts § runHostCtoAudit
+  # (queue-empty trigger). When all hosts are drained AND the operator
+  # opted in, the daemon spawns a CTO-mode agent session via the same
+  # spawn_agent.py dispatcher used by regular iterations. The brief
+  # builder is scripts/build_cto_brief.py (PR #856).
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  brief_dump="$TMPDIR_TEST/cto-brief-dump.md"
+  # Fake openhands: captures the brief content so we can assert it's
+  # the CTO brief (not the regular iteration brief).
+  cat > "$shim_dir/openhands" <<EOF
+#!/usr/bin/env bash
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    --task-file) cp "\$2" "$brief_dump" 2>/dev/null || true; shift 2 ;;
+    *) shift ;;
+  esac
+done
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+  # gh stub: pr list returns empty (no audit PR found via backstop);
+  # repo view returns the host repo name.
+  cat > "$shim_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr list") echo "" ; exit 0 ;;
+  "repo view") echo "test-org/audit-host" ; exit 0 ;;
+  *) : ; exit 0 ;;
+esac
+EOF
+  chmod +x "$shim_dir/gh"
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  # Empty TASKS.md to force drain (no eligible tasks across all hosts).
+  local dir="$HOSTS_DIR/drained-host"
+  mkdir -p "$dir"
+  (cd "$dir" && git init -q && git config user.email "t@t" && git config user.name "t")
+  # A base commit, so the runner can create the agent's isolated worktree (it
+  # refuses to spawn in the host's own checkout).
+  (cd "$dir" && git -c core.hooksPath=/dev/null commit -q --allow-empty -m "chore: init")
+  echo "# Tasks" > "$dir/TASKS.md"
+  mkdir -p "$dir/.minsky"
+  cat > "$dir/.minsky/repo.yaml" <<EOF
+host_repo: "test-org/audit-host"
+default_branch: "main"
+EOF
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+export MINSKY_CTO_AUDIT_ON_DRAIN=1
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-cto.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/build_cto_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_cto_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  # The CTO brief reached the agent — proves the trigger fired.
+  [ -f "$brief_dump" ]
+  grep -q "Queue-empty seed audit" "$brief_dump"
+  grep -q "audit/" "$brief_dump"
+  grep -q "test-org/audit-host" "$brief_dump"
+  # The audit was recorded in the experiment-store ledger.
+  local audit_log
+  audit_log="$dir/.minsky/experiment-store/cross-repo/host-cto-audit-$(date -u +%Y-%m-%d).jsonl"
+  [ -f "$audit_log" ]
+  grep -q '"experiment_id":"host-cto-audit-' "$audit_log"
+  grep -q '"verdict":"validated"' "$audit_log"
+  grep -q '"notes":"cto-audit; exit 0"' "$audit_log"
+}
+
+@test "CTO audit is skipped by default (opt-out preserved when MINSKY_CTO_AUDIT_ON_DRAIN is unset)" {
+  # Default behavior: NO auto-audit on drain. Operator must explicitly
+  # set MINSKY_CTO_AUDIT_ON_DRAIN=1 to enable. This preserves the
+  # legacy behavior + respects LLM cost discipline.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  # If the audit fires unexpectedly, the openhands binary will be
+  # invoked. We track invocation via a sentinel.
+  sentinel="$TMPDIR_TEST/openhands-WAS-invoked.txt"
+  cat > "$shim_dir/openhands" <<EOF
+#!/usr/bin/env bash
+echo "OPENHANDS_INVOKED_UNEXPECTEDLY" > "$sentinel"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  local dir="$HOSTS_DIR/drained-host"
+  mkdir -p "$dir"
+  (cd "$dir" && git init -q && git config user.email "t@t" && git config user.name "t")
+  # A base commit, so the runner can create the agent's isolated worktree (it
+  # refuses to spawn in the host's own checkout).
+  (cd "$dir" && git -c core.hooksPath=/dev/null commit -q --allow-empty -m "chore: init")
+  echo "# Tasks" > "$dir/TASKS.md"
+  mkdir -p "$dir/.minsky"
+  cat > "$dir/.minsky/repo.yaml" <<EOF
+host_repo: "test-org/no-audit-host"
+default_branch: "main"
+EOF
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+# MINSKY_CTO_AUDIT_ON_DRAIN NOT set — default OFF.
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-nocto.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/build_cto_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_cto_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  # Sentinel MUST NOT exist — openhands wasn't invoked.
+  [ ! -f "$sentinel" ]
+}
+
+@test "CTO audit is skipped in --dry-run mode (no real spawn during planning)" {
+  # Even when opted-in, --dry-run mode skips the audit. Dry-run is for
+  # planning only; spawning a real LLM session contradicts that intent.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  sentinel="$TMPDIR_TEST/openhands-WAS-invoked.txt"
+  cat > "$shim_dir/openhands" <<EOF
+#!/usr/bin/env bash
+echo "OPENHANDS_INVOKED_UNEXPECTEDLY" > "$sentinel"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  local dir="$HOSTS_DIR/drained-host"
+  mkdir -p "$dir"
+  (cd "$dir" && git init -q && git config user.email "t@t" && git config user.name "t")
+  # A base commit, so the runner can create the agent's isolated worktree (it
+  # refuses to spawn in the host's own checkout).
+  (cd "$dir" && git -c core.hooksPath=/dev/null commit -q --allow-empty -m "chore: init")
+  echo "# Tasks" > "$dir/TASKS.md"
+  mkdir -p "$dir/.minsky"
+  echo 'host_repo: "x/y"' > "$dir/.minsky/repo.yaml"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+export MINSKY_CTO_AUDIT_ON_DRAIN=1
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-dry.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/build_cto_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_cto_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  # Even with opt-in env var, --dry-run gates out the audit.
+  [ ! -f "$sentinel" ]
+}
+
+# --- config-as-code: --once alias + local_llm dry-run preview --------------
+# Pins minsky-config-json-support-local-llm-pref: the declarative
+# local-LLM-fallback preference in ~/.minsky/config.json is honored by a
+# zero-ceremony dry-run (no host, no spawn), and `--once` is a single-iteration
+# alias for --max-iterations 1.
+
+@test "--once is accepted (alias for --max-iterations 1)" {
+  host="$(make_host one "$(complete_task_block)")"
+  run "$MINSKY_RUN" --host "$host" --once --dry-run
+  [ "$status" -eq 0 ]
+  jsonl="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$jsonl" ]
+  # --once caps to exactly one iteration record.
+  [ "$(wc -l < "$jsonl" | tr -d ' ')" -eq 1 ]
+}
+
+@test "dry-run with local_llm_enabled prints local_llm=on to stdout (no host, exit 0)" {
+  printf '%s' '{"local_llm_enabled":true,"local_llm":{"model":"ollama_chat/qwen3-coder:30b","base_url":"http://localhost:11434"},"cloud_agent":"devin"}' > "$CONFIG_FILE"
+  run "$MINSKY_RUN" --once --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"local_llm=on"* ]]
+  [[ "$output" == *"model=ollama_chat/qwen3-coder:30b"* ]]
+  [[ "$output" == *"base-url=http://localhost:11434"* ]]
+}
+
+@test "dry-run local_llm preview honors MINSKY_LOCAL_LLM=1 env override" {
+  # Config has local_llm_enabled:false; the env override forces it on.
+  printf '%s' '{"local_llm_enabled":false,"local_llm":{"model":"lm_studio/qwen3-coder","base_url":"http://localhost:1234"}}' > "$CONFIG_FILE"
+  MINSKY_LOCAL_LLM=1 run "$MINSKY_RUN" --once --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"local_llm=on"* ]]
+  [[ "$output" == *"base-url=http://localhost:1234"* ]]
+}
+
+@test "dry-run without local_llm and no host still fails the hosts-dir invariant" {
+  # Regression guard: the config-preview early-exit must NOT swallow the
+  # historical invariant failure for the non-local-config path.
+  printf '%s' '{"openhands":{"model":"claude-opus-4-7"}}' > "$CONFIG_FILE"
+  run "$MINSKY_RUN" --once --dry-run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"INVARIANT FAIL"* ]] || [[ "$output" == *"required"* ]]
+}
+
+@test "--help documents the --once alias" {
+  run "$MINSKY_RUN" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--once"* ]]
+}
+
+@test "LOOP_FOREVER walk is set-e-safe (guarded non-zero walk_hosts) — regression for supervisor-dies-on-spawn-failed-walk" {
+  # Bug: under `set -e` (line 27) a BARE `walk_hosts` in the `while true`
+  # supervisor exits the whole daemon the instant a walk returns non-zero —
+  # e.g. CTO-audit-on-drain spawn-failed — killing the loop on its first
+  # drained walk instead of backing off. The loop must capture the exit
+  # without tripping set -e.
+  run grep -nE 'walk_hosts[[:space:]]*\|\|[[:space:]]*walk_exit=' "$MINSKY_RUN"
+  [ "$status" -eq 0 ]
+  # The LOOP_FOREVER block must NOT invoke walk_hosts in the bare form that
+  # set -e turns fatal. (The non-loop single-walk path at the very end is
+  # allowed to be bare — it has no surrounding retry loop to protect.)
+  loop_block="$(sed -n '/^  while true; do/,/^  done/p' "$MINSKY_RUN")"
+  run bash -c "printf '%s' \"\$1\" | grep -qE '^[[:space:]]*walk_hosts[[:space:]]*\$'" _ "$loop_block"
+  [ "$status" -ne 0 ]
+}
+
+# --- worker role: a claude worker runs on its own model ----------------------
+
+# Build a wrapper that runs bin/minsky-run.sh from a temp copy with the real
+# helper scripts and a 30 s dynamic timeout, with $1 prepended to PATH.
+_worker_role_wrapper() {
+  local shim_dir="$1"
+  local wrapper="$TMPDIR_TEST/minsky-run-worker-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+# An operator's BASH_ENV can put the real agent CLIs ahead of the shims.
+unset BASH_ENV ENV
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-worker.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+for f in pick_task.py build_brief.py synth_experiment_yaml.py spawn_with_watchdog.py spawn_agent.py extract_pr_url.py worktree-prepare.sh; do
+  cp "$REPO_ROOT/scripts/\$f" "\$TMP_SCRIPT/"; chmod +x "\$TMP_SCRIPT/\$f"
+done
+printf '#!/usr/bin/env python3\nprint(30)\n' > "\$TMP_SCRIPT/dynamic_timeout.py"; chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+  echo "$wrapper"
+}
+
+@test "worker role uses local_agent_model when local_agent is claude (no local-LLM path, no qwen brief overlay)" {
+  # Observed in a single-host run: MINSKY_ROLE=worker + local_agent=claude spawned
+  # `claude --model ollama_chat/qwen3-coder:30b` (the .local_llm.model default); the
+  # claude CLI rejected it, so every iteration was spawn-failed.
+  printf '{"local_agent":"claude","local_agent_model":"claude-sonnet-5","openhands":{"model":"claude-opus-4-7"}}' > "$CONFIG_FILE"
+  shim_dir="$TMPDIR_TEST/shim-bin"; mkdir -p "$shim_dir"
+  argv_dump="$TMPDIR_TEST/claude-argv.txt"
+  cat > "$shim_dir/claude" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > $argv_dump
+exit 0
+EOF
+  chmod +x "$shim_dir/claude"
+  host="$(make_host worker-claude "$(complete_task_block)")"
+  # spawn_agent must read MINSKY_CONFIG, never the operator's ~/.minsky/config.json.
+  export HOME="$TMPDIR_TEST/home"; mkdir -p "$HOME"
+  wrapper="$(_worker_role_wrapper "$shim_dir")"
+
+  MINSKY_ROLE=worker run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  [ -f "$argv_dump" ]
+  grep -A1 -x -- '--model' "$argv_dump" | grep -qx 'claude-sonnet-5'
+  ! grep -q 'ollama_chat' "$argv_dump"
+  ! grep -q 'TOOL-CALL DISCIPLINE' "$argv_dump"
+  [[ "$output" != *"local_llm=on"* ]]
+}
+
+@test "worker role keeps the local-LLM model when local_agent is openhands" {
+  printf '{"local_agent":"openhands","local_llm":{"model":"ollama_chat/test-model"},"openhands":{"model":"claude-opus-4-7"}}' > "$CONFIG_FILE"
+  shim_dir="$TMPDIR_TEST/shim-bin"; mkdir -p "$shim_dir"
+  argv_dump="$TMPDIR_TEST/openhands-argv.txt"
+  cat > "$shim_dir/openhands" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > $argv_dump
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+  host="$(make_host worker-openhands "$(complete_task_block)")"
+  # spawn_agent must read MINSKY_CONFIG, never the operator's ~/.minsky/config.json.
+  export HOME="$TMPDIR_TEST/home"; mkdir -p "$HOME"
+  wrapper="$(_worker_role_wrapper "$shim_dir")"
+
+  MINSKY_ROLE=worker run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  grep -A1 -x -- '--model' "$argv_dump" | grep -qx 'ollama_chat/test-model'
+  [[ "$output" == *"local_llm=on model=ollama_chat/test-model"* ]]
+}
+
+# --- worktree lifecycle: fail closed, refresh idle, restore timeout stash ----
+
+@test "worktree add failure fails the iteration instead of spawning in the host checkout" {
+  # The old fallback spawned the agent in the host's own checkout ("NOT ISOLATED").
+  shim_dir="$TMPDIR_TEST/shim-bin"; mkdir -p "$shim_dir"
+  marker="$TMPDIR_TEST/agent-ran.txt"
+  printf '#!/usr/bin/env bash\ntouch %s\nexit 0\n' "$marker" > "$shim_dir/openhands"
+  chmod +x "$shim_dir/openhands"
+  host="$HOSTS_DIR/no-commits"
+  mkdir -p "$host/.minsky"
+  (cd "$host" && git init -q && git config user.email t@t && git config user.name t)  # no commit: no worktree
+  complete_task_block > "$host/TASKS.md"
+  printf 'host_repo: "test/no-commits"\ndefault_branch: "main"\ntasks_md_path: "TASKS.md"\n' > "$host/.minsky/repo.yaml"
+  export HOME="$TMPDIR_TEST/home"; mkdir -p "$HOME"
+  wrapper="$(_worker_role_wrapper "$shim_dir")"
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [[ "$output" == *"verdict=spawn-failed"* ]]
+  [[ "$output" == *"worktree-unavailable"* ]]
+  [[ "$output" != *"NOT ISOLATED"* ]]
+  [ ! -f "$marker" ]
+}
+
+# A host clone with an origin, and a task worktree on feat/t cut from origin/main.
+_prep_fixture() {
+  origin="$TMPDIR_TEST/origin.git"
+  git init -q --bare -b main "$origin"
+  host="$TMPDIR_TEST/prep-host"
+  git clone -q "$origin" "$host" 2>/dev/null
+  (cd "$host" && git config user.email t@t && git config user.name t \
+    && echo one > a.txt && echo base > shared.txt && git add a.txt shared.txt \
+    && git -c core.hooksPath=/dev/null commit -q -m "chore: one" && git push -q origin HEAD:main)
+  wt="$host/.worktrees/daemon-t"
+  git -C "$host" worktree add -q -b feat/t "$wt" origin/main
+  # main moves on after the worktree was cut
+  (cd "$host" && git checkout -q main 2>/dev/null || git checkout -q -b main; echo two > b.txt && git add b.txt \
+    && git -c core.hooksPath=/dev/null commit -q -m "chore: two" && git push -q origin HEAD:main && git fetch -q origin)
+  PREP="$REPO_ROOT/scripts/worktree-prepare.sh"
+}
+
+@test "worktree-prepare moves an idle reused worktree to origin/main" {
+  _prep_fixture
+  run bash "$PREP" "$host" "$wt" feat/t main
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$wt" rev-parse HEAD)" = "$(git -C "$host" rev-parse origin/main)" ]
+}
+
+@test "worktree-prepare leaves a busy worktree alone" {
+  _prep_fixture
+  echo edit >> "$wt/a.txt"
+  before="$(git -C "$wt" rev-parse HEAD)"
+  run bash "$PREP" "$host" "$wt" feat/t main
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$wt" rev-parse HEAD)" = "$before" ]
+  grep -q edit "$wt/a.txt"
+}
+
+@test "worktree-prepare restores this branch's timeout stash after the refresh" {
+  _prep_fixture
+  echo "work in progress" > "$wt/new.txt"
+  git -C "$wt" stash push -q -u -m "minsky-timeout-stash 2026-09-28T00:14:29"
+  run bash "$PREP" "$host" "$wt" feat/t main
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$wt" rev-parse HEAD)" = "$(git -C "$host" rev-parse origin/main)" ]
+  grep -q "work in progress" "$wt/new.txt"
+  [ -z "$(git -C "$host" stash list)" ]
+}
+
+@test "worktree-prepare skips the refresh when the stash and main changed the same file" {
+  _prep_fixture
+  (cd "$host" && echo main-side > shared.txt && git add shared.txt \
+    && git -c core.hooksPath=/dev/null commit -q -m "chore: three" && git push -q origin HEAD:main && git fetch -q origin)
+  before="$(git -C "$wt" rev-parse HEAD)"
+  echo worker-side > "$wt/shared.txt"
+  git -C "$wt" stash push -q -m "minsky-timeout-stash 2026-09-28T01:00:00"
+  run bash "$PREP" "$host" "$wt" feat/t main
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$wt" rev-parse HEAD)" = "$before" ]
+  grep -q worker-side "$wt/shared.txt"
+}
+
+# --- picker: Blocked by, and MINSKY_SKIP_TASK_IDS ---------------------------
+
+_two_task_block() {
+  cat <<'EOF'
+# Tasks
+
+## P0
+
+- [ ] Dependent
+  - **ID**: dependent
+  - **Blocked by**: blocker
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+
+- [ ] Blocker
+  - **ID**: blocker
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+
+- [ ] Third
+  - **ID**: third
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+EOF
+}
+
+@test "the picker does not hand out a task whose Blocked by task is still open" {
+  make_host blocked-by "$(_two_task_block)" >/dev/null
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"task=blocker"* ]]
+  [[ "$output" != *"task=dependent"* ]]
+}
+
+@test "MINSKY_SKIP_TASK_IDS keeps the picker away from the listed tasks" {
+  make_host skip-ids "$(_two_task_block)" >/dev/null
+  MINSKY_SKIP_TASK_IDS=blocker run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"task=third"* ]]
+}
+
+# --- minsky --once: exit code and JSON verdict; dry run names the live model -
+
+@test "minsky --once exits 3 and ends with a JSON verdict when the agent never started" {
+  # A host driver saw exit=0 on every round while each was spawn-failed.
+  shim_dir="$TMPDIR_TEST/shim-bin"; mkdir -p "$shim_dir"
+  printf '#!/usr/bin/env bash\necho "agent could not start" >&2\nexit 1\n' > "$shim_dir/openhands"
+  chmod +x "$shim_dir/openhands"
+  host="$(make_host once-fail "$(complete_task_block)")"
+  export HOME="$TMPDIR_TEST/home"; mkdir -p "$HOME"
+  run env -u BASH_ENV -u ENV PATH="$shim_dir:$PATH" bash "$REPO_ROOT/bin/minsky" --once "$host" --live
+  [ "$status" -eq 3 ]
+  last="$(printf '%s\n' "$output" | tail -1)"
+  [ "$(printf '%s' "$last" | jq -r .verdict)" = "spawn-failed" ]
+  [ "$(printf '%s' "$last" | jq -r .task)" = "pick-me-first" ]
+}
+
+@test "minsky --once dry run exits 0 and ends with a JSON verdict" {
+  host="$(make_host once-dry "$(complete_task_block)")"
+  run env -u BASH_ENV -u ENV bash "$REPO_ROOT/bin/minsky" --once "$host"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | tail -1 | jq -r .verdict)" = "planned" ]
+}
+
+@test "a dry run names the model a claude worker will really use" {
+  # The dry run printed the budget resolver's model while the live worker used another.
+  printf '{"local_agent":"claude","local_agent_model":"claude-sonnet-5","openhands":{"model":"claude-opus-4-7"}}' > "$CONFIG_FILE"
+  make_host dry-worker "$(complete_task_block)" >/dev/null
+  MINSKY_ROLE=worker run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"local agent claude model=claude-sonnet-5 [dry-run]"* ]]
+  [[ "$output" != *"runany-provider"* ]]
+}
+
+# --- host branch prefix; short conventional auto-commit subjects -------------
+
+@test "the task branch uses the host's branch_prefix from .minsky/repo.yaml" {
+  # The brief told the agent minsky/<id> while the worktree branch was feat/<id>.
+  host="$(make_host prefixed "$(complete_task_block)")"
+  printf 'branch_prefix: "minsky/"\n' >> "$host/.minsky/repo.yaml"
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"branch=minsky/pick-me-first"* ]]
+}
+
+@test "a worker's leftover edits get a short conventional auto-commit subject" {
+  # "wip(daemon): partial progress on <id> (auto-committed by supervisor)" became a host's
+  # squash subject twice; it is not conventional and runs past 72 characters.
+  shim_dir="$TMPDIR_TEST/shim-bin"; mkdir -p "$shim_dir"
+  host="$(make_host subject "$(complete_task_block | sed 's/pick-me-first/a-rather-long-task-id-that-goes-on-and-on-and-on/')")"
+  printf '#!/usr/bin/env bash\necho leftover > "%s/.worktrees/daemon-a-rather-long-task-id-that-goes-on-and-on-and-on/leftover.txt"\nexit 0\n' "$host" > "$shim_dir/openhands"
+  chmod +x "$shim_dir/openhands"
+  export HOME="$TMPDIR_TEST/home"; mkdir -p "$HOME"
+  wrapper="$(_worker_role_wrapper "$shim_dir")"
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  subject="$(git -C "$host" log -1 --format=%s feat/a-rather-long-task-id-that-goes-on-and-on-and-on)"
+  echo "subject: $subject"
+  [ "${#subject}" -le 72 ]
+  [[ "$subject" =~ ^chore\(minsky\):\  ]]
+}

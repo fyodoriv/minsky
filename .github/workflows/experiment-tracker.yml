@@ -1,0 +1,200 @@
+# experiment-tracker-v0 — rule #9 weekly–monthly layer enforcement.
+#
+# Pattern: scheduled batch job + verdict ladder over an append-only
+# per-experiment store; MAPE-K's Analyze phase scoped to rule #9.
+# Source: Ries 2011 (build–measure–learn; sustained-gain discipline);
+# Kohavi/Tang/Xu 2020 (trustworthy over fast; mid-term regressions);
+# Kephart & Chess 2003 (Analyze phase). Vision § Pattern conformance index
+# row 35.
+#
+# Why this exists: rule #9 declares pre-registration; the daily layer
+# (`ci-experiment-runner-v0`) records baseline + treatment per merged PR.
+# Pre-registration without execution is half a rule — this tracker closes
+# the weekly–monthly layer:
+#
+#   - Daily 09:00 UTC (cron) and on workflow_dispatch, walk every
+#     `experiment-store/*.jsonl`, find the merge boundary (most recent
+#     record line), and for any replay window whose boundary is past,
+#     re-run the recorded `measurement` command.
+#   - Append a `replay-result` JSONL line tagged
+#     `{ts, ref, value, window_days, verdict}`.
+#   - On `validated`, write a single line to `validated-learnings.md`.
+#   - On `regressed` (only after two consecutive crossings — see
+#     `scripts/replay-experiment.mjs`), append a `pivot-experiment-<id>`
+#     task to TASKS.md.
+#
+# Commits any updates to `experiment-store/`, `validated-learnings.md`,
+# `TASKS.md` directly back to main with a `[skip ci]` marker so the
+# recorder's own push doesn't trigger the daily-layer workflow.
+#
+# Don't touch ci.yml or experiment.yml from this workflow's territory —
+# those live in their own files; this workflow is the
+# rule-9-weekly-monthly-layer-only.
+
+name: experiment-tracker
+
+on:
+  schedule:
+    # 09:00 UTC every day. Replay windows are coarse-grained (7d / 30d),
+    # so daily ticks suffice; we'd hit nothing 23 hours out of 24 anyway.
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: experiment-tracker-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      # Slice 8's `prepare` hook (PR #387) runs `tsc -b && lefthook install`
+      # automatically, building every workspace dist/ in topological order.
+      # The explicit `pnpm --filter @minsky/experiment-record build` step
+      # that used to live here is now redundant. Same comment for the
+      # `pnpm --filter @minsky/mape-k-loop build` step further below.
+      - run: pnpm install --frozen-lockfile
+
+      - name: replay due experiments
+        run: node scripts/replay-experiment.mjs
+
+      - name: commit + push tracker updates
+        run: |
+          set -euo pipefail
+          # If the tracker added/changed files, push them back to main.
+          # `[skip ci]` prevents recursive workflow runs (matches the daily
+          # recorder's discipline).
+          if [ -z "$(git status --porcelain experiment-store/ validated-learnings.md TASKS.md)" ]; then
+            echo "no tracker updates to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Disable the local lefthook pre-commit hooks for this bot commit.
+          # The `check-toolchain` hook probes for the darwin-arm64 biome
+          # optionalDependency, which isn't resolved on a linux/x64 CI runner,
+          # so it hard-fails an otherwise-clean paths-restricted bot commit.
+          # Mirrors the experiment.yml recorder; enforced repo-wide by
+          # scripts/check-bot-commit-hook-bypass.mjs (TASKS.md
+          # `lefthook-bot-commit-bypass-discipline`). NOT --no-verify, which
+          # is independently banned (check-no-no-verify-bypass.mjs).
+          git config core.hooksPath /dev/null
+          git add experiment-store/ validated-learnings.md TASKS.md
+          git commit -m "chore(experiment-tracker): record replay verdicts $(date -u +%Y-%m-%d) [skip ci]"
+          git push origin HEAD:main
+
+      # ---- rule-#9 quarterly automation: Knowledge phase ingest --------------
+      # Wires the just-emitted verdicts into the MAPE-K orchestrator's
+      # Knowledge phase (Kephart-Chess 2003). `--ingest-mode` skips Plan/Execute
+      # entirely (rule #7 — separation of concerns); the orchestrator only
+      # appends to `constraints.md` and, on calibration drift > threshold,
+      # writes a draft amendment proposal under `tmp/`. NEVER auto-merges
+      # (rule #7 — operator review gate is the load-bearing safety property,
+      # Beyer SRE 2016 Ch. 17).
+
+      # Slice 8's prepare hook already built mape-k-loop's dist — see
+      # comment near `pnpm install --frozen-lockfile` above. The explicit
+      # `pnpm --filter @minsky/mape-k-loop build` step is no longer needed.
+
+      - name: ingest verdicts → mape-k orchestrator (Knowledge phase)
+        run: |
+          set -euo pipefail
+          mkdir -p tmp
+          node novel/mape-k-loop/bin/mape-k-orchestrator.mjs \
+            --ingest-mode \
+            --experiment-store=experiment-store \
+            --tmp-dir=tmp
+
+      - name: compute add-paths (skip non-existent files)
+        # `peter-evans/create-pull-request@v6` passes every line of its
+        # `add-paths` input to `git add --` verbatim. If a path doesn't
+        # exist (`tmp/proposed-rule-9-amendment.md` is conditional —
+        # only written when calibration MAE exceeds the rule-#9
+        # threshold per Munafò et al. 2017), git add fails with `fatal:
+        # pathspec ... did not match any files`. Pre-compute the list
+        # so we only stage files that actually exist on disk.
+        id: addpaths
+        run: |
+          set -euo pipefail
+          paths=()
+          for p in novel/mape-k-loop/constraints.md tmp/proposed-rule-9-amendment.md; do
+            if [ -f "$p" ]; then
+              paths+=("$p")
+            fi
+          done
+          if [ ${#paths[@]} -eq 0 ]; then
+            echo "no orchestrator outputs to commit; skipping PR"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "skip=false"
+            echo "paths<<EOF"
+            printf '%s\n' "${paths[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: open draft PR for orchestrator outputs
+        # Only fires when the orchestrator wrote new files (constraints.md
+        # append OR a tmp/ amendment proposal). The PR stays in DRAFT — never
+        # auto-merged. Industry-standard `peter-evans/create-pull-request@v6`
+        # handles branch + commit + PR open in one step.
+        #
+        # `continue-on-error: true` because the repo's "Allow GitHub Actions
+        # to create and approve pull requests" setting (Settings > Actions
+        # > General > Workflow permissions) may be disabled. When it is,
+        # the action fails with `GitHub Actions is not permitted to create
+        # or approve pull requests`. Per rule #6 graceful-degrade: log a
+        # warning, keep the workflow green, accept that ingest output isn't
+        # auto-PR'd until the operator flips the setting (or grants a PAT
+        # via `PAT_TOKEN` secret). Operator can always re-run after enabling.
+        if: steps.addpaths.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          # Disable lefthook for the action's internal `git commit`. Slice
+          # 8.1's prepare hook (PR #389) installs lefthook hooks at
+          # `.git/hooks/pre-commit`, which fires on every commit including
+          # the action's. lefthook's TUI output (box-drawing chars) is
+          # interpreted as an "Unexpected error" by the action's parser.
+          # `LEFTHOOK=0` is lefthook's documented escape hatch — disables
+          # the binary entirely for the duration of the step.
+          LEFTHOOK: "0"
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: mape-k-ingestion/${{ github.run_id }}
+          base: main
+          draft: true
+          commit-message: |
+            chore(mape-k): ingest verdicts $(date -u +%Y-%m-%d) [skip ci]
+          title: "chore(mape-k): rule-#9 ingestion — ${{ github.run_id }}"
+          body: |
+            Automated draft PR from `experiment-tracker.yml` →
+            `mape-k-orchestrator.mjs --ingest-mode`.
+
+            **DRAFT** — operator review required (rule #7 — operator escape
+            hatch; Beyer SRE 2016 Ch. 17). Do not auto-merge.
+
+            Files changed (review individually):
+            - `novel/mape-k-loop/constraints.md` — Knowledge-phase append
+              (every-tick audit trail per Helland 2007).
+            - `tmp/proposed-rule-9-amendment.md` — only present when
+              calibration MAE exceeded the rule-#9 threshold (Munafò et al.
+              2017). Promote to a `research.md` PR if the operator agrees.
+          add-paths: ${{ steps.addpaths.outputs.paths }}

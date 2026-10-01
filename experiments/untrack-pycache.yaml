@@ -1,0 +1,8 @@
+id: untrack-pycache
+hypothesis: |
+  tracked scripts/__pycache__/*.pyc bytecode regenerates with different bytes on every host (python patch version + source mtime are baked in), so every daemon branch and operator pull collides on it — three incidents in two days: the 2026-06-10 operator autostash conflict (UU pick_task.cpython-313.pyc), PR #1202's CONFLICTING state, and continuous operator-tree dirty churn. Untracking the directory and gitignoring __pycache__/ + *.pyc eliminates the entire conflict class with zero runtime cost (python regenerates bytecode transparently).
+success: "`git ls-files | grep -c '\\.pyc$'` returns 0 and stays 0; zero pyc-path merge/stash conflicts in the 30 days after landing (was 3 incidents in 2 days)."
+pivot: "if any tooling measurably depends on committed bytecode (a cold-start path slower by > 10% or an import error in CI within a week), revert the gitignore lines and re-track."
+measurement: "grep -q '__pycache__/' .gitignore && python3 scripts/pick_task.py TASKS.md | head -1 | grep -q ."
+anchor: |
+  Spinellis, *Code Quality: The Open Source Perspective* (2006), Ch. 5 — generated artifacts do not belong in version control; track sources, derive artifacts per environment.

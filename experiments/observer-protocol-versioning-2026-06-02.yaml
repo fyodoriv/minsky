@@ -1,0 +1,55 @@
+id: observer-protocol-versioning-2026-06-02
+hypothesis: |
+  TASKS.md `observer-skill-protocol-versioning` claims that the observer
+  protocol documented in `skill-plugins/observer/minsky/SKILL.md` (the
+  five-section Watch / Restart / Safe-heal / Swift-PR / Log protocol)
+  carries no version marker today, so an observer-filed PR cannot be
+  read back against the exact protocol revision the observer followed.
+
+  This experiment claims: adding pure additive metadata — a
+  `protocol_version: v1` field in the SKILL.md frontmatter, a
+  `## Changelog` section documenting v1's contents, and a
+  `Protocol version: v<N>` line in the §5 Swift-PR PR-body template —
+  makes every future observer-filed PR traceable to the protocol it
+  followed. The bet relies on three properties:
+
+    1. The three markers are co-located in one artefact (the SKILL.md),
+       so the version, its changelog, and the PR-template line cannot
+       drift apart silently (rule #2 — single seam).
+    2. The PR-template line is mechanical: every Swift-PR copy-paste
+       carries `Protocol version: v<N>`, so the audit trail is a
+       byproduct of following the template rather than a separate step.
+    3. The change is metadata-only — no behaviour change to Watch,
+       Restart, Safe-heal, Swift-PR, or Log — so the audit-trail gain
+       carries zero regression risk to the observer's runtime conduct.
+success: |
+  3 markers present and a deterministic grep finds all of them, AND the
+  observer protocol stays interpretable post-incident:
+  `grep -q 'protocol_version: v' skill-plugins/observer/minsky/SKILL.md
+  && grep -q 'Protocol version: v' skill-plugins/observer/minsky/SKILL.md
+  && grep -q '^## Changelog' skill-plugins/observer/minsky/SKILL.md`
+  all exit 0.
+pivot: |
+  Numeric pivot threshold: if `protocol_version` churns faster than
+  1 bump/month (> 12 bumps in 12 months), abandon explicit semantic
+  versioning and cite the SKILL.md git commit SHA instead (a rev-stable
+  identifier that needs no manual bump). Decision boundary: > 12 protocol
+  bumps in any rolling 12-month window. (Margin vs success is large:
+  12 bumps/year vs the 3-marker presence success bar.)
+measurement: |
+  grep -q 'protocol_version: v' skill-plugins/observer/minsky/SKILL.md && grep -q 'Protocol version: v' skill-plugins/observer/minsky/SKILL.md && grep -q '^## Changelog' skill-plugins/observer/minsky/SKILL.md && echo PASS
+# Implementation artefacts (rule-12 scope-discipline cross-reference).
+# The hypothesis above is realised by the additive metadata in this
+# existing artefact — listed here so the rule-#9/rule-12 substrate ties
+# the change back to this pre-registered experiment:
+#   - skill-plugins/observer/minsky/SKILL.md
+anchor: |
+  Winters, T., Manshreck, T., Wright, H. (eds.), *Software Engineering
+  at Google*, O'Reilly, 2020, ISBN 978-1492082798, Ch. 9 ("Code Review")
+  — versioned protocols + audit trails are how long-lived code reviews
+  stay interpretable as the surrounding process evolves. Constitutional
+  anchors: rule #7 (vision.md § 7 — chaos engineering visible-not-silent:
+  which protocol version filed an escalation matters for the audit);
+  rule #9 (pre-registered HDD — the three-marker presence is the
+  deterministic metric).
+replay_windows_days: [30, 365]
