@@ -602,6 +602,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] A merged partial-progress PR must not hide its task from the picker for 7 days
   - **ID**: wip-merge-hides-task
+  - **Competitive-goal**: drives `autonomous-merge-rate` up: a task hidden by a merged partial-progress PR cannot be picked, finished or merged for 7 days.
   - **Tags**: p1, picker, duplicate-detection, stability, observed-2026-10-01
   - **Milestone**: M1
   - **Hypothesis**: `decide_duplicate` treats any merged PR whose title names a task as "done recently" for 7 days. The supervisor's partial-progress auto-commit PR (title `wip(daemon): partial progress on <task-id> (auto-committed by supervisor)`) names the task, so when a host's merge gate merges it while the task block stays in TASKS.md, the picker silently skips that task for 7 days. If merged-recent ignores partial-progress PRs (and logs every merged-recent skip), no open task is hidden by unfinished work.
