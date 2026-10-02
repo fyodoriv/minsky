@@ -466,6 +466,10 @@ See [`.claude/skills/pr-merge-no-shortcuts/SKILL.md` § Operational discipline](
 - Vendor lock-in: hardcoded tool names in business logic — caught by the dep-interface lint check
 - Edits to `vision.md` from a working task — only the MAPE-K loop's specification-monitor process amends the behavioral spec
 
+## Frozen agents
+
+Windsurf, Devin, and Augment (Auggie) are deprecated and frozen (owner decision 2026-10-02). Keep the existing `devin` backend, launcher paths, and tests. Never implement a fix or a feature for them as tools, and never file tasks for them. Competitor research and benchmark readings about Devin or Augment Code are not tool support and stay in scope. If work for a supported backend breaks a frozen agent's existing test, skip that test with a note naming this section.
+
 ## Reading next
 
 This repo conforms to the [`load-project-context`](https://github.example.com/example-org/agentbrew/blob/main/src/catalog.yaml) canonical-doc layout (cardinal docs at root + multi-file dirs at root or `docs/`). Any agentbrew-managed agent session entering this repo auto-loads the docs below into context via the catalog rule + Claude Code `SessionStart` hook. Read them in this order:
