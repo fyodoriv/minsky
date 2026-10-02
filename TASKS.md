@@ -191,7 +191,8 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `agent-mediated-install` — any AI coding agent (Claude Code / Cursor / Windsurf / Devin / Codex / Ollama-via-aider) can install minsky for the operator's current folder in ≤60s with a single human prompt (telemetry consent), via a canonical `INSTALL.md` runbook colocated in the repo root
   - **ID**: agent-mediated-install
-  - **Blocked**: needs-operator — Closing needs live 9-run real-agent matrix (claude/devin/cursor); deferred P2 + creds absent
+  - **Blocked**: needs-operator — Closing needs live real-agent matrix (claude/cursor); deferred P2 + creds absent
+  - **Scope**: Windsurf and Devin are deprecated and frozen (owner decision 2026-10-02); drop them from the install matrix.
   - **Tags**: p0, milestone-m1, install, dx, agent-ux, telemetry, operator-directive, observed-2026-05-20
   - **Milestone**: M1
   - **Surfaced-by**: operator 2026-05-20 — "user is working in claude/devin/windsurf/ollama/cursor, asks their agent to install minsky and get it running for current folder. Agent should find minsky repo, read its instructions, quickly do that, asking questions only where absolutely necessary, including agreement to submit anonymized runtime logs. Save answers + submit them to minsky's DB of which projects agreed and at what time. Then run minsky or tell user installation is complete. This installation path should be preferred and recommended above other info." Existing `minsky-init-one-command-bootstrap` (P0 — npx/curl) and `minsky-npx-install-and-run` (P1 — one shell line) remain alternative paths for users without an agent handy; this task makes the agent-mediated path the *canonical* one.
@@ -451,22 +452,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Pivot**: trivial — different category.
   - **Measurement**: `test -f competitors/pr-agent.md && grep -c '^## Five pivot questions' competitors/pr-agent.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/qodo-ai/pr-agent`.
-
-- [ ] `watchdog-timeout-kills-productive-devin` — the 900s (15min) watchdog SIGKILLs devin mid-work; devin iterations take 5-6min when productive but the watchdog fires on slow iterations, wasting the entire iteration
-  - **ID**: watchdog-timeout-kills-productive-devin
-  - **Blocked**: needs-operator — Already fixed by dynamic_timeout.py (20min floor); target .mjs files no longer exist
-  - **Tags**: p0, milestone-m1, devin, watchdog, reliability
-  - **Milestone**: M1
-  - **Competitive-goal**: a killed productive iteration wastes 15min of devin time with zero output — directly regresses cost-per-PR and stability.
-  - **Surfaced-by**: 2026-05-18 live daemon: one `spawn-failed` at exactly 900014ms (the 900s watchdog) while the other iterations completed in 335-382s. The watchdog killed what was likely a productive-but-slow iteration.
-  - **Details**: the default `claudePrintTimeoutMs` is 900_000 (15 min), set in `tick-loop.mjs:340`. But minsky-run.mjs (the cross-repo runner) doesn't use the tick-loop's spawn strategy — it has its own spawn path. Check which timeout the cross-repo runner uses and whether it's too aggressive for devin. Devin may legitimately take >15min on complex tasks. The existing P2 task `worker-watchdog-scale-by-pinned-model-latency` addresses this for the tick-loop but not for the cross-repo runner.
-  - **Files**: `novel/cross-repo-runner/bin/minsky-run.mjs` (spawn timeout configuration), `novel/tick-loop/bin/tick-loop.mjs` (reference — already has `MINSKY_CLAUDE_PRINT_TIMEOUT_MS` env override)
-  - **Touches**: novel/cross-repo-runner/bin/minsky-run.mjs, novel/tick-loop/bin/tick-loop.mjs
-  - **Hypothesis**: raising the cross-repo runner's spawn timeout to 1800s (30min) eliminates watchdog-killed productive iterations while still catching truly stuck spawns.
-  - **Success**: 0 `spawn-failed` at exactly 900s over 10 consecutive iterations; productive iterations that take 10-20min complete normally.
-  - **Pivot**: if 30min is too long for stuck detection, implement a "progress watchdog" that checks whether the spawn has produced any stdout in the last 5min instead of a fixed wall-clock timeout.
-  - **Measurement**: `jq 'select(.verdict=="spawn-failed") | .notes' .minsky/experiment-store/cross-repo/*.jsonl | grep -c '900'` → 0 (was: 1).
-  - **Anchor**: 2026-05-18 live daemon (900014ms spawn-failed). Existing P2 `worker-watchdog-scale-by-pinned-model-latency`.
 
 - [ ] `minsky-config-json-support-local-llm-pref` — operator can express the full local-LLM-fallback preference in `~/.minsky/config.json` (already read by `bin/minsky-run.sh`), with an example config + documented keys, so cloud_agent and local-llm prefs live in ONE editable file
   - **ID**: minsky-config-json-support-local-llm-pref
@@ -1835,7 +1820,8 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `verify-spawn-failed-exit-minus-one-substrate-resolves` — confirm the env-propagation + signal-capture substrate (PRs #666, #694) eliminates `verdict=spawn-failed exit=-1 stderr=(empty)` from cross-repo-runner spawns
   - **ID**: verify-spawn-failed-exit-minus-one-substrate-resolves
   - **Blocked**: needs-operator — Needs ≥1h live daemon data (daemon.log, experiment-store, plist); absent in worktree
-  - **Tags**: p3, longitudinal-verification, spawn, devin, observed-2026-05-23, follow-up
+  - **Tags**: p3, longitudinal-verification, spawn, observed-2026-05-23, follow-up
+  - **Scope**: verify on supported backends only. Devin is deprecated and frozen (owner decision 2026-10-02); ignore Devin spawns.
   - **Milestone**: M1
   - **Competitive-goal**: closes the runtime-verification half of `spawn-failed-exit-minus-one-silent-empty-stderr` (P0, resolved by substrate). The code-level fixes shipped via PR #666 (env propagation for DEVIN_*/CLAUDE_*/OPENAI_*/ANTHROPIC_* in the launchd plist generator) + PR #694 (`spawn-error-capture.test.ts` seam test asserting signal/stderr/stdout capture through `ProcessSpawnStrategy` → `runLive` → `LiveSpawnOutcome`). Hypothesis (a) from the parent task was the most likely cause and the code-level fix is in `bin/minsky:622-664`. This task confirms the fix is effective in production by collecting the longitudinal runtime data the parent task's Acceptance #1 + #2 require.
   - **Touches**: read-only — no source changes. Inspects `~/.minsky/daemon.log` + the daemon's launchd plist + `.minsky/experiment-store/cross-repo/*.jsonl` to count `spawn-failed exit=-1 stderr=(empty)` records.
