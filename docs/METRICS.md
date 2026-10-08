@@ -250,11 +250,11 @@ _Updated: 2026-09-27T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshot
 
 _Updated: 2026-09-27T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshots/2026-09-27.json` · Milestone: M1.9_
 
-**Value:** 4 count of contractually-runnable backends (target 4 of 4)
+**Value:** 3 count of contractually-runnable backends (target 3 of 3)
 
 **How to view:** `grep -c 'pendingExternalDep:\s*null' scripts/lib/cloud-agent-config.mjs`
 
-**Goal:** 4 of 4 backends in AGENT_MATRIX with `pendingExternalDep: null` (openhands + claude + devin + aider)
+**Goal:** 3 of 3 backends in AGENT_MATRIX with `pendingExternalDep: null` (openhands + claude + aider)
 
 **Pivot:** <2 for ≥2 weeks → launcher abstraction is leaking backend-specific assumptions; halt agent-spawn work and re-architect the dispatcher
 

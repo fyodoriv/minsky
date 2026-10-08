@@ -24,7 +24,7 @@ I can run uninstall whenever I want. Minsky never runs it for me.
 - `~/Library/LaunchAgents/com.minsky.*.plist` — all 7 supervisors on macOS.
 - `~/.config/systemd/user/minsky-*.{service,timer}` — the supervisor units on Linux.
 - Any `.minsky/` directory inside a repo you chose to set up for Minsky (you opt in per repo). A repo Minsky works on is called a host.
-- Any `.worktrees/daemon-*` directories inside a host — the isolated checkouts where Minsky runs an agent (the coding assistant, such as Claude Code or Devin) so its edits never touch your main branch.
+- Any `.worktrees/daemon-*` directories inside a host — the isolated checkouts where Minsky runs an agent (the coding assistant, such as Claude Code) so its edits never touch your main branch.
 
 ## Acceptance criteria
 

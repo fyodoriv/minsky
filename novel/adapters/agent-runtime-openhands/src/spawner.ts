@@ -8,7 +8,7 @@
 // to spawn the Python shim. The shim itself lives at
 // `bin/minsky-openhands-spawn.py` in this package.
 //
-// Wire shape matches the existing claude / devin / aider builders in
+// Wire shape matches the existing claude / aider builders in
 // `bin/minsky-run.sh` § `iterate_host` (the bash skeleton that supersedes the TS runner per Phase 7b):
 // the caller receives `{ command, argv, stdin, cwd }` and spawns it
 // directly via `child_process.spawn`. No long-lived state, no shared
@@ -68,7 +68,7 @@ export interface OpenHandsSpawnInput {
 
 /**
  * The subprocess invocation the cross-repo runner will execute. Shape
- * matches the existing claude/devin invocation envelope so the spawn
+ * matches the existing claude invocation envelope so the spawn
  * site stays uniform across agents.
  */
 export interface OpenHandsInvocation {
@@ -91,7 +91,7 @@ const MAX_BRIEF_BYTES = 1024 * 1024;
  *
  * Side effect: writes `brief` to a fresh temp file (`mkdtempSync` per
  * call). The TS caller is responsible for cleanup after the subprocess
- * exits — see `bin/minsky-run.mjs` for the existing devin/aider
+ * exits — see `bin/minsky-run.mjs` for the existing aider
  * cleanup pattern (the temp dir lives for the daemon's lifetime; per-
  * task files are not deleted because the iteration record may want
  * to attach them).

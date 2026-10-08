@@ -43,7 +43,7 @@ Minsky is **pre-alpha** (`v0.0.0`). This table reflects what actually works righ
 | 🟢 **Add missing tests** for existing code | Works. Test-first is constitutional. | M1 |
 | 🟡 **Run overnight unattended** | Works but fragile. Commit hooks, token limits, and GH auth can crash the daemon. | M1 targets 90% stability |
 | 🟡 **Single-file bug fixes** | Works when localized. Struggles with multi-file root causes. | M2 improves this |
-| 🟡 **Switch between Claude, Devin, and local models** | Partially working. Claude is primary, Devin experimental, local bootstraps but quality varies. | M1 |
+| 🟡 **Switch between Claude and local models** | Partially working. Claude is primary, local bootstraps but quality varies. | M1 |
 | 🔴 **Multi-file refactors** | Likely to produce partial changes that break the build. | M2 |
 | 🔴 **UI/frontend changes** | No screenshot capture or visual verification yet. | M2 |
 | 🔴 **Run on GitHub Actions** | Not yet. | M3 |
@@ -71,7 +71,7 @@ pnpm minsky doctor                   # health probe — claude / local-LLM / mod
 
 ### Daemon mode (`--daemon`)
 
-`minsky daemon start` backgrounds the process, logs to `~/.minsky/daemon.log`, writes a PID file, and exits immediately. The process is SIGHUP-immune — survives IDE terminal close, Windsurf/Cursor restart, and SSH disconnect. Guards against double-start (PID check).
+`minsky daemon start` backgrounds the process, logs to `~/.minsky/daemon.log`, writes a PID file, and exits immediately. The process is SIGHUP-immune — survives IDE terminal close, Cursor restart, and SSH disconnect. Guards against double-start (PID check).
 
 ### Local-only mode (`--local`)
 
@@ -79,13 +79,13 @@ pnpm minsky doctor                   # health probe — claude / local-LLM / mod
 
 ### Cloud agent selection (`MINSKY_CLOUD_AGENT`)
 
-The cloud agent is selectable per machine. Default `claude` (Claude Code CLI). Set `MINSKY_CLOUD_AGENT=devin` to use Devin CLI (`devin --print`) instead — same stdin/stdout contract, different billing. Pin the model with `MINSKY_CLOUD_AGENT_MODEL`.
+The cloud agent is selectable per machine. Default `claude` (Claude Code CLI). Set `MINSKY_CLOUD_AGENT=aider` to use the Aider CLI instead. Pin the model with `MINSKY_CLOUD_AGENT_MODEL`.
 
 **Operator escape hatches** (env vars; see `minsky --help`):
 
 | Env var | Effect |
 |---|---|
-| `MINSKY_CLOUD_AGENT=devin` | Use Devin CLI instead of Claude Code for cloud iterations. |
+| `MINSKY_CLOUD_AGENT=aider` | Use the Aider CLI instead of Claude Code for iterations. |
 | `MINSKY_CLOUD_AGENT_MODEL=<id>` | Model to pass via `--model` to the cloud agent. |
 | `MINSKY_LLM_PROVIDER=local-only` | Hard local mode (same as `--local` flag). |
 | `MINSKY_LLM_PROVIDER=local-preferred` | Prefer local when reachable, fall back to cloud. |
@@ -112,7 +112,7 @@ If `pnpm minsky` ran without the env var, the live probe (1-token `claude --prin
 
 Minsky ships an **observer plugin** distributed via
 [agentbrew](https://github.com/cbrwizard/agentbrew) so any Claude Code /
-Cursor / Devin / agentbrew-synced agent session can invoke the cross-repo
+Cursor / agentbrew-synced agent session can invoke the cross-repo
 runner from any folder and automatically watch the loop from outside.
 
 ```bash
@@ -134,7 +134,7 @@ The plugin has four pieces:
 |---|---|---|
 | PATH shim | `bin/minsky` | Resolves the minsky repo; handles `--daemon` (background + PID file + log), `--local` (zero-cloud env), `status`/`stop`/`logs` subcommands; forwards to `minsky-run.mjs`. SIGHUP-immune. |
 | Skill | `skill-plugins/observer/minsky/SKILL.md` | The observer protocol — Watch / Restart / Safe-heal / Swift-PR / Log. Triggered by phrases like "run minsky here" in any agent session. |
-| Slash commands | `commands/minsky.md` + `commands/minsky-status.md` + `commands/minsky-stop.md` | `/minsky`, `/minsky-status`, `/minsky-stop` for Claude Code / Cursor / Devin. |
+| Slash commands | `commands/minsky.md` + `commands/minsky-status.md` + `commands/minsky-stop.md` | `/minsky`, `/minsky-status`, `/minsky-stop` for Claude Code / Cursor. |
 | Agentfile | `Agentfile.yaml` | Declares `skillSources: [{ label: minsky-observer, path: ./skill-plugins/observer }]` so `agentbrew sync` deploys the skill to every detected agent's `skillsDir`. |
 
 The calling agent **watches the loop from outside** (Perrow 1984,
@@ -167,7 +167,7 @@ The named patterns aren't decoration — they're the debuggability promise. When
 
 **What works today** (3,135 tests passing):
 
-- ✅ Tick-loop daemon picks tasks from TASKS.md, spawns Claude Code / Devin / aider, opens PRs
+- ✅ Tick-loop daemon picks tasks from TASKS.md, spawns Claude Code / aider, opens PRs
 - ✅ Budget guard monitors token usage (5h window + weekly), auto-pauses before limits
 - ✅ Local-model fallback (aider + ollama) when cloud tokens exhausted
 - ✅ Local merge gate (replaces GitHub Actions — deterministic, no CI cost)
@@ -312,7 +312,7 @@ The sections below were relocated from the top-level `README.md` to shrink its t
 
 1. Reads `TASKS.md` from your host repo (the [tasks.md spec](https://github.com/tasksmd/tasks.md))
 2. Picks the highest-priority task that's ready to work on
-3. Spawns Devin, Claude, or a local AI model (configurable per machine)
+3. Spawns Claude or a local AI model (configurable per machine)
 4. The agent implements the task on a feature branch and runs your tests
 5. Opens a draft pull request — with a self-graded report on whether the change moved the metric it predicted
 6. Records the iteration in `.minsky/experiment-store/` (so the next run can learn from it)
@@ -327,7 +327,7 @@ minsky (bash CLI shim)
   ↓
 cross-repo-runner (minsky-run.mjs) — walks hosts, picks tasks, spawns agents
   ↓
-Devin / Claude / Aider — the actual AI agent (pluggable)
+Claude / Aider — the actual AI agent (pluggable)
   ↓
 .minsky/ sidecar — config, experiment store, iteration records
 ```
@@ -345,9 +345,9 @@ Deeper dive: [ARCHITECTURE.md](ARCHITECTURE.md), [vision.md § "Pattern conforma
 
 ### Minsky's position in the landscape
 
-Minsky is an **orchestrator**, not an agent. It sits ABOVE Claude / Devin / Aider — managing the daemon lifecycle, the MAPE-K loop, prompt evolution, the multi-repo task queue, supervisor restart discipline. The agents are its inputs. Its peers are other orchestrators (MetaGPT, AutoGen, CrewAI, LangGraph), not the agents it composes.
+Minsky is an **orchestrator**, not an agent. It sits ABOVE Claude / Aider — managing the daemon lifecycle, the MAPE-K loop, prompt evolution, the multi-repo task queue, supervisor restart discipline. The agents are its inputs. Its peers are other orchestrators (MetaGPT, AutoGen, CrewAI, LangGraph), not the agents it composes.
 
-A Minsky operator picks an agent (Claude vs Devin vs Aider) AND gets the orchestrator layer. The scorecard at [novel/competitive-benchmark/README.md](../novel/competitive-benchmark/README.md) compares both axes: Minsky should beat other orchestrators on orchestrator metrics AND not regress vs the bare agent. For the moat view of the same substrate, see [vision.md § "What Minsky uniquely does"](../vision.md#what-minsky-uniquely-does-the-moat) and [`competitors/README.md`](../competitors/README.md).
+A Minsky operator picks an agent (Claude vs Aider) AND gets the orchestrator layer. The scorecard at [novel/competitive-benchmark/README.md](../novel/competitive-benchmark/README.md) compares both axes: Minsky should beat other orchestrators on orchestrator metrics AND not regress vs the bare agent. For the moat view of the same substrate, see [vision.md § "What Minsky uniquely does"](../vision.md#what-minsky-uniquely-does-the-moat) and [`competitors/README.md`](../competitors/README.md).
 
 Not the only Minsky on the internet — there's also a popular economic-modelling tool ([`highperformancecoder/minsky`](https://github.com/highperformancecoder/minsky), named after the *economist* Hyman Minsky) plus several other unrelated projects. Full disambiguation table + the prior-art lineage that informs this Minsky's architecture: [docs/prior-art-and-name-collisions.md](prior-art-and-name-collisions.md).
 
@@ -364,7 +364,7 @@ Moved here from the top-level README during the `readme-rewrite-5-min-install-gu
 | **Comes up with tasks** | agents file P1–P3 tasks while iterating (rule #17 forces same-PR scout filings); `corpus-discover-quarterly` files competitor-research tasks every 90d | 🟡 agents author tasks *inside* iterations; autonomous authoring *between* ticks is the M2 gap |
 | **Best way based on science** | rule #9 pre-registered HDD enforced as a CI lint on every PR; M1.10 corpus scorecard with primary-source citations; every PR carries a `## Hypothesis self-grade` block | ✅ strongest pillar — this is the moat |
 
-**Two operator invariants recorded 2026-05-24**: (1) **Local models are the default until stable** — the runtime defaults to Ollama / LM Studio / MLX and does NOT require a cloud API key; the stance lifts when `scripts/measure-stability.mjs` reports ≥90% clean-exit fraction over a trailing 7-day window ([story 015](../user-stories/015-local-models-until-stable.md)). (2) **Launcher-agnostic feature parity** — you can install + run from any agent chat (Claude Code, Cursor, Devin, Windsurf, Codex, Aider, or a local model) and the daemon's runtime behavior is byte-identical afterwards; the chat is a doorway, not a runtime ([story 014](../user-stories/014-launcher-agnostic-feature-parity.md)). Full plans: [path-c reshape](plans/2026-05-22-path-c-openhands-reshape.md), [path-a aggressive cut](plans/2026-05-24-path-a-aggressive-cut.md).
+**Two operator invariants recorded 2026-05-24**: (1) **Local models are the default until stable** — the runtime defaults to Ollama / LM Studio / MLX and does NOT require a cloud API key; the stance lifts when `scripts/measure-stability.mjs` reports ≥90% clean-exit fraction over a trailing 7-day window ([story 015](../user-stories/015-local-models-until-stable.md)). (2) **Launcher-agnostic feature parity** — you can install + run from any agent chat (Claude Code, Cursor, Codex, Aider, or a local model) and the daemon's runtime behavior is byte-identical afterwards; the chat is a doorway, not a runtime ([story 014](../user-stories/014-launcher-agnostic-feature-parity.md)). Full plans: [path-c reshape](plans/2026-05-22-path-c-openhands-reshape.md), [path-a aggressive cut](plans/2026-05-24-path-a-aggressive-cut.md).
 
 ### Where to read next (full audience-segmented map)
 

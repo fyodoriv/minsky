@@ -9,7 +9,7 @@
 
 ## What this is
 
-Minsky is a background program that does coding work. You point it at a git repo (a **host**) with a plain-text to-do list (`TASKS.md`); Minsky picks the most important unfinished task and asks a coding **agent** — Claude Code, Devin, Aider, or a local model — to do it.
+Minsky is a background program that does coding work. You point it at a git repo (a **host**) with a plain-text to-do list (`TASKS.md`); Minsky picks the most important unfinished task and asks a coding **agent** — Claude Code, Aider, or a local model — to do it.
 
 Minsky isn't the agent — it drives the agent and hands you the result as a draft. It never merges on its own, never touches `main`, runs through the night, and restarts if it crashes. Everything runs on your machine, as you, so the work shows up under your name.
 

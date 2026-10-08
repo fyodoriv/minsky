@@ -156,7 +156,7 @@ The third beat is the load-bearing one. A reader who landed on the wrong doc fin
 
 **Claim.** Intelligence emerges from many simple specialised agents working together; none is intelligent alone.
 
-**Where in Minsky.** The tool's namesake. Agents are pluggable (Devin, Claude, Aider, local LLM) and operate on a shared queue (`TASKS.md`) — no agent is privileged, and different tasks naturally route to the agent best suited to them. The plugin architecture is in `novel/tick-loop/src/spawn-strategy.ts`.
+**Where in Minsky.** The tool's namesake. Agents are pluggable (Claude, Aider, local LLM) and operate on a shared queue (`TASKS.md`) — no agent is privileged, and different tasks naturally route to the agent best suited to them. The plugin architecture is in `novel/tick-loop/src/spawn-strategy.ts`.
 
 ### Pattern conformance (named-architecture discipline)
 

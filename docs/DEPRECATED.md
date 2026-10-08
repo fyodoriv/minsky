@@ -28,7 +28,7 @@ mirror-setup.
 
 - **Replacement**: Soft mode is the permanent default. Scope-leak logs
   out-of-scope files and continues. There is no reason to halt.
-- **Rationale**: Devin naturally touches related files. 54% of overnight
+- **Rationale**: Agents naturally touch related files. 54% of overnight
   iterations were killed by hard scope-leak (2026-05-18). Soft mode
   preserves PRs and keeps the daemon alive.
 - **Remove**: Delete the `"hard"` branch in `host-loop.ts:337` and the
@@ -126,6 +126,17 @@ mirror-setup.
   [`docs/CHANGELOG-narrative-history.md`](./docs/CHANGELOG-narrative-history.md).
 - **Status**: superseded as of 2026-05-21. The archive file is
   read-only — do not add new daily entries.
+
+### 11. Windsurf and Devin support (removed 2026-10-08)
+
+- **Replacement**: `claude`, `aider`, or `openhands` via `cloud_agent` in
+  `~/.minsky/config.json`.
+- **Rationale**: Owner decision 2026-10-08. The `devin` backend, its
+  `--prompt-file` brief delivery, install-measurement parser, cost tier 6, and
+  all Windsurf/Devin sync targets were deleted. Do not re-add them.
+- **Still frozen**: Augment (Auggie) stays deprecated and frozen (owner
+  decision 2026-10-02). Competitor analysis of Devin (Cognition) stays in
+  `competitors/`.
 
 ## Not deprecated (keep investing)
 

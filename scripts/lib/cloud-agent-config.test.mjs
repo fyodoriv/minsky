@@ -14,20 +14,20 @@ import { describe, expect, test } from "vitest";
 import { AGENT_MATRIX, resolveCloudAgent } from "./cloud-agent-config.mjs";
 
 describe("AGENT_MATRIX", () => {
-  test("contains exactly 4 rows", () => {
-    expect(AGENT_MATRIX).toHaveLength(4);
+  test("contains exactly 3 rows", () => {
+    expect(AGENT_MATRIX).toHaveLength(3);
   });
 
   test("openhands is first row (canonical default since 2026-05-24)", () => {
     expect(AGENT_MATRIX[0]?.id).toBe("openhands");
   });
 
-  test("row order is openhands / claude / devin / aider", () => {
-    expect(AGENT_MATRIX.map((r) => r.id)).toEqual(["openhands", "claude", "devin", "aider"]);
+  test("row order is openhands / claude / aider", () => {
+    expect(AGENT_MATRIX.map((r) => r.id)).toEqual(["openhands", "claude", "aider"]);
   });
 
   test("every row has a valid briefDeliveryShape", () => {
-    const validShapes = new Set(["brief-file", "stdin", "prompt-file", "message-file"]);
+    const validShapes = new Set(["brief-file", "stdin", "message-file"]);
     for (const row of AGENT_MATRIX) {
       expect(validShapes.has(row.briefDeliveryShape)).toBe(true);
     }
@@ -40,7 +40,7 @@ describe("AGENT_MATRIX", () => {
     }
   });
 
-  test("all four agents have pendingExternalDep === null (integration complete)", () => {
+  test("all three agents have pendingExternalDep === null (integration complete)", () => {
     // June-1-2026 dep lifted on 2026-05-24 when the Python-SDK shim
     // adapter shipped. No row carries an external-dep gate today.
     for (const row of AGENT_MATRIX) {
@@ -82,15 +82,6 @@ describe("resolveCloudAgent — shipped agents", () => {
     }
   });
 
-  test("ok status for devin (prompt-file shape)", () => {
-    const r = resolveCloudAgent({ envValue: undefined, configValue: "devin" });
-    expect(r.status).toBe("ok");
-    if (r.status === "ok") {
-      expect(r.agent).toBe("devin");
-      expect(r.row.briefDeliveryShape).toBe("prompt-file");
-    }
-  });
-
   test("ok status for aider (message-file shape)", () => {
     const r = resolveCloudAgent({ envValue: undefined, configValue: "aider" });
     expect(r.status).toBe("ok");
@@ -111,11 +102,10 @@ describe("resolveCloudAgent — unknown agent", () => {
     }
   });
 
-  test("unknown-agent error lists all 4 valid ids", () => {
+  test("unknown-agent error lists all 3 valid ids", () => {
     const r = resolveCloudAgent({ envValue: undefined, configValue: "made-up" });
     if (r.status !== "unknown") throw new Error(`expected unknown, got ${r.status}`);
     expect(r.error).toContain("claude");
-    expect(r.error).toContain("devin");
     expect(r.error).toContain("aider");
     expect(r.error).toContain("openhands");
   });
@@ -123,15 +113,15 @@ describe("resolveCloudAgent — unknown agent", () => {
 
 describe("resolveCloudAgent — priority (env > config > default)", () => {
   test("env value wins over config", () => {
-    const r = resolveCloudAgent({ envValue: "devin", configValue: "claude" });
+    const r = resolveCloudAgent({ envValue: "aider", configValue: "claude" });
     if (r.status !== "ok") throw new Error(`expected ok, got ${r.status}`);
-    expect(r.agent).toBe("devin");
+    expect(r.agent).toBe("aider");
   });
 
   test("config used when env is undefined", () => {
-    const r = resolveCloudAgent({ envValue: undefined, configValue: "devin" });
+    const r = resolveCloudAgent({ envValue: undefined, configValue: "aider" });
     if (r.status !== "ok") throw new Error(`expected ok, got ${r.status}`);
-    expect(r.agent).toBe("devin");
+    expect(r.agent).toBe("aider");
   });
 
   test("defaults to openhands when both env and config are undefined", () => {
@@ -147,10 +137,10 @@ describe("resolveCloudAgent — priority (env > config > default)", () => {
     const r = resolveCloudAgent({
       envValue: undefined,
       configValue: undefined,
-      defaultAgent: "devin",
+      defaultAgent: "aider",
     });
     if (r.status !== "ok") throw new Error(`expected ok, got ${r.status}`);
-    expect(r.agent).toBe("devin");
+    expect(r.agent).toBe("aider");
   });
 });
 

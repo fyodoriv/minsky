@@ -47,7 +47,7 @@ Every `minsky` subcommand, every flag. See [`bin/minsky`](../bin/minsky) for the
 | Var | What it controls |
 | --- | --- |
 | `MINSKY_REPO` | Override the install-dir resolver. Set to an absolute path. |
-| `MINSKY_CLOUD_AGENT` | One-shot agent override (`devin` / `claude`). |
+| `MINSKY_CLOUD_AGENT` | One-shot agent override (`claude` / `aider`). |
 | `MINSKY_LLM_PROVIDER` | `cloud-preferred` (default) / `local-only` / `local-preferred`. |
 | `MINSKY_BUDGET_TOKENS` | Per-iteration token budget cap. |
 | `MINSKY_CTO_AUDIT` | `on` (default) / `off` — toggles the post-iteration CTO audit. |

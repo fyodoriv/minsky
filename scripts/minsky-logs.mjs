@@ -184,7 +184,7 @@ export function formatSpan(line) {
     const kind = parsed.kind ?? "?";
     const reason = parsed.reason ?? "";
     const agentColor =
-      agent === "claude" ? ANSI.yellow : agent === "devin" ? ANSI.cyan : ANSI.magenta;
+      agent === "claude" ? ANSI.yellow : agent === "aider" ? ANSI.cyan : ANSI.magenta;
     return `${color(ANSI.blue, "[pick]")} ${color(agentColor + ANSI.bold, `${agent}/${model}`)} ${color(ANSI.dim, `(${kind})`)} ${color(ANSI.dim, reason)}`;
   }
 

@@ -439,7 +439,7 @@ if [ "$MODE" = "setup" ]; then
   # Idempotent: existing venv + already-installed package short-circuit
   # to a no-op. Graceful-degrade per rule #7: any failure here logs a
   # warning but does NOT block setup — operator can fall back to
-  # `cloud_agent: "claude" | "devin" | "aider"` by editing config.json.
+  # `cloud_agent: "claude" | "aider"` by editing config.json.
   CURRENT_STEP="setup-install-openhands-sdk"
   OPENHANDS_VENV="${HOME}/.minsky/openhands-venv"
   if [ ! -d "$OPENHANDS_VENV" ]; then

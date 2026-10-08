@@ -53,7 +53,6 @@ const SKIP_FRAGMENTS = [
   "/.worktrees/",
   "/.git/",
   "/competitors/",
-  "/.devin/",
   "/.claude/",
 ];
 

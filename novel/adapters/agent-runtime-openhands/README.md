@@ -11,7 +11,7 @@ Per the canonical [Path C plan](../../../docs/plans/2026-05-22-path-c-openhands-
 ## What it ships
 
 - **`bin/minsky-openhands-spawn.py`** — Python shim that runs the OpenHands SDK in-process via `openhands.sdk.Conversation`. Owns the entire SDK contact surface; the Node.js daemon never imports OpenHands directly. This shim is **explicitly throwaway** — when the June-1-2026 stable `openhands solve --task-file X` CLI ships, this file is replaced with a one-line CLI invocation and the TS adapter shape stays the same.
-- **`src/spawner.ts`** — TS builder that produces the subprocess invocation envelope (`{ command, argv, stdin, cwd }`) the cross-repo runner spawns. Matches the existing claude / devin / aider builders in [`bin/minsky-run.mjs`](../../cross-repo-runner/bin/minsky-run.mjs).
+- **`src/spawner.ts`** — TS builder that produces the subprocess invocation envelope (`{ command, argv, stdin, cwd }`) the cross-repo runner spawns. Matches the existing claude / aider builders in [`bin/minsky-run.mjs`](../../cross-repo-runner/bin/minsky-run.mjs).
 - **`src/spawner.test.ts`** — unit tests for the spawn-config contract (argv order, brief delivery shape, size guards).
 
 ## How it slots in
@@ -140,13 +140,13 @@ Per constitutional rule #13 (vision.md § 13.8). Methodology: STRIDE (Howard & L
 
 The boundary is the `spawn` call in `bin/minsky-run.mjs` — everything ABOVE (config resolution, agent matrix, runtime invariants, brief assembly) runs as Minsky-trusted code; everything BELOW (Python shim, OpenHands SDK, LLM API, agent tool calls) runs as untrusted-but-sandboxed code that can only modify files inside the host repo (Minsky's outer-loop scope-leak lint catches edits outside `<host>/.minsky/**` and aborts the iteration).
 
-The biggest residual risk is **agent tool calls executing arbitrary shell commands** via OpenHands' `TerminalTool`. This is the same risk class as the existing Claude Code / Devin spawn paths — Minsky's host-isolation is provided by the `runtime-invariants` chain (`git tree clean before spawn` + `scope-leak detection after spawn`), not by sandbox virtualisation. A future hardening is filed as [`agent-runtime-sandbox-isolation`](../../../TASKS.md) — running the shim inside a Docker container or under macOS App Sandbox / Linux seccomp.
+The biggest residual risk is **agent tool calls executing arbitrary shell commands** via OpenHands' `TerminalTool`. This is the same risk class as the existing Claude Code spawn paths — Minsky's host-isolation is provided by the `runtime-invariants` chain (`git tree clean before spawn` + `scope-leak detection after spawn`), not by sandbox virtualisation. A future hardening is filed as [`agent-runtime-sandbox-isolation`](../../../TASKS.md) — running the shim inside a Docker container or under macOS App Sandbox / Linux seccomp.
 
 **Secret hygiene**
 
 - The shim NEVER logs the API key (only the env var name is logged; the value is read once and passed to `openhands.sdk.LLM`).
 - The brief file is written to a fresh `mkdtemp` directory (`minsky-openhands-` prefix) under `os.tmpdir()`; not deleted automatically (the iteration record may want to attach it) — operators relying on auto-cleanup should run `find $TMPDIR -name "minsky-openhands-*" -mtime +7 -exec rm -rf {} \;` in a daily cron.
-- No PII can land in the brief that wouldn't already land in the existing claude/devin path; this adapter is shape-compatible.
+- No PII can land in the brief that wouldn't already land in the existing claude path; this adapter is shape-compatible.
 
 ## Migration path (June-1-2026)
 

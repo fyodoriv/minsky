@@ -12,7 +12,7 @@ The plain term for "the file the agent watches" is a watched file: the agent reg
 
 ## Story
 
-You are a solo developer travelling for a week. You leave Minsky running on your home Mac. Minsky is the background program; the agent is the coding assistant it drives (Claude, Devin, or a model on your own machine).
+You are a solo developer travelling for a week. You leave Minsky running on your home Mac. Minsky is the background program; the agent is the coding assistant it drives (Claude or a model on your own machine).
 
 On Tuesday at 2am NYC time, the agent hits an ambiguous design choice on a refactor task. The new lockfile primitive can use `proper-lockfile`'s default 5-second retry, or a longer 30-second retry that suits this project's slower CI. The agent does not guess. It appends a question block to `.minsky/qa-log.md`:
 

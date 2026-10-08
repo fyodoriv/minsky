@@ -14,7 +14,7 @@ the operator's eyes while minsky runs autonomously.
 ## 0. Pre-flight (before starting)
 
 Minsky runs on **any machine** with Node ≥20. It adapts to different
-folder layouts, agents (Claude/Devin/aider), models, and OS (macOS/Linux)
+folder layouts, agents (Claude/aider), models, and OS (macOS/Linux)
 via two config sources:
 
 | Config | Location | What it controls |
@@ -33,7 +33,6 @@ cat ~/.minsky/config.json 2>/dev/null || echo "no config — minsky will prompt 
 minsky stop 2>/dev/null; rm -f ~/.minsky/daemon.pid
 # 4. Which agents are available on this machine?
 claude --version 2>&1 | head -1 || echo "no claude"
-devin --version 2>&1 | head -1 || echo "no devin"
 which ollama >/dev/null && ollama list 2>/dev/null | head -3 || echo "no ollama"
 # 5. Check disk space and machine load
 df -h / | tail -1; uptime
@@ -47,8 +46,8 @@ of truth for this machine.
 **Different machines, different configs** — examples:
 
 ```jsonc
-// Machine A: Devin + Opus (Windsurf machine)
-{ "cloud_agent": "devin", "cloud_agent_model": "claude-opus-4-7-max" }
+// Machine A: Claude Code + Opus
+{ "cloud_agent": "claude", "cloud_agent_model": "claude-opus-4-7-max" }
 
 // Machine B: Claude Code + Sonnet (daily driver)
 { "cloud_agent": "claude", "cloud_agent_model": "claude-sonnet-4-5" }
@@ -123,7 +122,7 @@ Poll status and logs with short commands:
 # One-liner health probe — checks running + correct target + agent activity
 minsky status 2>&1 | head -3 \
   && echo "target: $(ps aux | grep minsky-run | grep -v grep | grep -oE '\-\-host[s-dir]* [^ ]+' | head -1)" \
-  && ps aux | grep 'devin.*print\|claude.*print' | grep -v grep | wc -l | xargs echo "agent procs:" \
+  && ps aux | grep 'claude.*print' | grep -v grep | wc -l | xargs echo "agent procs:" \
   && tail -3 ~/.minsky/daemon.log
 ```
 
@@ -151,10 +150,10 @@ done
 | `stale PID file` in status | daemon died | clean PID + restart (§3) |
 | target shows wrong `--host` or `--hosts-dir` | **wrong target** | **stop immediately** + restart with correct `--host` |
 | `recs` count increasing | iterations completing | healthy — report to operator |
-| `verdict: validated, pr_url: null` | devin worked but no PR | known bug — iterations still useful, will be fixed |
+| `verdict: validated, pr_url: null` | agent worked but no PR | known bug — iterations still useful, will be fixed |
 | `verdict: validated, pr_url: https://...` | **PR opened!** 🎉 | report to operator immediately |
 | `verdict: spawn-failed, 900...ms` | watchdog killed a slow iteration | known issue — daemon continues automatically |
-| `verdict: spawn-failed, <5000ms` | spawn died immediately | check agent auth (`claude/devin --version`) |
+| `verdict: spawn-failed, <5000ms` | spawn died immediately | check agent auth (`claude --version`) |
 | `verdict: scope-leak` | agent touched files outside declared scope | **normal** — soft mode logs the out-of-scope files + preserves the PR. Only investigate if the same files leak 3+ times. |
 | daemon process gone, no stale PID | clean exit | check `stopReason` in log, restart if needed |
 | no new records for 20+ min | stuck iteration | check if agent process is alive; if CPU=0% for 5min, SIGTERM daemon + restart |
@@ -194,8 +193,7 @@ If budget exhausted → **STOP** and jump to §5 (Swift-PR).
 |---|---|---|
 | **Stale PID** | `minsky daemon start` says "already running" but status says "stale" | `rm -f ~/.minsky/daemon.pid` then retry |
 | **Walker stuck on one host** | daemon.log shows same host for 10+ iterations | Per-host cap should be 3 (fixed 2026-05-18); if still stuck, restart daemon |
-| **Devin stdin panic** | `spawn-failed` at <5s, stderr "unexpected argument" | Fixed 2026-05-18 (`--prompt-file` instead of stdin). If seen, pull latest minsky and rebuild. |
-| **15min watchdog kills** | `spawn-failed` at exactly 900000ms | Devin iterations take 5-15min; watchdog is too aggressive. Known P0. Daemon auto-continues. |
+| **15min watchdog kills** | `spawn-failed` at exactly 900000ms | Slow agent iterations take 5-15min; watchdog is too aggressive. Known P0. Daemon auto-continues. |
 | **GraphQL errors** | `Could not resolve to a Repository` in log | Cosmetic — gh token context mismatch. Non-fatal. Ignore. |
 | **Two minsky-run processes** | `ps aux` shows 2 PIDs for minsky-run | `minsky stop` kills all; old daemon wasn't fully terminated. Always verify with `ps aux` after stop. |
 | **scope-leak from dirty tree** | `scope-leak` after you edited files | Commit your changes first, then restart. Minsky detects uncommitted changes as scope violations. |
@@ -228,7 +226,6 @@ promotes the remaining 6 where policy allows.
 | `operator-recipe` | `Rule #9 is iron` (task missing required fields) | Do NOT edit the task. File the task-fix PR upstream (§5) — this is a host-repo content bug, not a runner bug. |
 | **`automated`** | `stale PID file (PID XXXX not running)` | `novel/observer/heals/heal-stale-pid.mjs` — detects via `kill(0, pid) → ESRCH`, applies via `unlinkSync(pidPath)`. The #1 most common issue. |
 | `operator-recipe` | `daemon already running (PID XXXX)` | Check `kill -0 XXXX 2>/dev/null`; if dead, the stale-pid heal above runs; if alive, the daemon is fine. |
-| `operator-recipe` | `unexpected argument` from devin | Minsky build is stale — `cd $MINSKY_REPO && pnpm install && pnpm typecheck`. The `--prompt-file` fix must be compiled. |
 | **`automated`** | `MODULE_NOT_FOUND` from biome/lefthook (worktree) | `novel/observer/heals/heal-worktree-missing-node-modules.mjs` — detects worktree + missing `node_modules/` + present `package.json`; applies `pnpm install --prefer-offline`. |
 | **`automated`** | `.tsbuildinfo` references prior node version | `novel/observer/heals/heal-stale-tsbuildinfo.mjs` — detects via version mismatch in `.tsbuildinfo` JSON; applies via `unlinkSync` per stale file (recursive). |
 | `operator-recipe` | `GraphQL: Could not resolve` | Non-fatal. Ignore — gh token context mismatch between launchd and interactive shell. |
@@ -420,7 +417,7 @@ Every command should complete in <30s or be run non-blocking:
 - `minsky --host X --once --no-live` — can take minutes. Run non-blocking or with a timeout.
 - `minsky --host X --once --live` — can take 5-15 min. NEVER block on this.
 - `tail -N ~/.minsky/daemon.log` — always fast. Safe.
-- `ps aux | grep devin` — always fast. Safe.
+- `ps aux | grep claude` — always fast. Safe.
 
 ### Key files to read
 
@@ -435,14 +432,6 @@ Every command should complete in <30s or be run non-blocking:
 | `<host>/.minsky/repo.yaml` | Host config (repo slug, branch prefix, pre-commit) |
 
 ### Per-agent quirks
-
-**Devin** (`cloud_agent: "devin"`):
-
-- Brief delivery: `--prompt-file` (NOT stdin — devin panics on stdin pipe).
-- Typical iteration time: 5-15 min (longer than Claude due to API routing).
-- Watchdog: 900s (15 min) default — will kill slow-but-productive iterations. Known P0.
-- PR creation: devin needs explicit instructions in the brief to run `gh pr create`.
-- Permission mode: `--permission-mode dangerous` (unattended daemon).
 
 **Claude Code** (`cloud_agent: "claude"`):
 

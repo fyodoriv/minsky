@@ -9,7 +9,7 @@ A few plain-language terms used throughout this story:
 - **daemon** — the background program that keeps running on your machine, restarts on crash, and works while you sleep.
 - **host** — one code project (one git repository) the daemon works on.
 - **iteration** — one round of work: pick a task, ask an agent to do it, capture the result, open a draft pull request (PR).
-- **agent** — the coding assistant the daemon drives to do the actual work (Claude Code, Devin, Aider, or OpenHands). Minsky is not the agent; it orchestrates the agent.
+- **agent** — the coding assistant the daemon drives to do the actual work (Claude Code, Aider, or OpenHands). Minsky is not the agent; it orchestrates the agent.
 - **audit** — the review step at the end of an iteration that this story is about. The code lives in `novel/cross-repo-runner/src/host-cto-audit.ts`.
 
 This story documents the operator experience and the load-bearing acceptance criteria. The operator is you — the human who runs Minsky.
@@ -42,7 +42,7 @@ The daemon also re-sorted `TASKS.md` priorities. A P2 task it observed twice thi
 ## Metric
 
 - **Name**: `cto_audit_tasks_filed_per_week`
-- **Definition**: count of `TASKS.md` entries (across the fleet of hosts) where `**Surfaced-by**` contains `daemon CTO audit` OR `Devin session` OR `claude-code session`, over the trailing 7-day window. Stratified by host repo. Vanity-metric guard: a count rising forever signals the audit is overfitting (filing noise as tasks). The sustained-quality metric is the *merge rate* of audit-filed tasks (`cto_audit_filed_tasks_merged_within_30d`), which must stay >40%.
+- **Definition**: count of `TASKS.md` entries (across the fleet of hosts) where `**Surfaced-by**` contains `daemon CTO audit` OR `claude-code session`, over the trailing 7-day window. Stratified by host repo. Vanity-metric guard: a count rising forever signals the audit is overfitting (filing noise as tasks). The sustained-quality metric is the *merge rate* of audit-filed tasks (`cto_audit_filed_tasks_merged_within_30d`), which must stay >40%.
 - **Threshold**: ≥3 audit-filed tasks per active host per week (active = ≥10 iterations/week), with ≥40% of those tasks merged or marked `Status: shipped` within 30 days.
 - **Source**: `Observability` adapter querying the `TASKS.md` `**Surfaced-by**` field on every commit; secondary computation against `gh pr list` for the merge-rate stratifier.
 

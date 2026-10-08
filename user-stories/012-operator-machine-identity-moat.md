@@ -118,7 +118,7 @@ The moat is proved as much by what is absent as by what is present.
   no virtual machine.
 - The `bin/minsky` shell shim passes through `$HOME`, `$PATH`,
   `$ANTHROPIC_API_KEY`, and the rest. It strips no environment variables.
-- Commits come from the agent (Claude Code, Devin, or Aider) calling
+- Commits come from the agent (Claude Code or Aider) calling
   `git commit` inside the host worktree, using the operator's `~/.gitconfig`.
 - No alternative identity is created anywhere in `novel/`: no `OperatorIdentity`
   adapter, no single-sign-on redirect, no sandbox credentials. The absence is

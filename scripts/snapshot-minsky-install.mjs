@@ -6,7 +6,7 @@
 //
 // Why this file exists: story 014 pins the invariant that two Minsky
 // installs driven through INSTALL.md by two different launcher agents
-// (Claude Code, Cursor, Devin, …) produce byte-identical runtime
+// (Claude Code, Cursor, …) produce byte-identical runtime
 // behavior — the launcher is "a doorway, not a runtime". To *prove* that
 // invariant deterministically (rule #10), the chaos test installs Minsky
 // twice (once per stubbed launcher) and diffs the resulting state. This

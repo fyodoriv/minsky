@@ -2358,7 +2358,7 @@ EOF
 }
 
 @test "dry-run with local_llm_enabled prints local_llm=on to stdout (no host, exit 0)" {
-  printf '%s' '{"local_llm_enabled":true,"local_llm":{"model":"ollama_chat/qwen3-coder:30b","base_url":"http://localhost:11434"},"cloud_agent":"devin"}' > "$CONFIG_FILE"
+  printf '%s' '{"local_llm_enabled":true,"local_llm":{"model":"ollama_chat/qwen3-coder:30b","base_url":"http://localhost:11434"},"cloud_agent":"aider"}' > "$CONFIG_FILE"
   run "$MINSKY_RUN" --once --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *"local_llm=on"* ]]

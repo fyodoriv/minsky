@@ -19,7 +19,7 @@ invocation of `openhands solve …` and the TS adapter shape stays the
 same. See `docs/plans/2026-05-22-path-c-openhands-reshape.md` for the
 full migration plan.
 
-Wire shape (matches the existing claude/devin spawn contracts in
+Wire shape (matches the existing claude spawn contracts in
 `novel/cross-repo-runner/bin/minsky-run.mjs`):
 
   - stdin:        unused (Python argparse owns argv; brief comes via --brief-file)

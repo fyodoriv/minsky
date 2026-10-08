@@ -10,7 +10,7 @@ Minsky is a background program (a daemon — a program that keeps running in the
 background on your machine) that picks up to-do tasks and works on them on its
 own. You install it by asking whatever AI coding assistant you already have open
 to follow Minsky's install runbook, `INSTALL.md`. That assistant — Claude Code,
-Cursor, Devin, Windsurf, Codex, Aider, or a local model driving one of them — is
+Cursor, Codex, Aider, or a local model driving one of them — is
 called the **launcher**.
 
 This story pins down one invariant: the launcher only opens the door. Once the
@@ -41,7 +41,7 @@ runs as me, under my own git and SSH credentials.)
 
 - On my MacBook I asked Claude Code to install Minsky for one local repo.
 - On my Linux desktop I asked Cursor to install it for a different repo.
-- On my laptop I asked Devin (via its CLI) to install it for a third repo.
+- On my laptop I asked Codex (via its CLI) to install it for a third repo.
 
 All three runbooks were `INSTALL.md`. All three install paths completed in ≤90s.
 All three machines now run a daemon at exactly the same revision of `bin/minsky`.
@@ -73,7 +73,7 @@ the same room.
 
 1. `bin/minsky` reads no environment variable, file, or socket whose name
    encodes the identity of the launcher that ran the install. The daemon does
-   not branch on `CLAUDE_CODE=1`, `CURSOR=1`, `DEVIN_AGENT=1`, etc.
+   not branch on `CLAUDE_CODE=1`, `CURSOR=1`, etc.
 2. The set of features `minsky` exposes — subcommands, flags, env-var contract,
    file layout under `~/.minsky/` and `.minsky/` — is identical across all
    installs, no matter which launcher ran `INSTALL.md`.

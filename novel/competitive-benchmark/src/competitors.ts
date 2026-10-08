@@ -320,7 +320,7 @@ export const COMPETITORS: readonly Competitor[] = [
   // Per operator directive 2026-05-23 ("add actual competitors to the list,
   // not agents"). Minsky is an orchestrator: it manages the daemon lifecycle,
   // MAPE-K loop, prompt evolution, multi-repo task queue, supervisor restart
-  // discipline — sitting ON TOP of agents (Claude / Devin / Aider) which it
+  // discipline — sitting ON TOP of agents (Claude / Aider) which it
   // COMPOSES. The peers at Minsky's tier are other orchestrators
   // (MetaGPT, AutoGen, CrewAI, LangGraph). Agents above are kept in the
   // corpus as benchmark context — Minsky-via-Claude inherits Claude's

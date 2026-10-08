@@ -6,14 +6,14 @@
 
 ## Story
 
-Minsky is a background program that works on your code while you are away. It reads a project's to-do list, picks the most important unfinished item, and asks a coding assistant — Minsky calls this assistant the **agent** — to do the work. The agent can be Claude, Devin, or a model running on your own computer.
+Minsky is a background program that works on your code while you are away. It reads a project's to-do list, picks the most important unfinished item, and asks a coding assistant — Minsky calls this assistant the **agent** — to do the work. The agent can be Claude or a model running on your own computer.
 
 No single agent is best at everything. One is cheap and good at prose. One handles large, multi-file changes. One is free and fast for mechanical fixes. So Minsky picks the agent that fits each task, automatically, instead of using the same one for everything. This is the promise in [README.md § "Why Minsky?"](../README.md#why-minsky): *"no single model is good at architecture, implementation, and review at the same time."*
 
 Here is what that looks like. You are a solo developer. You check the daemon log after lunch — the **daemon** is the part of Minsky that keeps running in the background. You see three rounds of work finished this morning. Minsky calls one round an **iteration**: pick a task, ask an agent to do it, capture the result.
 
 1. Iteration #47 — task `readme-clarity-pass` picked claude-sonnet (task tag matches `docs|prose`, so it is prose work). Cost: $0.18. Time: 4 min.
-2. Iteration #48 — task `refactor-cross-repo-runner-spawn-pipeline` picked devin (task tag matches `refactor|architecture` AND the change spans 3 or more packages). Cost: $4.20. Time: 23 min.
+2. Iteration #48 — task `refactor-cross-repo-runner-spawn-pipeline` picked claude-opus (task tag matches `refactor|architecture` AND the change spans 3 or more packages). Cost: $4.20. Time: 23 min.
 3. Iteration #49 — task `lint-fix-novel-budget-guard` picked local Ollama qwen3-coder-30b (task tag matches `lint|mechanical|test-only`, a mechanical fix). Cost: $0.00. Time: 7 min.
 
 You never assigned an agent to any of these tasks by hand. Minsky chose. The daemon log shows why it chose each agent, so you can check its reasoning. Total cost stays within the budget you set in `MINSKY_BUDGET_TOKENS`.
@@ -28,10 +28,10 @@ This story specifies both: the per-task agent selection that ships today, and th
 
 - `novel/tick-loop/src/llm-provider-selector.ts` reads each task's `**Tags**` field and picks an agent from a fixed rule table:
   - `docs|prose|writing` → claude-sonnet
-  - `refactor|architecture|cross-repo` AND the task's `**Files**` field touches 3 or more packages → devin
+  - `refactor|architecture|cross-repo` AND the task's `**Files**` field touches 3 or more packages → claude-opus
   - `lint|mechanical|test-only|format` → local Ollama (when it is set up; falls back to claude-sonnet if the local stack is unhealthy)
   - default → claude-sonnet
-- The daemon writes the choice and the reason into every iteration record: `backend=devin reason=touches-3-packages cost-estimate=$4.50`
+- The daemon writes the choice and the reason into every iteration record: `backend=claude-opus reason=touches-3-packages cost-estimate=$4.50`
 - You can override the choice with a task-level `**Backend**: claude` field; the override always wins over the rule table
 - Per-task cost is tracked; the running cost per day stays under `MINSKY_BUDGET_TOKENS`
 
@@ -63,10 +63,10 @@ The personas hand work to each other through **A2A's Task lifecycle** — A2A is
 - **Setup**:
   - A fixture TASKS.md with 6 tasks, one per routing rule:
     - 1 `docs` task → expect `claude-sonnet`
-    - 1 `refactor` task touching 4 packages → expect `devin`
+    - 1 `refactor` task touching 4 packages → expect `claude-opus`
     - 1 `lint` task → expect `local-ollama` (or `claude-sonnet` when local is unhealthy)
     - 1 default-tag task → expect `claude-sonnet`
-    - 1 task with an explicit `**Backend**: devin` override on a docs-tagged task → expect `devin` (override wins)
+    - 1 task with an explicit `**Backend**: claude-opus` override on a docs-tagged task → expect `claude-opus` (override wins)
     - 1 task tagged `pipeline` → runs the 5-persona A2A pipeline (M2 — shipped; covered by `test/integration/multi-persona-pipeline.test.ts`, which runs `bin/minsky-multi-persona.sh` against a fixture task and checks the artifact chain plus the transition log)
   - `selectBackend(task)` from `llm-provider-selector` is the system under test
   - `claudeProbeOk()` and `ollamaHealthOk()` are mocked to known states
@@ -74,7 +74,7 @@ The personas hand work to each other through **A2A's Task lifecycle** — A2A is
 - **Assert**:
   - Each task produces the expected agent choice when the local stack is healthy
   - The lint task falls back to `claude-sonnet` when `ollamaHealthy: false`
-  - The override task returns `devin` regardless of tags or local health
+  - The override task returns `claude-opus` regardless of tags or local health
   - The pipeline test is **active** (M2 shipped): `test/integration/multi-persona-pipeline.test.ts` checks that the 5 personas run in order, that every transition is logged with `persona=<role>`, and that persona N's artifact reaches persona N+1
   - Every choice carries a non-empty `rationale` string ("matched tag: docs", "touches 4 packages > 3", "explicit operator override", "local unhealthy, falling back to claude-sonnet")
 
@@ -98,8 +98,8 @@ Per constitutional rule #7 (`vision.md` § 7).
 | 1 | Task has no tags | upstream-malformed | `graceful-degrade` — default to claude-sonnet | Fixture task with `**Tags**:` empty → assert backend=claude-sonnet, rationale="no tags, default" |
 | 2 | Task has conflicting tags (`docs` AND `lint`) | upstream-malformed | `graceful-degrade` — first-match-wins per a fixed ordering documented in the rule table | Fixture task with both tags → assert backend per documented precedence |
 | 3 | Local Ollama unhealthy when a lint task arrives | dependency upstream-error | `graceful-degrade` — fall back to claude-sonnet with the reason logged | Mock `ollamaHealthOk()=false`; assert backend=claude-sonnet, rationale="local unhealthy, falling back" |
-| 4 | Devin auth fails when a refactor task is selected | dependency upstream-error | `circuit-break-and-notify` — fall back to claude-sonnet for one iteration, notify the operator | Mock devin spawn returning exit=-1 with an auth error in stderr; assert the iteration retries with claude-sonnet next pass, single ntfy push at level=warn |
-| 5 | `MINSKY_BUDGET_TOKENS` would be exceeded by the selected agent's cost estimate | dependency upstream-error | `graceful-degrade` — downgrade to a local or smaller model | Mock cumulative cost near budget; assert the selector downgrades devin→claude-sonnet→local |
+| 4 | Claude Opus auth fails when a refactor task is selected | dependency upstream-error | `circuit-break-and-notify` — fall back to claude-sonnet for one iteration, notify the operator | Mock claude-opus spawn returning exit=-1 with an auth error in stderr; assert the iteration retries with claude-sonnet next pass, single ntfy push at level=warn |
+| 5 | `MINSKY_BUDGET_TOKENS` would be exceeded by the selected agent's cost estimate | dependency upstream-error | `graceful-degrade` — downgrade to a local or smaller model | Mock cumulative cost near budget; assert the selector downgrades claude-opus→claude-sonnet→local |
 | 6 | Multi-persona pipeline starts but a persona crashes (M2) | upstream-malformed | `loud-crash-supervisor-restart` — the driver halts the pipeline non-zero | `test/integration/multi-persona-pipeline.test.ts` chaos #2 (missing task halts loudly, no partial run) |
 | 7 | Multi-persona pipeline handoff artifact missing for the next persona (M2) | upstream-malformed | `loud-crash-supervisor-restart` — the driver halts at the gap | `test/integration/multi-persona-pipeline.test.ts` (artifact-chain test asserts the chain is contiguous); `novel/personas/README.md` chaos table #2 |
 | 8 | Two iterations select the same task at once (multi-host concurrency) | concurrency | `graceful-degrade` — per-host lease | Spawn 2 hosts targeting the same task; assert only one acquires the lease via `tasks-mcp`-style semantics |
@@ -121,8 +121,8 @@ Per constitutional rule #7 (`vision.md` § 7).
 
 (Per vision.md rule #13, security and privacy.)
 
-- **Trust boundary**: the selector's input is a task block from `TASKS.md`. You own that file; no untrusted data crosses the boundary at selection time. The downstream agent call has its own trust boundary (the claude or devin API).
-- **Secrets**: agent auth (DEVIN_API_KEY, ANTHROPIC_API_KEY) lives in your environment, never in the task block. The selector reads only the `**Backend**` and `**Tags**` fields.
+- **Trust boundary**: the selector's input is a task block from `TASKS.md`. You own that file; no untrusted data crosses the boundary at selection time. The downstream agent call has its own trust boundary (the Claude API).
+- **Secrets**: agent auth (ANTHROPIC_API_KEY) lives in your environment, never in the task block. The selector reads only the `**Backend**` and `**Tags**` fields.
 - **PII**: task bodies may reference host paths; the selector does not copy task bodies into logs — only the choice and the reason.
 - **Sandbox**: the selector is a pure-function lookup with no filesystem or network access of its own; the agent it picks runs under its own sandbox.
 - **Performance carve-out**: the selector is a pure-function lookup capped at under 50 ms. Even a 100x slowdown is invisible against an iteration p95 of 5+ minutes. There is no security-vs-performance trade-off.

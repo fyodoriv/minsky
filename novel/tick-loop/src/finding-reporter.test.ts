@@ -157,7 +157,7 @@ describe("containsPii", () => {
       reproSteps: ["happened at /Users/dave/x.ts"],
       minskyVersion: "0.1.0",
       os: "linux",
-      agent: "devin",
+      agent: "aider",
     };
     expect(containsPii(leaky)).toBe(true);
   });

@@ -529,7 +529,7 @@ def test_local_llm_mode_preserves_rule_9_fields() -> None:
 
 def test_cloud_mode_keeps_preamble_for_back_compat() -> None:
     """Default (non-local) mode keeps the constitution preamble — the
-    cloud-LLM path (Claude / Devin) is unchanged by this PR."""
+    cloud-LLM path (Claude) is unchanged by this PR."""
     task = _pick_task_from_sample()
     host_cfg = build_brief.HostConfig(
         host_repo="test/host",

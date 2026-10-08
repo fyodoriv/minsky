@@ -2,7 +2,7 @@
 //
 // These tests cover the rule-#2 adapter shape: given a brief, repo path,
 // and model name, produce the exact subprocess invocation the daemon
-// will execute. Wire shape matches the existing claude/devin builders
+// will execute. Wire shape matches the existing claude builders
 // in bin/minsky-run.mjs (see § "buildAgentConfig"). The Python shim
 // itself is exercised by the E2E smoke test in
 // `test/integration/openhands-spawn.test.mjs` (not this file) — these

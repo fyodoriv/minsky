@@ -51,7 +51,7 @@ minsky run --once --host <dir>                       # one iteration, ad-hoc
 # Introspection:
 minsky show tasks                                    # next-pick + per-priority counts
 minsky show findings                                 # self-diagnose with actor labels
-minsky list agents                                   # claude / devin / aider / openhands
+minsky list agents                                   # claude / aider / openhands
 minsky config show                                   # ~/.minsky/config.json
 ```
 
@@ -67,7 +67,7 @@ Backward-compat flag-style entrypoints (`minsky --daemon`, `--once`, `--transfor
 
 ```json
 {
-  "cloud_agent": "devin",               // "devin" | "claude"
+  "cloud_agent": "claude",              // "claude" | "aider" | "openhands"
   "cloud_agent_model": "claude-opus-4-7-max",  // passed as --model
   "local_agent": "aider",               // local-only mode agent
   "local_agent_model": "ollama_chat/qwen3-coder:30b",
@@ -93,11 +93,10 @@ Backward-compat flag-style entrypoints (`minsky --daemon`, `--once`, `--transfor
 | Agent | Cloud | Local | Brief delivery | Model flag |
 |---|---|---|---|---|
 | `claude` | ✅ | — | stdin | `--model` |
-| `devin` | ✅ | — | `--prompt-file` (stdin panics) | `--model` |
 | `aider` | — | ✅ | `--message-file` | `--model` via config args |
 | `openhands` | 🟡 schema accepted, runtime pending 2026-06-01 (OpenHands Agent Canvas CLI — GitHub issue `OpenHands/OpenHands#14374`) | 🟡 planned | `stdin` (anticipated; confirms on June 1) | `--model` (LLM-agnostic via OpenAI-compatible API) |
 
-The `openhands` row reflects an operator-approved wrap-feasibility decision per `competitors/openhands.md` § "Should we wrap OpenHands instead?" (Shape A: agent-layer wrap as pluggable backend). Implementation tracked at [`add-openhands-as-pluggable-backend`](TASKS.md) (P0). The schema half ships now via `novel/cross-repo-runner/src/agent-config.ts` → `AGENT_MATRIX` (the 4th row carries `pendingExternalDep: "2026-06-01"`); the daemon REFUSES to spawn under `cloud_agent: "openhands"` until that date, exiting `EX_USAGE` (64) with an actionable error that names the GitHub issue and the fallback agents. On June 1 the `pendingExternalDep` flag flips to `null` and the same code path becomes live.
+The `openhands` row reflects an operator-approved wrap-feasibility decision per `competitors/openhands.md` § "Should we wrap OpenHands instead?" (Shape A: agent-layer wrap as pluggable backend). Implementation tracked at [`add-openhands-as-pluggable-backend`](TASKS.md) (P0). The schema half ships now via `novel/cross-repo-runner/src/agent-config.ts` → `AGENT_MATRIX` (the openhands row carries `pendingExternalDep: "2026-06-01"`); the daemon REFUSES to spawn under `cloud_agent: "openhands"` until that date, exiting `EX_USAGE` (64) with an actionable error that names the GitHub issue and the fallback agents. On June 1 the `pendingExternalDep` flag flips to `null` and the same code path becomes live.
 
 ### Per-host overlay — `<host>/.minsky/repo.yaml`
 
@@ -208,11 +207,11 @@ Trigger phrases that activate this rule IMMEDIATELY (don't ask, just fix): "fix 
 
 ### 3a. Runtime invariants (coverage ≠ correctness)
 
-High unit-test coverage (95%+) is necessary but NOT sufficient. Every bug found in production during the 2026-05-18 session (devin stdin panic, permission mode missing, walker starvation, scope-leak false positives, brief missing PR instructions, watchdog kills) had passing unit tests — because unit tests mock the integration seams where real bugs live.
+High unit-test coverage (95%+) is necessary but NOT sufficient. Every bug found in production during the 2026-05-18 session (stdin panic, permission mode missing, walker starvation, scope-leak false positives, brief missing PR instructions, watchdog kills) had passing unit tests — because unit tests mock the integration seams where real bugs live.
 
 **Runtime invariants** (`novel/cross-repo-runner/src/runtime-invariants.ts`) run before EVERY iteration and check the **system** — not the pure functions. They verify:
 
-- Agent argv includes required flags for the configured agent (catches devin without `--permission-mode`)
+- Agent argv includes required flags for the configured agent (catches an agent without `--permission-mode`)
 - Brief includes PR creation instructions (catches the no-PR-opened bug class)
 - Git tree is clean before spawn (catches scope-leak false positives)
 - Task not stuck in a re-pick loop (catches walker starvation)
@@ -234,7 +233,7 @@ A dashboard feature without an integration test is a regression waiting to happe
 
 ### 14b. Dynamic settings (no hardcoded timeouts)
 
-All timeouts, intervals, thresholds, and resource limits must be **dynamically computed** from actual iteration history on the current machine — never hardcoded. Different machines have different CPUs, network latencies, and model routing speeds. A watchdog that's correct for Claude on a fast machine kills Devin on a slow one.
+All timeouts, intervals, thresholds, and resource limits must be **dynamically computed** from actual iteration history on the current machine — never hardcoded. Different machines have different CPUs, network latencies, and model routing speeds. A watchdog that's correct for Claude on a fast machine kills a slow agent on a slow machine.
 
 The implementation (`novel/cross-repo-runner/src/dynamic-timeouts.ts`):
 
@@ -436,7 +435,7 @@ If a task description is wrong, or a constitutional rule is being misapplied, pu
 
 ## Pipeline-managed repos — dedicated worktree pattern
 
-When you (the agent) are doing a multi-PR batch on this repo (e.g. a backlog drain, a CI stabilization sweep, a rule rollout), do NOT work in the main checkout. Other agents (the minsky supervisor launchd, parallel Devin sessions, the daemon itself) `git checkout` the main repo dir at unpredictable times and wipe your uncommitted edits.
+When you (the agent) are doing a multi-PR batch on this repo (e.g. a backlog drain, a CI stabilization sweep, a rule rollout), do NOT work in the main checkout. Other agents (the minsky supervisor launchd, parallel agent sessions, the daemon itself) `git checkout` the main repo dir at unpredictable times and wipe your uncommitted edits.
 
 The discipline is:
 
@@ -468,7 +467,7 @@ See [`.claude/skills/pr-merge-no-shortcuts/SKILL.md` § Operational discipline](
 
 ## Frozen agents
 
-Windsurf, Devin, and Augment (Auggie) are deprecated and frozen (owner decision 2026-10-02). Keep the existing `devin` backend, launcher paths, and tests. Never implement a fix or a feature for them as tools, and never file tasks for them. Competitor research and benchmark readings about Devin or Augment Code are not tool support and stay in scope. If work for a supported backend breaks a frozen agent's existing test, skip that test with a note naming this section.
+Windsurf and Devin support was removed on 2026-10-08 (owner decision). Do not re-add runners, launchers, sync targets, config keys, or tests for them. Augment (Auggie) stays deprecated and frozen (owner decision 2026-10-02): keep its existing paths and tests, never implement a fix or a feature for it as a tool, and never file tasks for it. Competitor research and benchmark readings about Devin or Augment Code are not tool support and stay in scope. If work for a supported backend breaks a frozen agent's existing test, skip that test with a note naming this section.
 
 ## Reading next
 

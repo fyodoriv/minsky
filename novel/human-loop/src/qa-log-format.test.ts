@@ -17,9 +17,9 @@ describe("qa-log-format — formatters", () => {
   });
 
   test("formatQuestion handles multiline question text", () => {
-    const out = formatQuestion("task-2", "devin", "First line.\nSecond line.", TS_1);
+    const out = formatQuestion("task-2", "aider", "First line.\nSecond line.", TS_1);
     expect(out).toBe(
-      `## Q: task-2 · ${TS_1}\n**from**: devin\n**asks**: First line.\nSecond line.\n`,
+      `## Q: task-2 · ${TS_1}\n**from**: aider\n**asks**: First line.\nSecond line.\n`,
     );
   });
 });
@@ -58,7 +58,7 @@ describe("qa-log-format — parser", () => {
     const text = [
       formatQuestion("task-1", "claude", "Q1?", TS_1),
       formatAnswer("task-1", "A1.", TS_1),
-      formatQuestion("task-2", "devin", "Q2?", TS_2),
+      formatQuestion("task-2", "aider", "Q2?", TS_2),
       formatAnswer("task-2", "A2.", TS_2),
       formatQuestion("task-3", "aider", "Q3?", TS_3),
       formatAnswer("task-3", "A3.", TS_3),
@@ -134,7 +134,7 @@ describe("qa-log-format — parser", () => {
         kind: "question",
         taskId: "task-2",
         timestamp: TS_2,
-        agent: "devin",
+        agent: "aider",
         question: "Multiline question line 1\nLine 2\nLine 3",
       },
       {

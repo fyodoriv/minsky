@@ -2,7 +2,7 @@
 //
 // Helper: heal-agent-rate-limited
 //
-// Catalogued failure mode: the cloud agent (claude / devin / aider /
+// Catalogued failure mode: the cloud agent (claude / aider /
 // codex) returns HTTP 429 on a tool call. Symptoms in worker stderr:
 //   - "rate limit exceeded"
 //   - "too many requests"

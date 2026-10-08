@@ -36,7 +36,7 @@ Piped stdin (or `MINSKY_NON_INTERACTIVE=1`) without `--force` exits 2 with `erro
 | Artifact | Path | Removed |
 | --- | --- | --- |
 | Daemon process | PID file at `~/.minsky/daemon.pid` | Yes (SIGTERM, then SIGKILL if needed) |
-| Agent children | spawned `devin --prompt-file …` etc. | Yes (SIGTERM to each match) |
+| Agent children | spawned `claude --print …` etc. | Yes (SIGTERM to each match) |
 | launchd plist (macOS) | `~/Library/LaunchAgents/com.minsky.daemon.plist` | Yes (`launchctl unload` + `rm`) |
 | systemd unit (Linux) | `~/.config/systemd/user/minsky-daemon.service` | Yes (`systemctl --user disable` + `rm`) |
 | Per-machine state | `~/.minsky/` (config, log, telemetry-consent) | Yes |
