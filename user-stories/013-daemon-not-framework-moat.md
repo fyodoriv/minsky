@@ -6,7 +6,7 @@ Minsky is a daemon — a background program that keeps running on your machine. 
 
 Every orchestrator-tier competitor — CrewAI, AutoGen, LangGraph, MetaGPT, the OpenAI Agents SDK — is a *framework* instead. With a framework, you write Python or TypeScript that calls the framework's `Flow`, `Crew`, `StateGraph`, `Team`, or `Agent` primitive. You learn a small language, define a state machine, build a graph.
 
-With Minsky there is none of that. No code to write. No DSL to learn. No graph to build. The repo is the input; draft pull requests are the output. The agent — the coding assistant Minsky drives, such as Claude Code, Devin, or Aider — does the actual work; Minsky just hands it the next task.
+With Minsky there is none of that. No code to write. No DSL to learn. No graph to build. The repo is the input; draft pull requests are the output. The agent — the coding assistant Minsky drives, such as Claude Code or Aider — does the actual work; Minsky just hands it the next task.
 
 ## Story
 
@@ -29,7 +29,7 @@ You never wrote a `Flow` class. You never defined a `StateGraph`. You never set 
 - A repo's only interface to Minsky is two Markdown files: `TASKS.md` (the to-do list) and `.minsky/repo.yaml` (per-host config, optional).
 - Stopping Minsky is `minsky stop` (graceful) or `pkill -f minsky-run.mjs` (hard). When Minsky is gone, your code is unchanged — no `Flow.cleanup()` calls, no Crew teardown, no graph deallocation.
 - The daemon survives you closing your laptop or restarting your machine. A supervisor — the outer watchdog that restarts Minsky if it dies — restarts it: `launchd` on macOS, `systemd` on Linux.
-- Switching agents (Claude Code → Devin → Aider) is a single edit to `~/.minsky/config.json`. It is never a code change to your repo.
+- Switching agents (Claude Code → Aider) is a single edit to `~/.minsky/config.json`. It is never a code change to your repo.
 
 ## Metric
 

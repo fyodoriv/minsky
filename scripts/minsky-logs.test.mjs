@@ -23,18 +23,18 @@ describe("formatSpan — iteration", () => {
   });
 
   it("formats a validated iteration with PASS tag", () => {
-    const line = `[span] tick-loop.iteration {"iteration.index":3,"iteration.status":"validated","task.id":"some-task","iteration.provider":"devin"}`;
+    const line = `[span] tick-loop.iteration {"iteration.index":3,"iteration.status":"validated","task.id":"some-task","iteration.provider":"aider"}`;
     const out = formatSpan(line);
     expect(out).not.toBeNull();
     expect(out).toContain("PASS");
     expect(out).toContain("iter#3");
     expect(out).toContain("some-task");
-    expect(out).toContain("via devin");
+    expect(out).toContain("via aider");
   });
 
   it("truncates over-long reason at 240 chars", () => {
     const huge = "x".repeat(500);
-    const line = `[span] tick-loop.iteration {"iteration.index":1,"iteration.status":"failed","task.id":"t","iteration.reason":"${huge}","iteration.provider":"devin"}`;
+    const line = `[span] tick-loop.iteration {"iteration.index":1,"iteration.status":"failed","task.id":"t","iteration.reason":"${huge}","iteration.provider":"aider"}`;
     const out = formatSpan(line);
     expect(out).not.toBeNull();
     // The middle of the huge string is dropped after 240 chars.
@@ -52,10 +52,10 @@ describe("formatSpan — strategic-pick", () => {
     expect(out).toContain("operator-pin");
   });
 
-  it("handles devin agent", () => {
-    const line = `[span] tick-loop.strategic-pick {"model":"devin","agent":"devin","kind":"strategic-router","reason":"x"}`;
+  it("handles aider agent", () => {
+    const line = `[span] tick-loop.strategic-pick {"model":"aider","agent":"aider","kind":"strategic-router","reason":"x"}`;
     const out = formatSpan(line);
-    expect(out).toContain("devin/devin");
+    expect(out).toContain("aider/aider");
   });
 });
 

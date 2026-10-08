@@ -63,7 +63,7 @@ If all four are yes → write the adapter. Pick the worker's language to match t
 
 The same logic applies. MCP servers + Claude Code skills are the **cross-runtime substrate**:
 
-- One MCP server is consumed by Claude Code, Cursor, Windsurf, Devin, OpenHands, Goose, Cline — a fleet-spanning agent platform that minsky orchestrates.
+- One MCP server is consumed by Claude Code, Cursor, OpenHands, Goose, Cline — a fleet-spanning agent platform that minsky orchestrates.
 - A Python-function-as-tool is consumed only by the Python agent framework that loaded it.
 
 Python-functions-as-tools are an **in-process** pattern (CrewAI, LangGraph, Pydantic AI). They're the right substrate inside one of those frameworks. They're the wrong substrate at the layer minsky operates — which spans multiple agents, runtimes, and languages.

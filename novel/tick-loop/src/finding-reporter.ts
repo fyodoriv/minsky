@@ -32,7 +32,7 @@ export interface RawFinding {
   readonly minskyVersion: string;
   /** OS identifier, e.g. "darwin", "linux". */
   readonly os: string;
-  /** Agent type that surfaced the finding, e.g. "claude", "devin", "aider". */
+  /** Agent type that surfaced the finding, e.g. "claude", "aider". */
   readonly agent: string;
 }
 

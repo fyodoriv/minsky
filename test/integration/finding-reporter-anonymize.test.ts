@@ -31,7 +31,7 @@ describe("finding-reporter end-to-end anonymization", () => {
     ],
     minskyVersion: "0.1.0",
     os: "linux",
-    agent: "devin",
+    agent: "aider",
   };
 
   it("emerges with zero secret/PII spans across every surface", () => {
@@ -59,10 +59,10 @@ describe("finding-reporter end-to-end anonymization", () => {
     expect(anon.type).toBe("crash");
     expect(anon.minskyVersion).toBe("0.1.0");
     expect(anon.os).toBe("linux");
-    expect(anon.agent).toBe("devin");
+    expect(anon.agent).toBe("aider");
     // The renderers still surface the metadata even after redaction.
     const body = renderIssueBody(anon);
     expect(body).toContain("**Finding type:** crash");
-    expect(body).toContain("- agent: devin");
+    expect(body).toContain("- agent: aider");
   });
 });

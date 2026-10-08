@@ -92,7 +92,7 @@ Shipped (PRs #812–#820). Phase-1 ship gate met; Phase-2 stability gate (≥80%
 ## Composition with sibling stories
 
 - Composes with [story 001 (loop runs overnight)](001-loop-runs-overnight.md): the inner step 3 IS the autonomous loop. Story 016 wraps it with bookend snapshots.
-- Composes with [story 014 (launcher-agnostic feature parity)](014-launcher-agnostic-feature-parity.md): `minsky --transform` works from any installer-agent surface (Claude Code, Cursor, Devin, Codex) because it's a bash entry point that the agent merely shells out to.
+- Composes with [story 014 (launcher-agnostic feature parity)](014-launcher-agnostic-feature-parity.md): `minsky --transform` works from any installer-agent surface (Claude Code, Cursor, Codex) because it's a bash entry point that the agent merely shells out to.
 - Composes with [story 015 (local models until stable)](015-local-models-until-stable.md): the inner iterations honor the local-model stance — `minsky --transform` does not require a cloud API key.
 
 ## Pivot

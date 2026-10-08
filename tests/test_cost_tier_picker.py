@@ -21,10 +21,10 @@ import cost_tier_picker  # noqa: E402  pylint: disable=wrong-import-position
 # --- tier_definitions ----------------------------------------------------
 
 
-def test_exactly_six_tiers_with_unique_ids() -> None:
+def test_exactly_five_tiers_with_unique_ids() -> None:
     tiers = cost_tier_picker.tier_definitions()
-    assert len(tiers) == 6
-    assert sorted(t["tier"] for t in tiers) == [1, 2, 3, 4, 5, 6]
+    assert len(tiers) == 5
+    assert sorted(t["tier"] for t in tiers) == [1, 2, 3, 4, 5]
 
 
 def test_every_tier_has_the_three_config_keys() -> None:
@@ -77,13 +77,13 @@ def test_invalid_existing_or_env_values_are_ignored() -> None:
 # --- is_valid_tier -------------------------------------------------------
 
 
-def test_is_valid_tier_accepts_1_through_6_int_and_str() -> None:
-    for v in (1, 2, 3, 4, 5, 6, "1", "6"):
+def test_is_valid_tier_accepts_1_through_5_int_and_str() -> None:
+    for v in (1, 2, 3, 4, 5, "1", "5"):
         assert cost_tier_picker.is_valid_tier(v)
 
 
 def test_is_valid_tier_rejects_out_of_range_and_garbage() -> None:
-    for v in (0, 7, -1, None, "", "abc", 2.5):
+    for v in (0, 6, -1, None, "", "abc", 2.5):
         assert not cost_tier_picker.is_valid_tier(v)
 
 
@@ -138,8 +138,8 @@ def test_merge_does_not_mutate_input() -> None:
 
 def test_merge_overwrites_agent_keys_to_match_new_tier() -> None:
     cfg = {"cloud_agent": "stale", "cloud_agent_model": "stale", "local_agent": "stale"}
-    merged = cost_tier_picker.merge_tier_into_config(cfg, 6)
-    assert merged["cloud_agent"] == cost_tier_picker.tier_to_config(6)["cloud_agent"]
+    merged = cost_tier_picker.merge_tier_into_config(cfg, 5)
+    assert merged["cloud_agent"] == cost_tier_picker.tier_to_config(5)["cloud_agent"]
 
 
 # --- resolve_config_path -------------------------------------------------
@@ -211,9 +211,9 @@ def test_summary_for_unset_tier() -> None:
 # --- render_menu ---------------------------------------------------------
 
 
-def test_menu_lists_all_six_tiers_and_marks_the_default() -> None:
+def test_menu_lists_all_five_tiers_and_marks_the_default() -> None:
     menu = cost_tier_picker.render_menu()
-    for i in range(1, 7):
+    for i in range(1, 6):
         assert f"  {i})" in menu
     assert "[default]" in menu
 

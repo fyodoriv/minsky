@@ -10,7 +10,7 @@ Within 30 seconds the loop pauses cleanly. The task already in progress finishes
 
 Two terms used below, defined once here:
 
-- A **persona** is a role the agent takes on — researcher, planner, implementer, or QA. (The **agent** is the coding assistant Minsky drives to do the actual work — Claude Code, Devin, Aider, or OpenHands.) A graceful pause lets the current persona step finish before stopping.
+- A **persona** is a role the agent takes on — researcher, planner, implementer, or QA. (The **agent** is the coding assistant Minsky drives to do the actual work — Claude Code, Aider, or OpenHands.) A graceful pause lets the current persona step finish before stopping.
 - The **supervisor** is the outer watchdog that restarts Minsky if it dies and survives reboots. A pause must outlive a supervisor restart, so it is stored as a file on disk, not just in memory.
 
 ## Acceptance criteria

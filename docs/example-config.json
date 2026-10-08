@@ -1,8 +1,8 @@
 {
   "_comment": "Annotated example ~/.minsky/config.json. Copy to ~/.minsky/config.json and edit. This file is strict JSON (jq-parseable); the _* keys are documentation-only and ignored by the runner. Every key here is read by bin/minsky-run.sh — see docs/configuration.md for the full key table and the env-var overrides that win per-run.",
 
-  "_comment_cloud_agent": "Which agent runs in cloud mode: openhands (default) | claude | devin | aider. Read at bin/minsky-run.sh (.cloud_agent // \"openhands\"). Env override: MINSKY_CLOUD_AGENT.",
-  "cloud_agent": "devin",
+  "_comment_cloud_agent": "Which agent runs in cloud mode: openhands (default) | claude | aider. Read at bin/minsky-run.sh (.cloud_agent // \"openhands\"). Env override: MINSKY_CLOUD_AGENT.",
+  "cloud_agent": "claude",
 
   "cloud_agent_model": "claude-opus-4-7-max",
 

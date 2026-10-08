@@ -113,7 +113,7 @@ describe("askHuman — timeout", () => {
     try {
       await askHuman("Q", {
         taskId: "task-budget",
-        agent: "devin",
+        agent: "aider",
         qaLogPath: logPath,
         timeoutMs: 150,
         watchImpl: watcher.factory,

@@ -4,7 +4,7 @@
 
 ## What this is
 
-This page is a reading guide, not the product pitch. Minsky is a background program — a daemon, meaning a program that keeps running on your machine after you start it — that you point at your code projects. It reads each project's plain-text to-do list, picks the most important unfinished task, asks a coding assistant (the agent, such as Claude, Devin, or a model on your own computer) to do it, and hands you a draft to review. It never merges anything without you.
+This page is a reading guide, not the product pitch. Minsky is a background program — a daemon, meaning a program that keeps running on your machine after you start it — that you point at your code projects. It reads each project's plain-text to-do list, picks the most important unfinished task, asks a coding assistant (the agent, such as Claude, or a model on your own computer) to do it, and hands you a draft to review. It never merges anything without you.
 
 Each section below is a path for one kind of reader: new here, installing, working on the code as an agent, studying the architecture, contributing, comparing tools, operating in production, or going deep on one topic. Every entry says what the doc is, who it's for, and roughly how long it takes to read. Pick the path that matches you.
 
@@ -77,7 +77,7 @@ Four reads, in order:
 
 1. [competitors/README.md](../competitors/README.md) — **the strategic landscape synthesis**. 6 moats + 5 honest gaps + adopt/reject pattern table. Read this FIRST.
 2. [docs/competitive-comparison.md](competitive-comparison.md) — the full 15-row capability table + tradeoffs + what-we-steal narrative (moved from README 2026-05-23 to free up top-of-funnel space).
-3. [novel/competitive-benchmark/README.md](../novel/competitive-benchmark/README.md) — the M1.10 scorecard. Orchestrator tier (MetaGPT) + agent tier (Claude Code, Devin, OpenHands, …). Why both: Minsky is at the orchestrator tier; it composes agents.
+3. [novel/competitive-benchmark/README.md](../novel/competitive-benchmark/README.md) — the M1.10 scorecard. Orchestrator tier (MetaGPT) + agent tier (Claude Code, OpenHands, …). Why both: Minsky is at the orchestrator tier; it composes agents.
 4. [competitors/](../competitors/) — per-vendor research files. One markdown per competitor with positioning + scorecard readings.
 
 For the **moats as user stories** with chaos coverage + pre-registered umbrella experiments:

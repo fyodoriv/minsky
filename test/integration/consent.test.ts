@@ -3,7 +3,7 @@
 //
 // Hypothesis (rule #9): collapsing the inline shell snippet to one
 // CLI invocation removes per-agent transcript-format divergence
-// (claude-code / devin / cursor all spawn a process and parse exit
+// (claude-code / cursor all spawn a process and parse exit
 // code identically, where a multi-line shell snippet is where they
 // drift).
 //
@@ -147,10 +147,10 @@ describe("bin/minsky consent — one-command telemetry recording", () => {
   test("MINSKY_AGENT env overrides the default in the agent field", () => {
     runConsent(["--yes"], {
       stateDir,
-      env: { MINSKY_AGENT: "devin" },
+      env: { MINSKY_AGENT: "aider" },
     });
     const rec = readConsentRecord(stateDir);
-    expect(rec.agent).toBe("devin");
+    expect(rec.agent).toBe("aider");
   });
 
   test("machine-salt file is created once and reused", () => {

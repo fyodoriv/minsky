@@ -8,22 +8,23 @@
 // is being deleted (phase-7b-delete-cross-repo-runner-multistep).
 // The runtime / bash skeleton (`bin/minsky-run.sh`) hard-codes
 // `openhands` as the spawn target, so the matrix is now LINT-ONLY:
-// it documents the contract (4 rows, openhands first, brief-file
+// it documents the contract (3 rows, openhands first, brief-file
 // delivery shape) and the audit-matrix lint asserts the design
 // intent. No production code path reads from it.
 //
 // Source: operator 2026-05-22 directive (Path C reshape) and 2026-05-24
 // "complete OpenHands integration today" directive. OpenHands is the
 // canonical agent runtime — first row, default agent. The legacy
-// claude / devin / aider rows remain as documented opt-in fallbacks but
-// are no longer the default. The 2026-06-01 `pendingExternalDep` was
+// claude / aider rows remain as documented opt-in fallbacks but
+// are no longer the default. The devin row was removed on 2026-10-08.
+// The 2026-06-01 `pendingExternalDep` was
 // lifted on 2026-05-24 once the Python-SDK shim adapter shipped
 // (`@minsky/agent-runtime-openhands`); the substrate-only gate is
 // gone, integration is real.
 //
 // Pattern: pure data table + pure resolver function — testable without
 // mocking the host process. Exported for the
-// `cloud-agent-config-audit-matrix-lint` script to assert the 4-row
+// `cloud-agent-config-audit-matrix-lint` script to assert the 3-row
 // contract and for the paired vitest unit test
 // (`cloud-agent-config.test.mjs`) to assert resolver semantics.
 
@@ -32,11 +33,9 @@
  *
  *   - `brief-file` — OpenHands (via the shim) reads from `--brief-file`
  *   - `stdin` — Claude Code reads from stdin (child.stdin.end)
- *   - `prompt-file` — Devin reads from a temp file via `--prompt-file`
- *     (devin panics on stdin pipe as of 2026.5.6-8)
  *   - `message-file` — aider reads from a `--message-file` argument
  *
- * @typedef {"brief-file" | "stdin" | "prompt-file" | "message-file"} BriefDeliveryShape
+ * @typedef {"brief-file" | "stdin" | "message-file"} BriefDeliveryShape
  */
 
 /**
@@ -48,18 +47,18 @@
  * on 2026-06-01).
  *
  * @typedef {Object} AgentMatrixRow
- * @property {"claude" | "devin" | "aider" | "openhands"} id Canonical agent id used in `~/.minsky/config.json` `cloud_agent`.
+ * @property {"claude" | "aider" | "openhands"} id Canonical agent id used in `~/.minsky/config.json` `cloud_agent`.
  * @property {BriefDeliveryShape} briefDeliveryShape How the brief is delivered.
  * @property {string} modelFlag Flag name the agent CLI accepts for `--model <name>` pass-through.
  * @property {string | null} pendingExternalDep `null` when runnable today; `YYYY-MM-DD` ISO date when contractually accepted but runtime CLI not yet shipped.
  */
 
 /**
- * The canonical 4-row cloud-agent matrix. Order is meaningful: the
+ * The canonical 3-row cloud-agent matrix. Order is meaningful: the
  * default agent (openhands) is first, then legacy backends in the
  * order they were originally added. The
  * `cloud-agent-config-audit-matrix-lint` script asserts exactly these
- * four rows in this order.
+ * three rows in this order.
  *
  * Source: operator 2026-05-22 Path C directive + 2026-05-24 "make
  * openhands default, integrate completely today" directive.
@@ -77,12 +76,6 @@ export const AGENT_MATRIX = [
   {
     id: "claude",
     briefDeliveryShape: "stdin",
-    modelFlag: "--model",
-    pendingExternalDep: null,
-  },
-  {
-    id: "devin",
-    briefDeliveryShape: "prompt-file",
     modelFlag: "--model",
     pendingExternalDep: null,
   },
@@ -164,7 +157,7 @@ export function resolveCloudAgent(input) {
       status: "pending-external-dep",
       agent: row.id,
       row,
-      error: `cloud_agent="${row.id}" not yet runnable; waiting for ${row.id} CLI release on ${row.pendingExternalDep} (GitHub issue OpenHands/OpenHands#14374). Switch to cloud_agent="claude" or "devin" until then.`,
+      error: `cloud_agent="${row.id}" not yet runnable; waiting for ${row.id} CLI release on ${row.pendingExternalDep} (GitHub issue OpenHands/OpenHands#14374). Switch to cloud_agent="claude" until then.`,
     };
   }
   return { status: "ok", agent: row.id, row };

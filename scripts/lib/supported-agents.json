@@ -16,13 +16,6 @@
       "modelFlag": "--model"
     },
     {
-      "id": "devin",
-      "cloud": true,
-      "local": false,
-      "briefDelivery": "prompt-file",
-      "modelFlag": "--model"
-    },
-    {
       "id": "aider",
       "cloud": false,
       "local": true,

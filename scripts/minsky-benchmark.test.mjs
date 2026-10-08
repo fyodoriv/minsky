@@ -50,7 +50,7 @@ describe("classifyVerdict", () => {
 
 describe("parseRunnerOutput", () => {
   test("extracts verdict= line", () => {
-    const out = "⏱ iteration #0: task=foo agent=devin verdict=validated duration=0s pr=—";
+    const out = "⏱ iteration #0: task=foo agent=aider verdict=validated duration=0s pr=—";
     expect(parseRunnerOutput(out)).toBe("validated");
   });
   test("falls back to stopReason when no verdict= present", () => {

@@ -8,7 +8,7 @@
 
 ## What this is
 
-The canonical install runbook for Minsky. **Audience**: an AI coding agent (Claude Code, Devin, Cursor, Windsurf, Codex CLI, or any agent that can read files and run shell commands) acting on behalf of a human operator who said something like *"install minsky for this folder and start it"*. Follow it step by step. Ask the operator a question ONLY at the explicit consent-prompt step (Step 5) — every other step is yours to execute autonomously.
+The canonical install runbook for Minsky. **Audience**: an AI coding agent (Claude Code, Cursor, Codex CLI, or any agent that can read files and run shell commands) acting on behalf of a human operator who said something like *"install minsky for this folder and start it"*. Follow it step by step. Ask the operator a question ONLY at the explicit consent-prompt step (Step 5) — every other step is yours to execute autonomously.
 
 **Where to read next after installing**:
 
@@ -17,7 +17,7 @@ The canonical install runbook for Minsky. **Audience**: an AI coding agent (Clau
 - [docs/uninstall.md](docs/uninstall.md) — clean removal when you're done
 - [README.md](README.md) for context on what you just installed
 
-**Status.** The end-to-end flow below works today. The `minsky consent --yes / --no` subcommand exists (Step 5 is a single CLI call) and the measurement harness `scripts/measure-agent-install.mjs` is wired into `pre-pr-lint --stage=full` (so the harness machinery is CI-gated via mock mode). The harness now also has a `--live` mode that spawns a real agent against a fresh tmp git repo seeded with this runbook, captures its transcript, and parses the operator-prompt count via a per-provider module under `scripts/measure-agent-install/parsers/` (one isolated file per provider: claude-code / devin / cursor). Live mode is operator-side only — it is NOT wired into CI (the parent task's Pivot keeps real-agent invocation off the cost-bearing CI path), and it skips gracefully when the named agent CLI is not on PATH. Run an operator-side smoke like:
+**Status.** The end-to-end flow below works today. The `minsky consent --yes / --no` subcommand exists (Step 5 is a single CLI call) and the measurement harness `scripts/measure-agent-install.mjs` is wired into `pre-pr-lint --stage=full` (so the harness machinery is CI-gated via mock mode). The harness now also has a `--live` mode that spawns a real agent against a fresh tmp git repo seeded with this runbook, captures its transcript, and parses the operator-prompt count via a per-provider module under `scripts/measure-agent-install/parsers/` (one isolated file per provider: claude-code / cursor). Live mode is operator-side only — it is NOT wired into CI (the parent task's Pivot keeps real-agent invocation off the cost-bearing CI path), and it skips gracefully when the named agent CLI is not on PATH. Run an operator-side smoke like:
 
 ```bash
 node scripts/measure-agent-install.mjs --providers=claude-code --runs-per-provider=1 --live --out=.minsky/measurements/$(date -u +%Y-%m-%d).json
@@ -29,7 +29,7 @@ The record lands in `.minsky/measurements/<date>.json` (the canonical run-record
 
 Two invariants you, the installing agent, must honor:
 
-1. **You are a doorway, not a runtime.** After you finish this runbook, you are *out of the picture*. The daemon you started runs on the operator's machine and operates independently. Whatever chat window invoked you — Claude Code, Cursor, Devin, Windsurf, Codex, Aider, or a local model talking to one of them — must produce **byte-identical runtime behavior** afterwards. Do not write launcher-specific config. Do not branch on `process.env.CLAUDE_CODE` / `CURSOR` / `DEVIN_AGENT` / `CODEX` / etc. on the way through. Do not seed `~/.minsky/config.json` with anything that varies by launcher. The only field that may record which launcher you were is `agent` inside `~/.minsky/telemetry-consent.json` (telemetry-only — never re-read by runtime code). See [`user-stories/014-launcher-agnostic-feature-parity.md`](user-stories/014-launcher-agnostic-feature-parity.md) for the full invariant.
+1. **You are a doorway, not a runtime.** After you finish this runbook, you are *out of the picture*. The daemon you started runs on the operator's machine and operates independently. Whatever chat window invoked you — Claude Code, Cursor, Codex, Aider, or a local model talking to one of them — must produce **byte-identical runtime behavior** afterwards. Do not write launcher-specific config. Do not branch on `process.env.CLAUDE_CODE` / `CURSOR` / `CODEX` / etc. on the way through. Do not seed `~/.minsky/config.json` with anything that varies by launcher. The only field that may record which launcher you were is `agent` inside `~/.minsky/telemetry-consent.json` (telemetry-only — never re-read by runtime code). See [`user-stories/014-launcher-agnostic-feature-parity.md`](user-stories/014-launcher-agnostic-feature-parity.md) for the full invariant.
 
 2. **A cloud API key is NOT required.** Minsky's default runtime is local — Ollama / LM Studio / MLX. The default config you write in Step 4 sets `cloud_agent: "openhands"` + `cloud_agent_model: "ollama_chat/qwen3-coder:30b"` + `ollama_base_url: "http://localhost:11434"`. If the operator has no `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` in their environment, that is **not a blocker** — proceed to Step 5 (consent) and Step 6 (daemon start) without prompting. The operator's directive (recorded in [`user-stories/015-local-models-until-stable.md`](user-stories/015-local-models-until-stable.md)) is: rely on local models until the M1.1 stability gate trips at 90% clean-exit fraction. Cloud-key opt-in is a documented post-install edit, not an install-time prompt.
 
@@ -71,7 +71,7 @@ python3 --version # must be ≥ 3.10 — required for the OpenHands agent runtim
 
 If any prerequisite is missing or too old, tell the operator the exact missing piece and the install command for their OS (Homebrew on macOS, apt on Debian/Ubuntu), then STOP. Do not auto-install Node or pnpm without permission — that's the operator's machine, not yours.
 
-**Why Python 3.10+ is required**: Minsky's default agent runtime is OpenHands (per the operator's 2026-05-22 Path C reshape directive). Today's OpenHands ships as a Python SDK; Minsky's adapter ([`@minsky/agent-runtime-openhands`](novel/adapters/agent-runtime-openhands/README.md)) spawns it via a tiny Python shim. From `2026-06-01` (OpenHands' Agent Canvas Initiative CLI release) the shim is replaced with a direct CLI invocation and the Python dep can move from required to optional. Until then, Python is required if the operator uses the default `cloud_agent: "openhands"`. Operators can fall back to `cloud_agent: "claude"` / `"devin"` / `"aider"` (no Python required) by editing `~/.minsky/config.json` after Step 4.
+**Why Python 3.10+ is required**: Minsky's default agent runtime is OpenHands (per the operator's 2026-05-22 Path C reshape directive). Today's OpenHands ships as a Python SDK; Minsky's adapter ([`@minsky/agent-runtime-openhands`](novel/adapters/agent-runtime-openhands/README.md)) spawns it via a tiny Python shim. From `2026-06-01` (OpenHands' Agent Canvas Initiative CLI release) the shim is replaced with a direct CLI invocation and the Python dep can move from required to optional. Until then, Python is required if the operator uses the default `cloud_agent: "openhands"`. Operators can fall back to `cloud_agent: "claude"` / `"aider"` (no Python required) by editing `~/.minsky/config.json` after Step 4.
 
 ## Step 1.5 — install the OpenHands SDK (automatic during `pnpm minsky:setup`)
 
@@ -95,7 +95,7 @@ OPENHANDS_SUPPRESS_BANNER=1 ~/.minsky/openhands-venv/bin/python -c "from openhan
 
 The operator must export their LLM API key (default: `ANTHROPIC_API_KEY`) in their shell rc before the daemon spawns its first task. If they use a different provider (OpenAI, Gemini, etc.), set `MINSKY_OPENHANDS_API_KEY_ENV=OPENAI_API_KEY` (or equivalent) in `~/.minsky/config.json`.
 
-If `pnpm minsky:setup` reports `⚠ uv not on PATH` (graceful-degrade — supervisor still loads), install `uv` first (`brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`), then re-run `pnpm minsky:setup`. Operators using a non-openhands backend (`cloud_agent: "claude" | "devin" | "aider"`) can ignore the openhands SDK entirely.
+If `pnpm minsky:setup` reports `⚠ uv not on PATH` (graceful-degrade — supervisor still loads), install `uv` first (`brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`), then re-run `pnpm minsky:setup`. Operators using a non-openhands backend (`cloud_agent: "claude" | "aider"`) can ignore the openhands SDK entirely.
 
 ## Step 2 — record the current host
 
@@ -159,7 +159,7 @@ cat > ~/.minsky/config.json <<EOF
 EOF
 ```
 
-Pick the `agent` value matching the AI agent that's running you right now: `claude` if you're Claude Code, `devin` if you're Devin, `cursor` if you're inside Cursor, `aider` if you're Aider with a local Ollama model, etc. The operator can change it later; default to `claude` if unsure.
+Pick the `agent` value matching the AI agent that's running you right now: `claude` if you're Claude Code, `cursor` if you're inside Cursor, `aider` if you're Aider with a local Ollama model, etc. The operator can change it later; default to `claude` if unsure.
 
 To express the operator's full preference — including the local-LLM fallback (`local_llm_enabled`, `local_llm.model`, `local_llm.base_url`) and `cloud_agent` — in one editable file, copy the annotated [`docs/example-config.json`](docs/example-config.json) to `~/.minsky/config.json` and edit it. See [docs/configuration.md § Local-LLM fallback keys](docs/configuration.md) for every key, its default, and the `MINSKY_LOCAL_LLM` env override. Verify the file is honored with no agent spawn: `MINSKY_CONFIG=~/.minsky/config.json DRY_RUN=1 "$INSTALL_DIR/bin/minsky-run.sh" --once --dry-run`.
 

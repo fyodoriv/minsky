@@ -4,7 +4,7 @@ This file exists so a new operator can see — before the first iteration —
 what each brain+workers model combination is expected to cost. On a fresh
 machine `~/.minsky/config.json` has no `cost_tier`, and historically the
 operator hand-edited that JSON blind. `bin/minsky-init` now presents these
-six tiers at setup (with $/hr expectations), persists the choice as
+five tiers at setup (with $/hr expectations), persists the choice as
 `cost_tier`, and never asks again. Upfront cost transparency at the decision
 point is the trust differentiator: Devin charges $500/mo flat, OpenHands and
 SWE-agent give no estimate, Aider shows token counts only post-hoc.
@@ -13,7 +13,7 @@ The decision logic and config merge live in `scripts/cost_tier_picker.py`
 (a pure, unit-tested helper); `bin/minsky-init` wires the TTY prompt around
 it. See `tests/test_cost_tier_picker.py` for the behavior contract.
 
-## The six tiers
+## The five tiers
 
 The `$/hr` column is a coarse upper-bound expectation, not a billing
 guarantee — real cost depends on iteration cadence and token volume (which
@@ -27,7 +27,6 @@ first so the menu reads as a price ladder.
 | 3 | Sonnet + Sonnet | `claude` | `claude-sonnet-4-5` | `claude` | $4–8 | Sonnet both lanes — cheaper, still cloud-quality. |
 | 4 | Sonnet + local | `claude` | `claude-sonnet-4-5` | `aider` | $2–5 | Sonnet brain, local workers (aider + ollama). |
 | 5 | local + local | `claude` | `claude-sonnet-4-5` | `aider` | $0 | Fully local — zero cloud tokens. Run `minsky --local`. |
-| 6 | Windsurf + Devin | `devin` | `claude-opus-4-8-max` | `aider` | $20+ flat | Devin brain (flat-rate seat), local workers. |
 
 Tier 2 is the default — the balance point most operators want. Pressing
 Enter at the prompt, or running non-interactively (launchd, SSH, CI),

@@ -22,7 +22,7 @@
 // `.claude/skills/pr-merge-no-shortcuts/SKILL.md` + cited it in vision.md §18
 // without the allowlist entry; an intervening merge dropped the entry; #704
 // had to re-add it. This lint closes the loop at the source — it asserts
-// EVERY skill directory under `.claude/skills/` (and `.devin/skills/`) has its
+// EVERY skill directory under `.claude/skills/` has its
 // name on the allowlist, regardless of whether vision.md cites it yet, so a
 // forgotten entry fails in the same PR that adds the skill.
 //
@@ -51,11 +51,10 @@ import { parseAllowlist } from "./check-rule-5-glossary-discipline.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 
-// The skill roots the gate covers. Both are agent-config directories that hold
+// The skill roots the gate covers. Each is an agent-config directory that holds
 // one `<name>/SKILL.md` per skill; the directory name IS the coined token the
-// allowlist anchors. `.devin/skills/` may be absent on a Claude-only checkout —
-// a missing root contributes zero skill names, never an error.
-export const DEFAULT_SKILL_ROOTS = Object.freeze([".claude/skills", ".devin/skills"]);
+// allowlist anchors. A missing root contributes zero skill names, never an error.
+export const DEFAULT_SKILL_ROOTS = Object.freeze([".claude/skills"]);
 
 const ALLOWLIST_REL_PATH = "scripts/glossary-allowlist.txt";
 
@@ -92,7 +91,7 @@ export function buildViolationMessage(missing) {
     } missing from ${ALLOWLIST_REL_PATH}:`,
     list,
     "",
-    "Each `.claude/skills/<name>/SKILL.md` (or `.devin/skills/<name>/`) is a",
+    "Each `.claude/skills/<name>/SKILL.md` is a",
     "coined token whose anchor is the SKILL.md file itself (rule #5). Add the",
     `directory name to ${ALLOWLIST_REL_PATH} in THIS PR so a later vision.md`,
     "citation doesn't fail the rule-5 glossary-discipline check far from the",
@@ -102,8 +101,8 @@ export function buildViolationMessage(missing) {
 
 /**
  * I/O seam helper: add every `<name>` directory under `absRoot` that holds a
- * `SKILL.md` to `names`. A missing root is a no-op (a Claude-only checkout has
- * no `.devin/skills/`). Split out of `listSkillNames` to keep that function's
+ * `SKILL.md` to `names`. A missing root is a no-op (a checkout without that
+ * root contributes nothing). Split out of `listSkillNames` to keep that function's
  * cognitive complexity under biome's ceiling.
  *
  * @param {string} absRoot

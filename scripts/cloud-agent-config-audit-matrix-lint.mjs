@@ -16,7 +16,7 @@
 // when the Python-SDK shim adapter shipped
 // (`@minsky/agent-runtime-openhands`), so the lint no longer date-flips
 // — it now asserts the post-integration steady state: openhands is
-// row 0, all four rows have pendingExternalDep === null, and the
+// row 0, all three rows have pendingExternalDep === null, and the
 // brief-file delivery shape is in the validShapes set.
 //
 // Standalone node script (NOT a vitest spec) so the parent task's
@@ -61,14 +61,14 @@ function assert(label, condition, detail) {
 console.info("cloud-agent-config-audit-matrix");
 
 // Dimension 1 — row count.
-assert("matrix has exactly 4 rows", AGENT_MATRIX.length === 4, `got ${AGENT_MATRIX.length}`);
+assert("matrix has exactly 3 rows", AGENT_MATRIX.length === 3, `got ${AGENT_MATRIX.length}`);
 
 // Dimension 2 — row order is openhands (default) first, then legacy
-// claude / devin / aider in the order they were added.
-const expectedOrder = ["openhands", "claude", "devin", "aider"];
+// claude / aider in the order they were added.
+const expectedOrder = ["openhands", "claude", "aider"];
 const observedOrder = AGENT_MATRIX.map((r) => r.id);
 assert(
-  "row order is openhands / claude / devin / aider",
+  "row order is openhands / claude / aider",
   JSON.stringify(observedOrder) === JSON.stringify(expectedOrder),
   `expected ${expectedOrder.join(",")} got ${observedOrder.join(",")}`,
 );
@@ -81,7 +81,7 @@ assert(
 );
 
 // Dimension 4 — every row has a valid briefDeliveryShape.
-const validShapes = new Set(["brief-file", "stdin", "prompt-file", "message-file"]);
+const validShapes = new Set(["brief-file", "stdin", "message-file"]);
 for (const row of AGENT_MATRIX) {
   assert(
     `row "${row.id}" has valid briefDeliveryShape`,
@@ -100,7 +100,7 @@ for (const row of AGENT_MATRIX) {
   );
 }
 
-// Dimension 6 — all four agents have pendingExternalDep === null
+// Dimension 6 — all three agents have pendingExternalDep === null
 // (integration complete). The 2026-06-01 dep was lifted on
 // 2026-05-24 when the Python-SDK shim adapter shipped.
 for (const row of AGENT_MATRIX) {

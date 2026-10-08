@@ -13,7 +13,7 @@ A complete annotated example ships at [`docs/example-config.json`](example-confi
 }
 ```
 
-`openhands` is the default since 2026-05-24 — no `cloud_agent` field is required if the operator wants OpenHands behind Claude/OpenAI/Gemini. The legacy `claude` / `devin` / `aider` backends remain valid via explicit setting.
+`openhands` is the default since 2026-05-24 — no `cloud_agent` field is required if the operator wants OpenHands behind Claude/OpenAI/Gemini. The legacy `claude` / `aider` backends remain valid via explicit setting.
 
 ## Full schema
 
@@ -31,7 +31,7 @@ A complete annotated example ships at [`docs/example-config.json`](example-confi
 
 | Field | What it controls |
 | --- | --- |
-| `cloud_agent` | Which agent runs in cloud mode: `openhands` (default since 2026-05-24) / `claude` / `devin` / `aider`. |
+| `cloud_agent` | Which agent runs in cloud mode: `openhands` (default since 2026-05-24) / `claude` / `aider`. |
 | `cloud_agent_model` | Passed as `--model` to the agent. For `openhands`, this is the LiteLLM model id consumed by the SDK (e.g. `claude-sonnet-4-20250514`, `gpt-4o`). |
 | `local_agent` | Which CLI runs in local mode: `aider` / `opencode`. |
 | `local_agent_model` | Model name for the local agent (passed to the underlying provider). |
@@ -81,7 +81,7 @@ Distinct from the `local_agent` / `cloud_agent_model: "ollama_chat/…"` paths a
 
 ```json
 {
-  "cloud_agent": "devin",
+  "cloud_agent": "aider",
   "local_llm_enabled": true,
   "local_llm": {
     "model": "ollama_chat/qwen3-coder:30b",
@@ -118,7 +118,6 @@ For the full local-model setup walkthrough (warming, keep-alive, tool-call relia
 | --- | --- | --- | --- | --- |
 | `openhands` | Cloud (OpenHands SDK + LLM of choice via litellm) | `--brief-file` (via Python shim) | 65.8% SWE-bench Verified inherited; critic + best-of-N agent loop; LLM-agnostic; AgentSkills-spec compat with Claude Code skills | **Default cloud workload since 2026-05-24** |
 | `claude` | Cloud (Anthropic subscription) | stdin | Highest single-shot completion rate; OAuth / keychain auth | Opt-in fallback when OpenHands SDK unavailable |
-| `devin` | Cloud (Windsurf subscription) | `--prompt-file` (stdin panics) | Polished IDE-style PR output | Opt-in fallback when openhands rate-limited |
 | `aider` | Local (Ollama / MLX) | `--message-file` | $0 cost, runs on M-series Mac | Token-budget fallback; long sessions |
 | `opencode` | Local (LM Studio / Ollama) | stdin | Faster cold-start than aider | Mechanical lint fixes |
 
@@ -126,7 +125,7 @@ For the full local-model setup walkthrough (warming, keep-alive, tool-call relia
 
 | Scope | Mechanism |
 | --- | --- |
-| One run | `MINSKY_CLOUD_AGENT=devin minsky` |
+| One run | `MINSKY_CLOUD_AGENT=claude minsky` |
 | Persistent | Edit `cloud_agent` in `~/.minsky/config.json` |
 | Auto-fallback (cloud → local) | Detected automatically when the cloud agent returns "quota exceeded" (see [user-stories/004-budget-auto-pause.md](../user-stories/004-budget-auto-pause.md) and [user-stories/008-per-task-backend-and-personas.md](../user-stories/008-per-task-backend-and-personas.md)) |
 

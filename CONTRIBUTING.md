@@ -18,7 +18,7 @@ The full documentation map is at [docs/README.md](docs/README.md).
 
 ## The AI-authored convention
 
-Code in this repo is AI-authored. Cloud agents (Claude, Devin, Codex, Cursor, Windsurf, Copilot, Aider, Cody, …) and local models (Ollama, llama.cpp, MLX, LM Studio, vLLM, …) both count — the bar is that the lines weren't typed by you stroke-by-stroke in a plain editor.
+Code in this repo is AI-authored. Cloud agents (Claude, Codex, Cursor, Copilot, Aider, Cody, …) and local models (Ollama, llama.cpp, MLX, LM Studio, vLLM, …) both count — the bar is that the lines weren't typed by you stroke-by-stroke in a plain editor.
 
 **Why.** Minsky is itself a daemon that runs AI agents against tasks. Its credibility rests on the codebase being produced the same way the product produces code. There's also a velocity argument: agent-authored PRs onboard against this repo's 53 pre-PR lint stages, 65 CI jobs, and 17 constitutional rules with one read of `AGENTS.md`, which keeps the review loop fast — a human cold-starting on the rules takes hours per PR.
 

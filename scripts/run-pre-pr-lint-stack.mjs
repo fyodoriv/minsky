@@ -1117,7 +1117,7 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["scripts/check-watch-surface-cap.mjs"],
   },
   {
-    // Every `.claude/skills/<name>/SKILL.md` (and `.devin/skills/<name>/`)
+    // Every `.claude/skills/<name>/SKILL.md`
     // directory name must appear on `scripts/glossary-allowlist.txt`, so a
     // forgotten allowlist entry fails in the SAME PR that adds the skill
     // rather than in a later PR that cites the token in vision.md (the

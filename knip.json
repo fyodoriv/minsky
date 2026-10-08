@@ -49,7 +49,6 @@
   "ignoreBinaries": [
     "fnm",
     "claude",
-    "devin",
     "aider",
     "ollama",
     "ts-prune",

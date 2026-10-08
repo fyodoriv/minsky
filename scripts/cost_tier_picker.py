@@ -20,7 +20,7 @@ deleted `novel/tick-loop/src/cost-tier-picker.ts` is NOT recreated — that
 startup flow is gone; per-machine config now lives in `bin/minsky-init`.
 
 Public surface:
-    tier_definitions()                         -> list[dict]   (6 tiers)
+    tier_definitions()                         -> list[dict]   (5 tiers)
     decide_tier(existing, env_choice, is_tty)  -> str          (skip|use-default|prompt)
     tier_to_config(tier)                       -> dict         ({cloud_agent,...})
     merge_tier_into_config(cfg, tier)          -> dict         (cost_tier + keys merged)
@@ -35,7 +35,7 @@ CLI (used by bin/minsky-init):
     python3 scripts/cost_tier_picker.py --menu              # print the human-readable tier menu
 
 Env:
-    MINSKY_COST_TIER   — non-interactive tier choice (1..6); honored for tests / launchd / SSH / CI.
+    MINSKY_COST_TIER   — non-interactive tier choice (1..5); honored for tests / launchd / SSH / CI.
     MINSKY_CONFIG      — explicit config path (highest precedence).
     MINSKY_STATE_DIR   — state dir; config is <state-dir>/config.json (default ~/.minsky).
 
@@ -60,7 +60,7 @@ from typing import Any
 
 # --- Tier table (single source of truth) ---------------------------------
 #
-# Six tiers, brain (cloud_agent + model) + workers (local_agent). The
+# Five tiers, brain (cloud_agent + model) + workers (local_agent). The
 # `est_usd_per_hr` is a coarse upper-bound expectation shown at setup — it
 # is a transparency signal, not a billing guarantee (the real cost depends
 # on iteration cadence + token volume, which `dynamic_timeout.py` governs).
@@ -116,15 +116,6 @@ _TIERS: list[dict[str, Any]] = [
         "est_usd_per_hr": "$0",
         "blurb": "Fully local (aider + ollama). Zero cloud tokens — run minsky --local.",
     },
-    {
-        "tier": 6,
-        "name": "Windsurf + Devin",
-        "cloud_agent": "devin",
-        "cloud_agent_model": "claude-opus-4-8-max",
-        "local_agent": "aider",
-        "est_usd_per_hr": "$20+ flat",
-        "blurb": "Devin brain (flat-rate seat), local workers. For Devin/Windsurf seats.",
-    },
 ]
 
 _TIER_BY_ID = {t["tier"]: t for t in _TIERS}
@@ -139,12 +130,12 @@ _TIER_CONFIG_KEYS = ("cloud_agent", "cloud_agent_model", "local_agent")
 
 
 def tier_definitions() -> list[dict[str, Any]]:
-    """Return the 6 tier definitions (deep copy — callers may not mutate)."""
+    """Return the 5 tier definitions (deep copy — callers may not mutate)."""
     return [dict(t) for t in _TIERS]
 
 
 def is_valid_tier(tier: Any) -> bool:
-    """True iff `tier` (int or integer-valued str) names one of the 6 tiers.
+    """True iff `tier` (int or integer-valued str) names one of the 5 tiers.
 
     Floats and non-integer strings ("2.5", "abc") are rejected — a tier id
     is a whole number, never a coerced fraction (int(2.5) == 2 would be a

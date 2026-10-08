@@ -8,7 +8,7 @@
 //   1. GREEN-PATH parameterized assertions over the REAL surfaces
 //      (AGENT_MATRIX + supported-agents.json + AGENTS.md). These pin
 //      that the three surfaces agree today — ≥20 passing tests across
-//      the 4 dimensions × 4 agents.
+//      the 4 dimensions × 3 agents.
 //   2. DRIFT-DETECTION assertions over MUTATED in-memory fixtures —
 //      proving each dimension actually fails (and names the offender)
 //      when a developer adds an agent to one surface but not another,
@@ -216,8 +216,8 @@ describe("Acceptance — drift detection over mutated fixtures", () => {
 });
 
 describe("parseAgentsMdMatrix — read-only table parser", () => {
-  test("extracts exactly the four documented agents", () => {
-    expect(MD_ROWS.map((r) => r.id).sort()).toEqual(["aider", "claude", "devin", "openhands"]);
+  test("extracts exactly the three documented agents", () => {
+    expect(MD_ROWS.map((r) => r.id).sort()).toEqual(["aider", "claude", "openhands"]);
   });
 
   test("returns [] when the marker is absent", () => {

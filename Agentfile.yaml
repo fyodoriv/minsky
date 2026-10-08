@@ -9,7 +9,7 @@
 #
 # Skills under `.claude/skills/` are the canonical source — they are
 # tracked in git, edited in PRs, and propagated to every agent's
-# skillsDir (Claude, Cursor, Windsurf, Devin, Augment, Codex, Gemini CLI,
+# skillsDir (Claude, Cursor, Augment, Codex, Gemini CLI,
 # Copilot, OpenCode, Kiro, Amp, etc.) via the symlink set agentbrew
 # generates. See https://github.com/cbrwizard/agentbrew for the schema.
 #

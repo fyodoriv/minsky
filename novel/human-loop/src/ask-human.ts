@@ -34,7 +34,7 @@ import { formatQuestion, parseQaLog, type QaEntry } from "./qa-log-format.js";
 export interface AskHumanOpts {
   /** Task ID this question is asked about. Used to match Q ↔ A pairs. */
   taskId: string;
-  /** Agent name (claude / devin / aider). Written into the Q's `**from**:` field. */
+  /** Agent name (claude / aider). Written into the Q's `**from**:` field. */
   agent: string;
   /** Absolute path to the qa-log Markdown file. Default `<host>/.minsky/qa-log.md`. */
   qaLogPath: string;

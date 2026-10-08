@@ -25,7 +25,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import * as claudeCodeParser from "./measure-agent-install/parsers/claude-code.mjs";
 import * as cursorParser from "./measure-agent-install/parsers/cursor.mjs";
-import * as devinParser from "./measure-agent-install/parsers/devin.mjs";
 import {
   buildReport,
   liveVerdict,
@@ -125,7 +124,7 @@ describe("measure-agent-install.mjs — buildReport (pure function)", () => {
 
   test("mock + real (no --live): mock passes, real skips → aggregate fails", () => {
     const r = buildReport({
-      providers: ["mock", "devin"],
+      providers: ["mock", "cursor"],
       runsPerProvider: 1,
       thresholdSeconds: 90,
       thresholdPrompts: 1,
@@ -302,7 +301,6 @@ describe("measure-agent-install.mjs — CLI integration", () => {
 describe("per-provider parsers — fixture-tested prompt counting", () => {
   test("registry maps each known provider to its parser module", () => {
     expect(PROVIDER_PARSERS["claude-code"]).toBe(claudeCodeParser);
-    expect(PROVIDER_PARSERS["devin"]).toBe(devinParser);
     expect(PROVIDER_PARSERS["cursor"]).toBe(cursorParser);
     for (const [name, parser] of Object.entries(PROVIDER_PARSERS)) {
       expect(parser.PROVIDER).toBe(name);
@@ -316,16 +314,12 @@ describe("per-provider parsers — fixture-tested prompt counting", () => {
     expect(claudeCodeParser.parsePromptCount(readFixture("claude-code"))).toBe(1);
   });
 
-  test("devin: conforming transcript has exactly 1 operator prompt", () => {
-    expect(devinParser.parsePromptCount(readFixture("devin"))).toBe(1);
-  });
-
   test("cursor: conforming transcript has exactly 1 operator prompt", () => {
     expect(cursorParser.parsePromptCount(readFixture("cursor"))).toBe(1);
   });
 
   test("empty / non-string transcript → 0 prompts (no crash)", () => {
-    for (const parser of [claudeCodeParser, devinParser, cursorParser]) {
+    for (const parser of [claudeCodeParser, cursorParser]) {
       expect(parser.parsePromptCount("")).toBe(0);
       // @ts-expect-error — exercising the defensive non-string guard
       expect(parser.parsePromptCount(undefined)).toBe(0);
@@ -335,11 +329,6 @@ describe("per-provider parsers — fixture-tested prompt counting", () => {
   test("claude-code: two AskUserQuestion blocks → 2 prompts (over-prompt detected)", () => {
     const t = "[AskUserQuestion]\nfirst\n[AskUserQuestion]\nsecond\n";
     expect(claudeCodeParser.parsePromptCount(t)).toBe(2);
-  });
-
-  test("devin: falls back to verbatim consent text when no primary marker", () => {
-    const t = "[devin] Do you agree to submit these anonymized telemetry events?\n";
-    expect(devinParser.parsePromptCount(t)).toBe(1);
   });
 });
 

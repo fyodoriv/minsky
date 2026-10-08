@@ -119,7 +119,7 @@ Minsky's daemon spawns a worktree per task and tears it down when the iteration 
 - `prompt` and `agent` hook types (LLM-as-advisory-judge layer).
 - `InstructionsLoaded` event (the audit surface for the deletion question).
 - `WorktreeCreate` event (cleanest split of supervisor vs in-session enforcement).
-- The cross-agent portability question — Codex hooks, OpenCode plugins, Cursor rules, Windsurf rules all use *different* schemas. A single source of truth that compiles to N agent-specific hook configs is a real engineering problem the article doesn't acknowledge. (See `iamfakeguru/agent-md` and `agentic-thinking/hookbus-publisher-codex` for prior art.)
+- The cross-agent portability question — Codex hooks, OpenCode plugins, Cursor rules all use *different* schemas. A single source of truth that compiles to N agent-specific hook configs is a real engineering problem the article doesn't acknowledge. (See `iamfakeguru/agent-md` and `agentic-thinking/hookbus-publisher-codex` for prior art.)
 - The deletion discipline. Adding hooks without pruning rules just adds a second junk drawer. Johnson 2026 is the missing companion piece.
 
 ## 4. The Minsky reality check
@@ -142,7 +142,7 @@ Minsky's daemon spawns a worktree per task and tears it down when the iteration 
 | **Minsky project Claude hooks** (`./.claude/settings.json`) | **Absent.** Only `.claude/skills/` and `.claude/worktrees/` exist. None of the 50+ deterministic checks fire in the agent's own session — only at commit/push/CI. |
 | **Per-worktree hooks** for Minsky's tick-loop workers | **Absent.** Workers run with the user-global settings.json, not a Minsky-aware one. |
 | **AGENTS.md pruning** to mirror the move-rules-to-hooks shift | **Absent.** AGENTS.md is 462 lines + vision.md is 822 lines; growth is monotonic. |
-| **Cross-agent hook schema** (Claude / Codex / OpenCode / Devin) | **Partial.** `agentbrew` syncs skills/MCP/rules; does NOT yet sync hooks. |
+| **Cross-agent hook schema** (Claude / Codex / OpenCode) | **Partial.** `agentbrew` syncs skills/MCP/rules; does NOT yet sync hooks. |
 
 The gap is one tier deep: **the agent's own loop is not running Minsky's deterministic checks**. Every rule-N script runs at commit/push/CI — which is fine for catching violations before they ship, but means an agent in an unsupervised loop discovers the violation 30–120 seconds AFTER committing, not in the same edit operation. That's an order-of-magnitude latency multiplier on the agent's iteration speed.
 
@@ -319,7 +319,7 @@ exit 0
 
 ### 5.4 Cross-agent portability (machine-wide)
 
-`agentbrew` already syncs skills + MCP + rules across Claude / Codex / Cursor / Windsurf / OpenCode. **Hooks should be the fifth axis.** Codex's hook schema is close-but-different (per `developers.openai.com/codex/hooks` and `openai/codex#19949`). The mapping is:
+`agentbrew` already syncs skills + MCP + rules across Claude / Codex / Cursor / OpenCode. **Hooks should be the fifth axis.** Codex's hook schema is close-but-different (per `developers.openai.com/codex/hooks` and `openai/codex#19949`). The mapping is:
 
 | Claude event | Codex equivalent | OpenCode equivalent |
 |---|---|---|

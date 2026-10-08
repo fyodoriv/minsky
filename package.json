@@ -43,8 +43,7 @@
     "developer-tools",
     "automation",
     "openhands",
-    "claude-code",
-    "devin"
+    "claude-code"
   ],
   "scripts": {
     "prepare": "tsc -b --force && node scripts/install-lefthook-best-effort.mjs && node scripts/check-toolchain.mjs",

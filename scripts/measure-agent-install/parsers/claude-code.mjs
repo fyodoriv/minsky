@@ -1,7 +1,7 @@
 // Per-provider transcript parser for the `claude-code` agent.
 //
 // Conforming pattern: Strategy (Gamma et al. 1994) — one parser module
-// per provider, selected by name at the `--live` call site. Adding a 4th
+// per provider, selected by name at the `--live` call site. Adding a 3rd
 // provider is a one-file addition (parent task Acceptance #6).
 //
 // Contract: given a captured stdout transcript of an agent following

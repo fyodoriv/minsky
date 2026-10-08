@@ -23,7 +23,7 @@ The `## The dependency table` section below is **load-bearing**. A check parses 
 
 A few key terms, defined once and used throughout:
 
-- **agent** — the coding assistant Minsky drives to do the actual work (Claude Code, Devin, or Aider). Minsky is not an agent; it orchestrates agents.
+- **agent** — the coding assistant Minsky drives to do the actual work (Claude Code or Aider). Minsky is not an agent; it orchestrates agents.
 - **host** — one code project (one git repository) that Minsky works on. Walking several hosts in turn is the cross-repo fleet.
 - **iteration** — one round of work: pick a task, ask an agent to do it, capture the result, open a draft PR. The user-facing command for one round is `minsky run`.
 - **tick** — one wake-up of the loop on its timer (the control-loop period; Liu, *Real-Time Systems*, 2000).
@@ -35,7 +35,7 @@ The user-visible surface is a one-line bash shim that delegates to the cross-rep
 - [`novel/cross-repo-runner/`](./novel/cross-repo-runner/) — the task-walker that picks the next task, spawns an agent, captures the iteration, and opens a draft PR. Bin entry: [`novel/cross-repo-runner/bin/minsky-run.mjs`](./novel/cross-repo-runner/bin/minsky-run.mjs).
 - [`distribution/launchd/`](./distribution/launchd/) and [`distribution/systemd/`](./distribution/systemd/) — the outer supervisor units that restart the daemon on crash, re-claim work, and survive reboots. These are the let-it-crash substrate (rule #6): prefer crashing loudly and letting the supervisor restart over silent retry.
 
-The agent is pluggable through the adapter pattern described below. Today the choices are `claude` (Claude Code), `devin` (Devin CLI), and `aider` (local with Ollama). Pick one via `~/.minsky/config.json` or the `MINSKY_CLOUD_AGENT` env var.
+The agent is pluggable through the adapter pattern described below. Today the choices are `claude` (Claude Code) and `aider` (local with Ollama). Pick one via `~/.minsky/config.json` or the `MINSKY_CLOUD_AGENT` env var.
 
 *Historical note*: the original v0 architecture (referenced in some sections below) used a tool called OMC as the orchestrator and an `omc-tasksmd-bridge`. The v0.1 line replaced both with direct agent spawning plus the cross-repo runner's task picker. Sections that mention OMC are kept as historical context — the current substrate is the cross-repo runner.
 

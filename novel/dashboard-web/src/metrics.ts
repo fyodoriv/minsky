@@ -365,9 +365,9 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
     id: "agent-launcher-parity",
     label: "Agent-launcher parity — backends contractually runnable today",
     formula: "grep -c 'pendingExternalDep:\\s*null' scripts/lib/cloud-agent-config.mjs",
-    unit: "count of contractually-runnable backends (target 4 of 4)",
+    unit: "count of contractually-runnable backends (target 3 of 3)",
     freshnessBudgetMs: 7 * DAY_MS,
-    goal: "4 of 4 backends in AGENT_MATRIX with `pendingExternalDep: null` (openhands + claude + devin + aider)",
+    goal: "3 of 3 backends in AGENT_MATRIX with `pendingExternalDep: null` (openhands + claude + aider)",
     pivot:
       "<2 for ≥2 weeks → launcher abstraction is leaking backend-specific assumptions; halt agent-spawn work and re-architect the dispatcher",
     anchor:

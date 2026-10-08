@@ -12,7 +12,7 @@ A few terms used below, defined once:
 
 - **daemon** — a background program that keeps running on your machine after you start it, surviving terminal close and restarting on crash.
 - **host** — one code project (git repository) that Minsky works on. A "cross-repo fleet" is Minsky walking several hosts in turn.
-- **agent** — the coding assistant Minsky drives to do the actual work: Claude Code, Devin, or Aider. Minsky is not an agent; it orchestrates agents.
+- **agent** — the coding assistant Minsky drives to do the actual work: Claude Code or Aider. Minsky is not an agent; it orchestrates agents.
 - **TASKS.md** — the plain-text Markdown to-do list at a project's root that Minsky reads to pick work.
 - **MAPE-K loop** — Minsky's self-improvement loop: Monitor, Analyze, Plan, Execute over a Knowledge base (Kephart & Chess, 2003). Minsky reads its own past results, finds its weak spots, and files tasks against them.
 
@@ -44,7 +44,7 @@ Last updated 2026-05-23.
 | **Self-improvement (MAPE-K)** | 🟡 Substrate ships today (experiment-store + spec monitor + observer); closed-loop prompt tuning is spec-only ([user-story-003](../user-stories/003-mape-k-improves-prompts.md) status: Specification) | ❌ Static once shipped | ❌ One-shot reasoning per task | 🟡 Cognition-internal | ❌ None |
 | **Operator queue** | ✅ `TASKS.md` (markdown in repo) | Web UI / CLI / integrations | Python code + AMP UI | Cognition app / Slack | Operator types into terminal |
 | **Live dashboard** | ✅ `minsky watch` (stability, iterations, human-help) | ✅ Web UI | 🟡 AMP UI (paid) | ✅ Cognition app | ❌ |
-| **Backend choice (Claude / Devin / local)** | 🟡 Claude primary; Devin blocked on spawn-exit issue; local (aider) dry-run only; OpenHands planned (approved 2026-05-22, blocked on OpenHands Agent Canvas CLI 2026-06-01) | ✅ 15+ LLMs via OpenAI-compatible APIs | ✅ LiteLLM | ❌ Devin-only | ✅ N/A (is the backend) |
+| **Backend choice (Claude / local)** | 🟡 Claude primary; local (aider) dry-run only; OpenHands planned (approved 2026-05-22, blocked on OpenHands Agent Canvas CLI 2026-06-01) | ✅ 15+ LLMs via OpenAI-compatible APIs | ✅ LiteLLM | ❌ Devin-only | ✅ N/A (is the backend) |
 | **Headline benchmark** | 🔴 None published yet ([gap filed](../TASKS.md)) | ✅ **65.8% SWE-bench Verified** (Apr 2025) | ❌ No coding benchmark | ✅ Scores in Cognition blog | ✅ Aider polyglot leaderboard |
 | **Enterprise distribution** | 🔴 None ([gap filed](../TASKS.md)) | ✅ Agent Control Plane (May 2026) | ✅ AMP — **60% Fortune 500, 2B+ executions** | ✅ Devin Enterprise (Cognition Cloud / VPC) | ❌ No dedicated enterprise |
 | **Funding signal** | None | $18.8M Series A (Madrona, Nov 2025) | $18M total (Insight Partners, Oct 2024) | $4B valuation | Anthropic-backed / OSS |

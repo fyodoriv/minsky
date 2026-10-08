@@ -68,7 +68,7 @@ minsky logs
 ```
 
 If the daemon died, restart it (step 3). If it's stuck on a spawn
-failure (e.g., devin auth expired), fix the root cause then restart.
+failure (e.g., agent auth expired), fix the root cause then restart.
 
 Follow §3 → §4 → §5 of the `minsky` skill for heal/escalate protocol.
 Never silently retry. Always either heal visibly, restart visibly, OR

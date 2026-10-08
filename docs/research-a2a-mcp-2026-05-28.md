@@ -81,7 +81,7 @@ Both use JSON-RPC 2.0; both are HTTP-transport-compatible; both have streaming. 
 | Existing Minsky task | A2A maps it to |
 |---|---|
 | `multi-persona-pipeline-handoff-spec` (M2) | Each persona = an A2A-compliant agent. Handoff = `SendMessage` → `Task` → `SubscribeToTask`. The custom `novel/handoff-spec/` JSON schema this task originally tracked is obsoleted — A2A IS the handoff spec. |
-| `daemon-cross-vendor-reviewer-bias-prevention` | Worker (OpenHands/local) sends task to reviewer (Claude/Devin) as a separate A2A endpoint. No vendor lock-in. |
+| `daemon-cross-vendor-reviewer-bias-prevention` | Worker (OpenHands/local) sends task to reviewer (Claude) as a separate A2A endpoint. No vendor lock-in. |
 | `minsky-remote-task-submission` (P0) | Machine A's daemon sends `SendMessage` to the central repo's A2A agent with findings. Central agent files TASKS.md entry; optional AGNTCY directory for discovery. |
 | `fleet-log-aggregation` (P0) | Central agent queries `ListTasks` across all registered daemons. Aggregation is just iteration over the A2A response set. |
 | Companion mode (already shipped via agentbrew) | MCP server (not A2A) — companion exposes research findings as resources; worker queries `resources/list` + `resources/read`. |

@@ -126,8 +126,7 @@ local-models-stability-gate-90-percent  # P1 task in TASKS.md — implements sto
 # not a Minsky concept, so it has no Glossary/Pattern-index entry.
 RunAtLoad
 
-# Skill primer directory names under `.claude/skills/<name>/` (and
-# `.devin/skills/<name>/`). The anchor for each is the SKILL.md file itself —
+# Skill primer directory names under `.claude/skills/<name>/`. The anchor for each is the SKILL.md file itself —
 # every `<name>` is a coined token whose definition lives in its primer. The
 # `check-skill-allowlist-coverage` lint (full stage) asserts EVERY skill
 # directory name appears below, so a forgotten entry fails in the same PR that

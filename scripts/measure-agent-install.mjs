@@ -2,7 +2,7 @@
 // Measurement harness for the parent P0 `agent-mediated-install` task's
 // 9-run cross-provider success criterion:
 //
-//   `node scripts/measure-agent-install.mjs --providers=claude-code,devin,cursor \
+//   `node scripts/measure-agent-install.mjs --providers=claude-code,cursor \
 //     --runs-per-provider=3 --threshold-seconds=90 --threshold-prompts=1`
 //
 // Exit 0 iff every run passes both thresholds (duration ≤ N seconds AND
@@ -34,22 +34,20 @@ import { fileURLToPath } from "node:url";
 
 import * as claudeCodeParser from "./measure-agent-install/parsers/claude-code.mjs";
 import * as cursorParser from "./measure-agent-install/parsers/cursor.mjs";
-import * as devinParser from "./measure-agent-install/parsers/devin.mjs";
 
-// Per-provider parser registry. Adding a 4th provider is a one-file
+// Per-provider parser registry. Adding a 3rd provider is a one-file
 // addition (parent task Acceptance #6): write the parser module, add one
 // row here. The harness logic stays untouched.
 /** @type {Record<string, { PROVIDER: string, BINARY: string, parsePromptCount: (t: string) => number }>} */
 export const PROVIDER_PARSERS = {
   "claude-code": claudeCodeParser,
-  devin: devinParser,
   cursor: cursorParser,
 };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 
-const KNOWN_PROVIDERS = new Set(["mock", "claude-code", "devin", "cursor"]);
+const KNOWN_PROVIDERS = new Set(["mock", "claude-code", "cursor"]);
 const DEFAULT_THRESHOLD_SECONDS = 90;
 const DEFAULT_THRESHOLD_PROMPTS = 1;
 const DEFAULT_RUNS_PER_PROVIDER = 3;

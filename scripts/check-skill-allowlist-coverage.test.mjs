@@ -69,7 +69,7 @@ describe("buildViolationMessage", () => {
 });
 
 describe("the live repo (rule #5 enforcement)", () => {
-  test("every .claude/skills + .devin/skills directory name is on the allowlist", () => {
+  test("every .claude/skills directory name is on the allowlist", () => {
     const skillNames = listSkillNames([...DEFAULT_SKILL_ROOTS], REPO_ROOT);
     // Sanity — the repo ships real skill primers; an empty result would mean
     // the discovery seam silently broke and the gate became a no-op.

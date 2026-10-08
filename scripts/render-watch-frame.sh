@@ -30,7 +30,7 @@ if [ -f "$PID_FILE" ]; then
   if kill -0 "$daemon_pid" 2>/dev/null; then
     uptime=$(ps -p "$daemon_pid" -o etime= 2>/dev/null | tr -d ' ')
     target=$(ps -p "$daemon_pid" -o args= 2>/dev/null | grep -oE '\-\-host [^ ]+' | head -1)
-    agent_count=$(pgrep -f 'devin.*--print\|claude.*--print' 2>/dev/null | wc -l | tr -d ' ')
+    agent_count=$(pgrep -f 'claude.*--print' 2>/dev/null | wc -l | tr -d ' ')
     echo "  🟢 DAEMON  PID=$daemon_pid  uptime=$uptime  agents=$agent_count"
     echo "     target: $target"
   else
@@ -120,7 +120,7 @@ if [ -f "$LOG_FILE" ]; then
   _recent_fails=$(tail -20 "$LOG_FILE" | grep -c 'spawn-failed' 2>/dev/null || echo "0")
   _recent_fails=$(echo "$_recent_fails" | tr -d '[:space:]')
   if [ "${_recent_fails:-0}" -ge 3 ] 2>/dev/null; then
-    echo "  ⚠️  3+ recent spawn failures. Check: devin --version / claude --version"
+    echo "  ⚠️  3+ recent spawn failures. Check: claude --version"
     _help_needed=1
   fi
 fi
