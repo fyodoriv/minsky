@@ -1,6 +1,6 @@
 ---
 name: incremental-implementation
-description: Implement a task slice-by-slice, verifying the build and tests after each slice before moving to the next. Use during implementation of any task with 2+ slices (from /task-slice). Enforces the checkpoint-every-3-slices rule and the "codebase must build after every increment" invariant. Complements task-slice (which plans) — this skill executes the plan.
+description: Implement a task slice-by-slice, verifying the build and tests after each slice before moving to the next. Use when implementing any task with 2+ slices (from /task-slice). Enforces the checkpoint-every-3-slices rule and the "codebase must build after every increment" invariant. Complements task-slice (which plans) — this skill executes the plan.
 allowed-tools: Bash, Read, Edit
 ---
 

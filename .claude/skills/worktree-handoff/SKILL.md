@@ -1,6 +1,6 @@
 ---
 name: worktree-handoff
-description: Compact the current worktree session into a handoff document that the tick-loop can include in the next worker's brief. Use when a task iteration is ending, a worker is about to be evicted, or the session context needs to survive a daemon restart. Saves to .minsky/worker-handoff-<task-id>.md at a predictable path the tick-loop reads.
+description: Compact the current worktree session into a handoff document that the tick-loop can include in the next worker's brief. Use when a task iteration is ending, a worker is about to be evicted, or the session context needs to survive a daemon restart. Saves to .minsky/worker-handoff-{task-id}.md, a predictable path the tick-loop reads.
 allowed-tools: Bash, Read, Write
 ---
 
