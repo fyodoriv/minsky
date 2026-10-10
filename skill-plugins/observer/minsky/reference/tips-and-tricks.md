@@ -6,7 +6,7 @@ This file exists so the observer skill stays short. It holds the §8 operational
 
 ## Contents
 
-- 8. Tips & tricks (operational knowledge)
+- §8 Tips & tricks (operational knowledge)
   - Command timeout discipline
   - Key files to read
   - Per-agent quirks
@@ -52,7 +52,7 @@ Every command should complete in <30s or be run non-blocking:
 
 - Brief delivery: stdin (`child.stdin.end(brief)`).
 - Typical iteration time: 3-10 min.
-- Watchdog: 900s default, overridable via `MINSKY_CLAUDE_PRINT_TIMEOUT_MS`.
+- Watchdog: computed from iteration history (rule 14b, dynamic settings). Do not pin it with an env var; see `docs/DEPRECATED.md` for the escape hatch.
 - May hang with 0% CPU — the 2026-05-07 hang ran 1h56m. The watchdog exists for this.
 
 **Aider / local** (`--local` mode):

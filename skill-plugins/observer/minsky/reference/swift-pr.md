@@ -6,7 +6,7 @@ This file exists so the observer skill stays short. It holds the full §5 Swift-
 
 ## Contents
 
-- 5. Swift-PR (the escalation path)
+- §5 Swift-PR (the escalation path)
   - Picking the upstream repo
   - The PR body template
   - The PR creation commands
