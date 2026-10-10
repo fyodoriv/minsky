@@ -191,6 +191,10 @@ Observed 2026-05-21 in `novel/tui/`: PR #639's `test/*.test.ts` files referenced
 
 Fix-class during conflict resolution: when you take main's source over PR's source, you must ALSO take main's tests (or delete PR's tests that reference the rejected API). The orphan-test detector is filed as a TASKS.md follow-up.
 
+## The full anti-pattern family
+
+Read [reference/anti-pattern-family.md](reference/anti-pattern-family.md) for the five forbidden "close instead of merge" variants (close-with-preservation, defer-via-task, mark-as-blocked-and-move-on, template-stub PR bodies, preserve-via-patch-file), the only acceptable closes, the per-PR merge workflow, and the substrates already in place.
+
 ## Anchor
 
 - `vision.md` § 18 — the iron rule itself

@@ -1,9 +1,17 @@
----
-name: pr-merge-no-shortcuts
-description: When the operator says "merge all PRs" or any equivalent directive to drain a PR backlog, this skill is mandatory. Anti-patterns documented here are forbidden by vision.md rule #18 (Merge means MERGE). Trigger phrases — "merge all PRs", "drain the queue", "land everything", "until none remain", "until everything is merged". Skill content is the durable substrate against the 2026-05-21 close-with-preservation regression.
----
+# PR merge — anti-pattern family and the merge workflow
 
-# PR-merge: no shortcuts
+This file exists to keep the full rule-#18 catalogue next to the `pr-merge-no-shortcuts` skill. It holds the five forbidden close-instead-of-merge variants, the only acceptable closes, the per-PR merge workflow, and the substrates already in place. It was moved here from the retired `skill-plugins/pr-merge-no-shortcuts/minsky/` copy so there is one installed skill.
+
+## Contents
+
+- What the operator actually wants when they say "merge"
+- The anti-pattern family (FORBIDDEN)
+- The only acceptable closes (per rule #18)
+- The merge workflow (per-PR, for real)
+- Substrates already in place
+- When you're tempted
+- Anchors
+
 
 ## What the operator actually wants when they say "merge"
 

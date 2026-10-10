@@ -1,6 +1,6 @@
 ---
 name: cli-consolidation
-description: Apply rule #16 "default by default" specifically to CLI surface design — fold new functionality into existing commands as flags or defaults rather than creating new subcommands. Use this skill any time the agent considers `minsky <new-subcommand>` or any new CLI verb in any repo Minsky governs.
+description: Apply rule #16 "default by default" specifically to CLI surface design — fold new functionality into existing commands as flags or defaults rather than creating new subcommands. Use this skill when the agent considers a new `minsky` subcommand or any new CLI verb in any repo Minsky governs.
 triggers:
   - user
   - model
