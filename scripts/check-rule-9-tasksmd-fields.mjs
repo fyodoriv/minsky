@@ -28,10 +28,11 @@
 //   principles").
 // Conformance: full — pure function over TASKS.md text.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { repoFromArgv } from "./lib/repo-arg.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
@@ -49,10 +50,14 @@ const REPO_ROOT = resolve(HERE, "..");
  *  allowlist (when a grandfathered task is backfilled) is a one-line
  *  diff in the data file, not a code change here.
  *
+ *  Another repo (`--repo`) without the file grandfathers nothing.
+ *
+ *  @param {string} [root]
  *  @returns {ReadonlySet<string>}
  */
-function loadGrandfathered() {
-  const path = resolve(REPO_ROOT, ".prereg-allowlist");
+function loadGrandfathered(root = REPO_ROOT) {
+  const path = resolve(root, ".prereg-allowlist");
+  if (root !== REPO_ROOT && !existsSync(path)) return Object.freeze(new Set());
   const text = readFileSync(path, "utf8");
   return Object.freeze(
     new Set(
@@ -178,9 +183,11 @@ function main() {
     return;
   }
 
-  const tasksMd = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
+  const repo = repoFromArgv(argv, REPO_ROOT);
+  const allowlist = repo === REPO_ROOT ? RULE_9_GRANDFATHERED : loadGrandfathered(repo);
+  const tasksMd = readFileSync(resolve(repo, "TASKS.md"), "utf8");
   const blocks = parseRule9Blocks(tasksMd);
-  const { blocking, grandfathered, clean } = classifyRule9Blocks(blocks, RULE_9_GRANDFATHERED);
+  const { blocking, grandfathered, clean } = classifyRule9Blocks(blocks, allowlist);
   process.stdout.write(
     `rule-9-tasksmd-fields: scanned ${blocks.length} task block(s); clean=${clean}, grandfathered=${grandfathered.length}, blocking=${blocking.length}\n`,
   );

@@ -31,6 +31,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { repoFromArgv } from "./lib/repo-arg.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
@@ -183,7 +184,7 @@ export function checkRule13SiblingAnchors(tasksMdText, siblingIds = SIBLING_P0_I
  * @returns {Promise<number>}
  */
 async function main() {
-  const tasksPath = resolve(REPO_ROOT, "TASKS.md");
+  const tasksPath = resolve(repoFromArgv(process.argv.slice(2), REPO_ROOT), "TASKS.md");
   const text = await readFile(tasksPath, "utf8");
   const blocks = extractAnchorsForIds(text, SIBLING_P0_IDS);
   const result = checkRule13SiblingAnchors(text);

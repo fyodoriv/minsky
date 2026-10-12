@@ -34,6 +34,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { repoFromArgv } from "./lib/repo-arg.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -64,10 +65,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /**
  * @param {string} base
  * @param {string} head
+ * @param {string} cwd  repo to diff
  * @returns {ChangedFile[]}
  */
-function getChangedFiles(base, head) {
+function getChangedFiles(base, head, cwd) {
   const out = execSync(`git diff --name-status ${base}...${head}`, {
+    cwd,
     encoding: "utf8",
   });
   return out
@@ -235,13 +238,13 @@ function main() {
   if (prBodyPath !== undefined && existsSync(prBodyPath)) {
     prBody = readFileSync(prBodyPath, "utf8");
   }
-  const repoRoot = resolve(HERE, "..");
+  const repoRoot = repoFromArgv(process.argv.slice(2), resolve(HERE, ".."));
   const tasksMd = readFileSync(resolve(repoRoot, "TASKS.md"), "utf8");
 
   /** @type {ChangedFile[]} */
   let changedFiles;
   try {
-    changedFiles = getChangedFiles(base, head);
+    changedFiles = getChangedFiles(base, head, repoRoot);
   } catch (e) {
     process.stderr.write(
       `rule-3 lint cannot compute diff: ${e instanceof Error ? e.message : String(e)}\n`,
