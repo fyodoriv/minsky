@@ -4,8 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
-> **Deprecated (2026-09-21).** No new features or deployments. Migration,
-> security, and critical repair only — see [docs/DEPRECATED.md](docs/DEPRECATED.md).
+> **Maintenance mode.** Not under active development, but still usable.
+> Fixes and small changes are welcome — see [docs/DEPRECATED.md](docs/DEPRECATED.md).
 
 ## What this is
 

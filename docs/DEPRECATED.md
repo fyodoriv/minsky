@@ -10,10 +10,11 @@ The list is consulted by `AGENTS.md` (which tells every agent to read this file 
 
 ## Repository status
 
-Minsky is deprecated as of 2026-09-21. Do not add new features or deployments.
-Keep existing installs, branches, and worktrees only for migration, security,
-or critical repair. New tooling automation belongs in AgentBrew and
-mirror-setup.
+Minsky is in maintenance mode: it is not under active development, but it is
+not deprecated. The owner may still use it to drive work in other repos.
+Fixes, security work, and small changes that a user of Minsky needs are in
+scope. Ask the owner before you start a large new feature. The do-not-invest
+list below still applies to the surfaces it names.
 
 ## What this file is not
 
