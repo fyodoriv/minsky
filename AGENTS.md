@@ -6,6 +6,8 @@
 > repos. Fixes, security work, and small changes that a user of Minsky needs
 > are in scope. Ask the owner before you start a large new feature.
 
+<!-- pattern: not-applicable — CLAUDE.md is a symlink to this file so Claude Code loads it; no new pattern -->
+
 ## What this file is
 
 This file is the canonical runbook for any AI agent (Claude Code, OMC personas, future tools) that works in the Minsky repo. It is a router: each section keeps the key instruction and links to the full text in [`docs/agents/`](docs/agents/). `CLAUDE.md` is a symlink to this file.
