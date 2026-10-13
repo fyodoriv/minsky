@@ -599,6 +599,18 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P1
 
+- [ ] `pnpm test` must never revert uncommitted changes in the checkout
+  - **ID**: test-suite-reverts-uncommitted-edits
+  - **Tags**: p1, data-safety, tests, scout
+  - **Competitive-goal**: protects `autonomous-merge-rate`: a gate that silently discards an agent's uncommitted work costs a full redo.
+  - **Details**: On 2026-10-13, while the agent-guide contract (#25) was being built, one `pnpm test` run reverted uncommitted edits to tracked files in the worktree; untracked files survived. Suspect: `scripts/git-shim-guard.test.mjs`, which runs `reset --hard`, `restore .`, and `checkout .` through `.claude/shims/git` with `MINSKY_GIT_SHIM_REAL_GIT=/usr/bin/true`. The shim honors that variable, so the real cause is not confirmed: find which test runs a real destructive git command in the repo, then make every such test run in a temp repo. The same test file also fails on unchanged `main`. AGENTS.md Gotchas says "Commit before `pnpm test`" until this is fixed.
+  - **Touches**: scripts/git-shim-guard.test.mjs, .claude/shims/git, vitest.config.ts
+  - **Hypothesis**: once destructive git commands in tests only run in temp repos, a `pnpm test` run changes zero tracked files in the checkout.
+  - **Success**: in a scratch worktree with a deliberate uncommitted edit to a tracked file, `pnpm test` leaves `git diff --stat` unchanged.
+  - **Pivot**: if the culprit cannot be found, add a vitest setup guard that fails any test file that changes `git status --porcelain` of the repo.
+  - **Measurement**: `echo x >> README.md && pnpm test; git diff --stat README.md` in a scratch worktree (must still show the edit).
+  - **Anchor**: vision.md rule #6 (stay alive) and rule #17 (proactive healing); Meszaros 2007, xUnit Test Patterns (fresh fixture).
+
 - [ ] A merged partial-progress PR must not hide its task from the picker for 7 days
   - **ID**: wip-merge-hides-task
   - **Competitive-goal**: drives `autonomous-merge-rate` up: a task hidden by a merged partial-progress PR cannot be picked, finished or merged for 7 days.
