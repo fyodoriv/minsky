@@ -6,43 +6,26 @@
 > repos. Fixes, security work, and small changes that a user of Minsky needs
 > are in scope. Ask the owner before you start a large new feature.
 
+<!-- pattern: not-applicable — CLAUDE.md is a symlink to this file so Claude Code loads it; no new pattern -->
+
 ## What this file is
 
-The canonical runbook for any AI agent (Claude Code, OMC personas, future tools) working in the Minsky repo. It tells you how to set up the workspace, run the daemon, claim a task from `TASKS.md`, and the operational rules — which rules apply, where to find them, and which are locally enforced.
-
-If you're an agent reading this for the first time, read in this order: `MILESTONES.md` (the roadmap), then `vision.md` (the constitution), then `TASKS.md` (the work queue), then come back here.
-
-**Before implementing any feature**, check `DEPRECATED.md` — it lists features that should NOT receive new work (hard scope-leak mode, observer-watch.sh, dashboard-web, hardcoded timeout env vars, manual stop/start flows). Use the replacement instead.
-
-This file keeps each rule and procedure short, with its name and the key instruction. The full text lives in [`docs/agents/`](docs/agents/): follow the link at each section for detail.
+This file is the canonical runbook for any AI agent (Claude Code, OMC personas, future tools) that works in the Minsky repo. It is a router: each section keeps the key instruction and links to the full text in [`docs/agents/`](docs/agents/). `CLAUDE.md` is a symlink to this file.
 
 ## What this file is not
 
-- **Not the constitution** — see [vision.md](./vision.md) for the 17 non-negotiable rules. This file references them but doesn't redefine them.
-- **Not the architecture doc** — see [ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the layered model, adapter pattern, and dependency table.
-- **Not the install guide** — see [INSTALL.md](./INSTALL.md) for first-time setup of a freshly-cloned host.
-- **Not a task list** — see [TASKS.md](./TASKS.md) for active work.
+- **Not the constitution** — see [vision.md](./vision.md) for the 17 non-negotiable rules.
+- **Not the architecture doc** — see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+- **Not the install guide** — see [INSTALL.md](./INSTALL.md).
+- **Not a task list** — see [TASKS.md](./TASKS.md).
 
-The `## Orchestrator discipline` and `### 15. Milestone alignment gate` sections below are **load-bearing** — they are cited by deterministic CI gates (`scripts/check-pr-self-grade.mjs`, `scripts/check-rule-6-let-it-crash.mjs`) and by `CHANGELOG.md`. Do not rename or renumber them.
+The `Orchestrator discipline` and `15. Milestone alignment gate` sections are **load-bearing**: CI gates (`scripts/check-pr-self-grade.mjs`, `scripts/check-rule-6-let-it-crash.mjs`) and `CHANGELOG.md` cite them. Do not rename or renumber them.
 
-## Repository setup
+## Start here
 
-```bash
-git clone https://github.com/fyodoriv/minsky.git
-cd minsky
-pnpm install            # prepare hook: (a) tsc -b builds all workspace dist/; (b) lefthook installs git hooks
-minsky daemon doctor    # verify health (no separate build step)
-```
+Minsky is an integration distribution: it connects existing tools into a system that works through a repo's `TASKS.md` and hands back draft PRs. It is not a framework; we do not build what already exists. Canonical repo: `github.com/fyodoriv/minsky`, branch `main`.
 
-No separate build step is needed. Details: [docs/agents/running-minsky.md](docs/agents/running-minsky.md).
-
-## Running minsky
-
-Run `minsky daemon start --hosts-dir <repos-parent-dir>` to work across repos in the background, or add `--local` for local models only (zero cloud tokens). Manage it with `minsky daemon status`, `logs`, and `stop`. One-shot verbs are `minsky transform`, `minsky solve <task-id>`, and `minsky run --once --host <dir>`. The full command list and the legacy flag forms are in [docs/agents/running-minsky.md](docs/agents/running-minsky.md).
-
-### Per-machine agent config — `~/.minsky/config.json`
-
-**Always check this file first** when starting minsky on any machine. It picks the agents and models: `cloud_agent`, `cloud_agent_model` (the brain), `local_agent`, `local_agent_model` (the workers), `review_model`, and `brain_effort`. Env vars override it for one session. Schema and resolution order: [docs/agents/running-minsky.md](docs/agents/running-minsky.md).
+Read this file, then [`MILESTONES.md`](MILESTONES.md), [`vision.md`](vision.md), and `TASKS.md`. Before you build a feature, check [`docs/DEPRECATED.md`](docs/DEPRECATED.md). The docs map is [`docs/README.md`](docs/README.md). Code here is AI-authored; do not add attestation trailers or co-author tags ([`CONTRIBUTING.md`](CONTRIBUTING.md)).
 
 **Agent support matrix:**
 
@@ -52,149 +35,111 @@ Run `minsky daemon start --hosts-dir <repos-parent-dir>` to work across repos in
 | `aider` | — | ✅ | `--message-file` | `--model` via config args |
 | `openhands` | 🟡 schema accepted, runtime pending 2026-06-01 (OpenHands Agent Canvas CLI — GitHub issue `OpenHands/OpenHands#14374`) | 🟡 planned | `stdin` (anticipated; confirms on June 1) | `--model` (LLM-agnostic via OpenAI-compatible API) |
 
-The `openhands` row is schema-only until its external dependency ships; the daemon refuses to spawn it until then. Details: [docs/agents/running-minsky.md](docs/agents/running-minsky.md).
+Per-machine agents and models: `~/.minsky/config.json`. Per-host task source: `<host>/.minsky/repo.yaml`. Details: [docs/agents/running-minsky.md](docs/agents/running-minsky.md).
 
-### Per-host overlay — `<host>/.minsky/repo.yaml`
+## Commands
 
-`task_source` picks where the daemon reads work: `tasks-md` (default) or `github-issues`. An unknown value fails loud. Details: [docs/agents/running-minsky.md](docs/agents/running-minsky.md).
+Run from the repo root, with the pinned Node: prefix each line with `fnm exec --using=24.14.0`.
 
-## Identity
+| Task | Command |
+|---|---|
+| Install (also builds and installs git hooks) | `pnpm install --frozen-lockfile` |
+| Health check | `minsky daemon doctor` |
+| One test file | `pnpm exec vitest run <path>.test.ts` |
+| All unit tests (commit first, see Gotchas) | `pnpm test` |
+| Integration tests | `pnpm test:integration` |
+| Lint / typecheck | `pnpm lint` / `pnpm typecheck` |
+| Pre-PR lint stack | `pnpm pre-pr-lint` |
+| Milestone alignment (rule 15) | `node scripts/check-milestone-alignment.mjs` |
+| Full gate (slow; run it in the background) | `pnpm check` |
+| Run on a host once | `minsky run --once --host <dir>` |
 
-You're working on **Minsky** — an integration distribution that connects existing tools into a viable cybernetic system that produces software 24/7 and stays alive indefinitely. Minsky is not a framework. We do not build what already exists.
+## Where to change what
 
-Code in this repo is AI-authored — cloud agents and local models both count. Don't add an attestation trailer, footer, or co-author tag to commits; provenance is established by live observation of the session, not by self-declaration. The convention is descriptive, not mechanically enforced. Full policy at [`CONTRIBUTING.md`](CONTRIBUTING.md). See `vision.md` § "What Minsky is" for full identity.
-
-## Constitutional rules (non-negotiable)
-
-These come from `vision.md`. Violations are reported by the MAPE-K loop's specification monitor (`claude-spec-monitor`) — runtime specification monitoring per Havelund & Goldberg 2008. Each rule's full text is in [docs/agents/constitutional-rules.md](docs/agents/constitutional-rules.md).
-
-| # | Rule | The key instruction |
+| I want to… | Change | Update this doc too |
 |---|---|---|
-| 1 | Don't reinvent the wheel | Search for an existing tool first and wrap it in an adapter. New code is an extractable OSS package. |
-| 2 | Every dependency through an interface | No tool name in business logic: interface file, vendor file, `selfTest()`, and an `ARCHITECTURE.md` row. |
-| 3 | Test-first, metric-first, doc-first | Failing test, metric with a threshold, and docs in the same commit. Given/When/Then scenarios come before tests. |
-| 3a | Runtime invariants | Every production bug becomes a runtime invariant checked before each iteration. |
-| 3b | Integration tests for CLI features | See below. |
-| 4 | Everything measurable, everything visible | New components emit OpenTelemetry; metrics reach a dashboard. |
-| 5 | Theoretical grounding | Cite named patterns; don't invent terminology. |
-| 6 | Stay alive | Handle process death, rate limits, and failures. Let it crash under a supervisor. |
-| 7 | Chaos engineering | List failure modes with a deterministic chaos test and blast radius. No silent retry. |
-| 8 | Pattern conformance | Every new artifact adds a row to the vision.md pattern conformance index in the same commit. |
-| 9 | Pre-registered hypothesis-driven development (iron) | Hypothesis, success, pivot, measurement, and anchor before code. No exemption. |
-| 10 | Deterministic enforcement (iron) | Every rule is a deterministic CI check. LLM checks are advisory only. |
-| 11 | Default by default (rule #16) | New behaviour ships as the default. **CLI surface consolidation**: prefer flags or defaults over new subcommands. |
-| 12 | Proactive healing (rule #17, iron) | Observation IS the fix: same-session action, fix the class, heal before reporting. |
-| 14b | Dynamic settings | See below. |
+| Change the CLI | `bin/minsky`, `novel/*/src/` | README, [running-minsky.md](docs/agents/running-minsky.md) |
+| Change the tick loop or budget | `novel/tick-loop/` | [machine-budget.md](docs/machine-budget.md) |
+| Change the observer or heals | `novel/observer/` | [self-diagnose-authoring.md](docs/self-diagnose-authoring.md) |
+| Add or change an adapter | `novel/adapters/<name>/` (interface, vendor file, `selfTest()`) | [ARCHITECTURE.md](docs/ARCHITECTURE.md) dependency table |
+| Change agent personas | `novel/personas/` | [working-tasks.md](docs/agents/working-tasks.md) |
+| Add a deterministic lint | `scripts/check-*.mjs` + `.test.mjs`, wired in `.github/workflows/ci.yml` | [constitutional-rules.md](docs/agents/constitutional-rules.md) |
+| Change launchd or systemd units | `distribution/launchd/`, `distribution/systemd/` | [machine-budget.md](docs/machine-budget.md) |
+| Add or change a metric | `scripts/`, `METRICS.md` | [METRICS.md](docs/METRICS.md) |
+| Add a competitor analysis | `competitors/<name>.md` | `competitors/README.md` |
+| Add or close a task | `TASKS.md` (rule-9 fields, `**Touches**:`) | none |
+| Add a doc | `docs/<name>.md` | a row in [docs/README.md](docs/README.md) |
+
+## Rules
+
+### Constitutional rules (non-negotiable)
+
+The 17 rules live in [vision.md](./vision.md); full text per rule: [docs/agents/constitutional-rules.md](docs/agents/constitutional-rules.md).
+
+| # | Rule | Key instruction |
+|---|---|---|
+| 1 | Don't reinvent the wheel | Find an existing tool and wrap it in an adapter. |
+| 2 | Every dependency through an interface | No tool name in business logic; `selfTest()`; an `ARCHITECTURE.md` row. |
+| 3 | Test-first, metric-first, doc-first | Failing test, metric with a threshold, and docs in the same commit. |
+| 3a | Runtime invariants | Every production bug becomes a runtime invariant. |
+| 3b | Integration tests for CLI features | Each CLI feature ships a test in `test/integration/` that runs the real binary. |
+| 4 | Everything measurable | New components emit OpenTelemetry. |
+| 5 | Theoretical grounding | Cite named patterns. |
+| 6 | Stay alive | Handle process death and rate limits; let it crash under a supervisor. |
+| 7 | Chaos engineering | A deterministic chaos test per failure mode. No silent retry. |
+| 8 | Pattern conformance | Each new artifact adds a row to the vision.md pattern index. |
+| 9 | Pre-registered hypothesis (iron) | Hypothesis, success, pivot, measurement, anchor before code. |
+| 10 | Deterministic enforcement (iron) | Every rule is a CI check; LLM checks are advisory only. |
+| 11 | Default by default (rule #16) | New behavior ships as the default; prefer flags to new subcommands. |
+| 12 | Proactive healing (rule #17, iron) | Fix the observed class in the same session. |
+| 14b | Dynamic settings | Compute timeouts and limits from history; no hardcoded values. |
 | 15 | Milestone alignment gate | See below. |
-
-### 3b. Integration tests for CLI features (reinforcement)
-
-Every CLI-facing feature ships an integration test in `test/integration/`. It runs the real binary on fixture data and asserts the output the operator sees. Unit tests alone are not enough. [Full text](docs/agents/constitutional-rules.md).
-
-### 14b. Dynamic settings (no hardcoded timeouts)
-
-Timeouts, intervals, thresholds, and limits are computed from iteration history on this machine. Compute from data first, hard default second, env override third, and log the value. [Full text](docs/agents/constitutional-rules.md).
 
 ### 15. Milestone alignment gate (supersedes task picking)
 
-Before picking ANY implementation task, check that seven surfaces match the current milestone in `MILESTONES.md`: `README.md`, the quickstart, `vision.md`, `user-stories/`, integration tests, logs and observability, and `METRICS.md`. A stale surface is your first task. This is iron: no exemption. Run `scripts/check-milestone-alignment.mjs` and put its output in the PR body as a `Milestone alignment check` section. [Full text](docs/agents/constitutional-rules.md).
+Before you pick an implementation task, check that the seven surfaces in `MILESTONES.md` match the current milestone. A stale surface is your first task. Put the output of `scripts/check-milestone-alignment.mjs` in the PR body as `Milestone alignment check`.
 
-## Orchestrator discipline (sub-agent launches)
+### Orchestrator discipline (sub-agent launches)
 
-When the harness launches sub-agents in parallel (worktree-isolated PRs), two rules are non-negotiable. Both came from the post-batch audit of the #22-#26 cycle and are now mechanically enforced.
+1. At most two parallel agents may touch a shared file (`ci.yml`, `TASKS.md`, root configs, `vision.md`, `AGENTS.md`, `README.md`).
+2. Every PR body has a `Hypothesis self-grade` block: `Predicted:`, `Observed:`, `Match:`, `Lesson:`. The `pr-self-grade` gate checks it.
 
-1. **At most two parallel agents may touch any shared file.** Specifically `.github/workflows/ci.yml`, `TASKS.md`, root `vitest.config.ts`, root `tsconfig.json`, and any `vision.md` / `AGENTS.md` / `README.md` are shared. If a batch needs to ship N>2 PRs that all add a CI job, batch their job-additions into a single coordinator PR (one agent ships all N scripts; one PR wires them all into ci.yml at the end). The orchestrator must verify file-set disjointness before launch; this check is itself part of the brief.
+Full text: [operating-notes.md](docs/agents/operating-notes.md#orchestrator-discipline-sub-agent-launches).
 
-2. **Every sub-agent's PR body must include a `Hypothesis self-grade` block.** The block carries four lines: `Predicted: …` (re-states the hypothesis), `Observed: …` (the actual measurement output), `Match: yes / no / partial`, `Lesson: …`. This closes the loop on rule #9's pre-registered HDD discipline — pre-registration without observation-vs-prediction is half a rule. The deterministic CI gate (`pr-self-grade`, runs on `pull_request` events) reads the PR body and fails the merge if any of the four lines is missing or empty. The orchestrator's brief template MUST instruct the sub-agent to fill the block; failures here are an orchestrator bug, not a sub-agent bug.
+### `**Touches**:` field on task blocks
 
-These rules apply to every Agent-tool-launched sub-agent. Human-authored PRs are subject to rule (2) only — the same self-grade block, enforced by the same gate.
+P0/P1 task blocks declare `**Touches**: <globs>` or `**Touches**: <none>` ([operating-notes.md](docs/agents/operating-notes.md)).
 
-## How to claim and work a task
+### Test conventions and documentation rules
 
-Tasks live in `TASKS.md` and follow the [tasks.md spec](https://github.com/tasksmd/tasks.md).
+Tests sit next to their code. Every doc opens with one paragraph on why it exists. Details: [conventions.md](docs/agents/conventions.md).
 
-0. Run `/karpathy-disciplines` — prime working memory with the four engineering disciplines BEFORE reading the task block. This takes seconds and prevents the most common worker failure modes (silent assumption, scope creep, vague completion).
-1. Run `/next-task` (installed by `setup.sh` via `npx @tasks-md/cli install`)
-2. The command reads `TASKS.md`, picks the highest-priority unblocked task, claims it with `(@your-agent-id)`, and orients you
-3. Follow the constitutional rules above
-4. When the task is complete, **remove its entire block from `TASKS.md`** — history lives in git log per the tasks.md spec
-5. Commit and push
+### Never
 
-### Task hygiene
+Never commit secrets, `node_modules/`, build output, or runtime state. Never edit `vision.md` from a task. Never re-add Windsurf or Devin; Augment is frozen. Never run `minsky enable-autostart` unless the owner asks. More: [operating-notes.md](docs/agents/operating-notes.md).
 
-Delete a delivered task block; never keep it as `**Blocked**: … DELIVERED; block retained`. The `no-delivered-retained-blocks` gate rejects that. Details: [docs/agents/working-tasks.md](docs/agents/working-tasks.md).
+## Gotchas
 
-### Tool-call discipline (load-bearing for non-Claude models)
+- **Commit before `pnpm test`.** A git-guard test (`scripts/git-shim-guard.test.mjs`) can revert uncommitted tracked changes in the checkout when the guard does not block. Untracked files survive.
+- Use the pinned Node (`.node-version` is 24.14.0): `fnm exec --using=24.14.0 pnpm …`. The machine default differs.
+- This repo sets a local `core.hooksPath=.git/hooks` (lefthook). Keep it; the global hooks path points elsewhere.
+- Work in a git worktree (for example `<repos-parent>/wt/<name>`) and run `pnpm install` there.
+- The owner's global gitignore lists `TASKS.md`. Fixture git repos in tests need `GIT_CONFIG_GLOBAL=/dev/null`.
+- PR-body gates (`pr-vision-trace`, `pr-security-review`, `pr-self-grade`) read the live body. Edit the body, then `gh run rerun <id> --failed`. The aggregate `ci` job fails only because one of them failed.
+- `scripts/check-readme-byte-budget.mjs` caps the README size. Put detail in `docs/`.
+- `scripts/check-docs-frame-coherence.mjs` requires the H1, `>` tagline, and "What this file is / is not" frame on this file.
 
-**EVERY reply you emit must include a tool call.** A prose-only reply ends the conversation in OpenHands-style frameworks, so the work never ships. Follow each planning sentence with its tool call in the same reply. Details: [docs/agents/working-tasks.md](docs/agents/working-tasks.md).
+## Delivery
 
-### Choosing an OMC mode for a task
+1. Branch `type/short-description` from `main`, in a worktree.
+2. Commit, then run `pnpm check` (or the relevant tests plus `pnpm lint` and `pnpm typecheck`).
+3. Use a conventional commit header; no attestation trailers.
+4. The PR body has `## Summary`, `## Details`, `## Docs`, `## Vision trace`, `## Security & privacy`, `## Hypothesis self-grade`, and `## Milestone alignment check`.
+5. Merge when every CI check is green. Remove the worktree and the branch.
 
-Pick the mode from the task's `**Tags**`: `/autopilot` by default; `/team N:role` for `multi-domain` or `coordination`; `/ultrawork` for `parallel` or `refactor`; `/ralph` for `relentless` or `verify-required`. Details: [docs/agents/working-tasks.md](docs/agents/working-tasks.md).
+## Docs upkeep
 
-### Investor / growth-hacker personas
-
-These OMC personas (`product-manager`, `product-analyst`, `analyst`) only run when the task's `**Tags**` includes one of: `business`, `growth`, `revenue`, `customer`, `pricing`.
-
-### All user interface is P0-P1 (by definition)
-
-Every user-facing CLI surface, help text, error message, dashboard widget, `init` flow, and `doctor` output is P0 or P1, never P2-P3. Keep one canonical command per operation and sane defaults. Details: [docs/agents/working-tasks.md](docs/agents/working-tasks.md).
-
-## File and folder conventions
-
-**Filename casing:** `vision.md` is lowercase; `AGENTS.md`, `TASKS.md`, `ARCHITECTURE.md`, `LICENSE`, and `README.md` are uppercase; everything else is lowercase with hyphens. The folder layout is in [docs/agents/conventions.md](docs/agents/conventions.md).
-
-## Code conventions
-
-TypeScript for `novel/` packages, Prettier defaults, one adapter per file with a `selfTest()`, JSDoc on public functions, and no business logic inside adapters. Details: [docs/agents/conventions.md](docs/agents/conventions.md).
-
-## Test conventions
-
-Unit tests sit next to their code; integration tests run against real dependencies; coverage is 80% statements / 70% branches for `novel/`. Details: [docs/agents/conventions.md](docs/agents/conventions.md).
-
-## Documentation rules
-
-Every doc opens with one paragraph on why it exists. Cross-link docs. When code and docs disagree, fix both in the same commit. Don't hand-maintain timestamps. Details: [docs/agents/conventions.md](docs/agents/conventions.md).
-
-## What to do when stuck
-
-Re-read `vision.md`, check `research.md` and `competitors/`, then mark the task blocked with a reason, file the blocker as a task, and move on. Do not loop. Details: [docs/agents/operating-notes.md](docs/agents/operating-notes.md).
-
-## Operator directive vocabulary (load-bearing translations)
-
-If the literal reading of an operator phrase ("monitor it", "fix all those issues") would stop you short of shipping a PR, the active reading is correct. Examples: [docs/agents/operating-notes.md](docs/agents/operating-notes.md).
-
-## `**Touches**:` field on task blocks (parallel-launch coordination)
-
-P0/P1 task blocks must declare `**Touches**:` file globs, or `**Touches**: <none>`. The `check-touches-field` lint enforces it. Format and rules: [docs/agents/operating-notes.md](docs/agents/operating-notes.md).
-
-## Pushback is welcome
-
-If a task description is wrong, or a constitutional rule is being misapplied, push back. Add a `**Pushback**:` block to the task explaining the issue. The human or the MAPE-K loop will resolve it. Silent compliance with a bad spec is itself a constitutional violation.
-
-## Pipeline-managed repos — dedicated worktree pattern
-
-For a multi-PR batch, never work in the main checkout; other agents reset it. Use a dedicated worktree and remove it after the merge. Steps, plus the PR-drain tactics in [`.claude/skills/pr-merge-no-shortcuts/SKILL.md`](.claude/skills/pr-merge-no-shortcuts/SKILL.md): [docs/agents/operating-notes.md](docs/agents/operating-notes.md).
-
-## What never to commit
-
-Never commit `.env` files or any secret material; `node_modules/`, build artifacts, or runtime state (see `.gitignore`); hardcoded tool names in business logic (vendor lock-in, caught by the dep-interface lint check); or edits to `vision.md` from a working task (only the MAPE-K loop's specification-monitor process amends the behavioral spec).
-
-## Frozen agents
-
-Windsurf and Devin support was removed on 2026-10-08 (owner decision). Do not re-add runners, launchers, sync targets, config keys, or tests for them. Augment (Auggie) stays deprecated and frozen (owner decision 2026-10-02): keep its existing paths and tests, never implement a fix or a feature for it as a tool, and never file tasks for it. Competitor research and benchmark readings about Devin or Augment Code are not tool support and stay in scope. If work for a supported backend breaks a frozen agent's existing test, skip that test with a note naming this section.
-
-## Reading next
-
-This repo conforms to the [`load-project-context`](https://github.example.com/example-org/agentbrew/blob/main/src/catalog.yaml) canonical-doc layout (cardinal docs at root + multi-file dirs at root or `docs/`). Any agentbrew-managed agent session entering this repo auto-loads the docs below into context via the catalog rule + Claude Code `SessionStart` hook. Read them in this order:
-
-- `MILESTONES.md` — the roadmap, per-milestone capability tables, what minsky will never do
-- `vision.md` — the 17-rule constitution; load-bearing for every constitutional decision
-- `ARCHITECTURE.md` — the layered model + adapter pattern + dependency table
-- `TASKS.md` — what to do (137 open tasks; the milestone-alignment-gate task is always first)
-- `METRICS.md` — the 10 canonical metrics (currently stubs — M1 wires real observations)
-- `research.md` — what's in the stack and why
-- `user-stories/` — what success looks like, with metrics
-- `competitors/` — per-competitor strategic analysis (M1.10 corpus + delegate/contribute/absorb verdicts)
-- `DEPRECATED.md` — features that should NOT receive new work; check before implementing
-- `INSTALL.md` — first-time setup of a freshly-cloned host
+- Every behavior change updates its docs in the same PR. The routing table names the doc.
+- A gotcha that cost you time goes into `## Gotchas`, or becomes a lint if a machine can check it.
+- Every PR body has `## Docs`: the docs you changed, or `Docs: none — <reason>`.
+- A new top-level `docs/*.md` needs a row in [docs/README.md](docs/README.md). `scripts/agent-guide-contract.test.mjs` checks this file, the map, and the README opening.

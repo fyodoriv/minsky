@@ -27,6 +27,8 @@ const REPO_ROOT = resolve(HERE, "..");
 export const CARDINAL_CASING = Object.freeze({
   "vision.md": "vision.md",
   "agents.md": "AGENTS.md",
+  // Claude Code loads only this exact name; it is a symlink to AGENTS.md.
+  "claude.md": "CLAUDE.md",
   "tasks.md": "TASKS.md",
   "architecture.md": "ARCHITECTURE.md",
   license: "LICENSE",

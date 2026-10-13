@@ -141,6 +141,31 @@ A cheat-sheet of the 17 rules, with links:
 16. **Default by default** — when you implement a fix, make it the default ([§ 16](../vision.md#16-default-by-default))
 17. **Proactive healing** — observation IS the fix; same session, same PR ([§ 17](../vision.md#17-proactive-healing))
 
+## Every other document, by type
+
+The paths above cover the main reading. This index lists the remaining top-level docs, grouped by [Diátaxis](https://diataxis.fr/) type. Audience: **human** (operators and reviewers), **agent** (coding agents changing this repo), or **both**. A new top-level `docs/*.md` file needs a row here; `scripts/agent-guide-contract.test.mjs` checks it.
+
+| Type | Doc | Answers | Audience |
+|---|---|---|---|
+| How-to | [self-diagnose-authoring.md](self-diagnose-authoring.md) | How do I add a self-diagnosis check that files a P0 task? | agent |
+| How-to | [observability-8h-run.md](observability-8h-run.md) | How do I measure an 8-hour Minsky run? | both |
+| How-to | [release.md](release.md) | How are releases cut? | both |
+| Reference | [METRICS.md](METRICS.md) | What does each metric mean, and how do I view it? | both |
+| Reference | [cost-tiers.md](cost-tiers.md) | What does each cost tier spend? | human |
+| Reference | [machine-budget.md](machine-budget.md) | How does Minsky match the machine-use budget? | both |
+| Reference | [heal-class-coverage-matrix.md](heal-class-coverage-matrix.md) | Which failure classes have a heal? (generated) | agent |
+| Reference | [bash-runner-observability.md](bash-runner-observability.md) | What does the bash runner log? | agent |
+| Reference | [enterprise-deployment-options.md](enterprise-deployment-options.md) | Which enterprise deployment options exist? | human |
+| Explanation | [orchestrator-fanout.md](orchestrator-fanout.md) | Why does Minsky pin a process role before it spawns? | agent |
+| Explanation | [language-strategy.md](language-strategy.md) | Why TypeScript and not Python? | both |
+| Explanation | [prior-art-and-name-collisions.md](prior-art-and-name-collisions.md) | Which Minsky is this, and where do its ideas come from? | human |
+| Explanation | [validated-learnings.md](validated-learnings.md) | Which experiments held up after merge? | both |
+| Record | [research-log.md](research-log.md) | Which tools did we evaluate and watch? | agent |
+| Record | [research-a2a-mcp-2026-05-28.md](research-a2a-mcp-2026-05-28.md) | Research: agent-to-agent and MCP. | agent |
+| Record | [research-docker-sandbox-2026-06-02.md](research-docker-sandbox-2026-06-02.md) | Research: the Docker sandbox adapter. | agent |
+| Record | [research-hooks-vs-rules-2026-05-27.md](research-hooks-vs-rules-2026-05-27.md) | Research: hooks versus rules. | agent |
+| Record | [strategic-review-2026-05-22-continue-or-wrap-more.md](strategic-review-2026-05-22-continue-or-wrap-more.md) | Review: continue building or wrap more? | human |
+
 ## Found a typo or unclear doc?
 
 Open a PR. Treat docs the same as code: a failing test (the unclear sentence), then a fix, then the explanation in the commit message.

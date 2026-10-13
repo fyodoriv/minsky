@@ -70,3 +70,25 @@ See [`.claude/skills/pr-merge-no-shortcuts/SKILL.md` § Operational discipline](
 ## Size note on vision.md
 
 **Size note**: `vision.md` is intentionally long (~717 lines, ~1.2 MB) — it's the constitution, not a quickstart. Agents loading it should treat it as system-prompt-level context, not a tutorial. The size anomaly (89 lines exceed 1000 chars each — single-paragraph constitutional clauses) is tracked as a P2 in `TASKS.md` for potential chunking; until then, agents read it whole and treat it as load-bearing.
+
+## Orchestrator discipline (sub-agent launches)
+
+When the harness launches sub-agents in parallel (worktree-isolated PRs), two rules are non-negotiable. Both came from the post-batch audit of the #22-#26 cycle and are now mechanically enforced.
+
+1. **At most two parallel agents may touch any shared file.** Specifically `.github/workflows/ci.yml`, `TASKS.md`, root `vitest.config.ts`, root `tsconfig.json`, and any `vision.md` / `AGENTS.md` / `README.md` are shared. If a batch needs to ship N>2 PRs that all add a CI job, batch their job-additions into a single coordinator PR (one agent ships all N scripts; one PR wires them all into ci.yml at the end). The orchestrator must verify file-set disjointness before launch; this check is itself part of the brief.
+
+2. **Every sub-agent's PR body must include a `Hypothesis self-grade` block.** The block carries four lines: `Predicted: …` (re-states the hypothesis), `Observed: …` (the actual measurement output), `Match: yes / no / partial`, `Lesson: …`. This closes the loop on rule #9's pre-registered HDD discipline — pre-registration without observation-vs-prediction is half a rule. The deterministic CI gate (`pr-self-grade`, runs on `pull_request` events) reads the PR body and fails the merge if any of the four lines is missing or empty. The orchestrator's brief template MUST instruct the sub-agent to fill the block; failures here are an orchestrator bug, not a sub-agent bug.
+
+These rules apply to every Agent-tool-launched sub-agent. Human-authored PRs are subject to rule (2) only — the same self-grade block, enforced by the same gate.
+
+## What never to commit
+
+Never commit `.env` files or any secret material; `node_modules/`, build artifacts, or runtime state (see `.gitignore`); hardcoded tool names in business logic (vendor lock-in, caught by the dep-interface lint check); or edits to `vision.md` from a working task (only the MAPE-K loop's specification-monitor process amends the behavioral spec).
+
+## Frozen agents
+
+Windsurf and Devin support was removed on 2026-10-08 (owner decision). Do not re-add runners, launchers, sync targets, config keys, or tests for them. Augment (Auggie) stays deprecated and frozen (owner decision 2026-10-02): keep its existing paths and tests, never implement a fix or a feature for it as a tool, and never file tasks for it. Competitor research and benchmark readings about Devin or Augment Code are not tool support and stay in scope. If work for a supported backend breaks a frozen agent's existing test, skip that test with a note naming this section.
+
+## Pushback is welcome
+
+If a task description is wrong, or a constitutional rule is being misapplied, push back. Add a `**Pushback**:` block to the task explaining the issue. The human or the MAPE-K loop will resolve it. Silent compliance with a bad spec is itself a constitutional violation.
