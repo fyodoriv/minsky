@@ -31,7 +31,7 @@ npx -y @fyodoriv/minsky
 
 Installs Minsky, writes `~/.minsky/config.json`, and runs one round. No API key needed — uses your agent login.
 
-**Uninstall:** `minsky uninstall --force`. **Contributors:** `git clone`, `pnpm install`, then `bin/minsky`.
+**Uninstall:** `minsky uninstall --force`. **Contributors:** `pnpm install`, then read [AGENTS.md](AGENTS.md). **Docs:** [docs/README.md](docs/README.md).
 
 ## Run
 
@@ -64,4 +64,4 @@ Full table: [docs/competitive-comparison.md](docs/competitive-comparison.md).
 
 ## License
 
-MIT. Next: [docs/README.md](docs/README.md) · [AGENTS.md](AGENTS.md) · [vision.md](vision.md).
+MIT. The rules: [vision.md](vision.md).
