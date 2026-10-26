@@ -11,7 +11,7 @@
 
 Minsky is a background program that does coding work. You point it at a git repo (a **host**) with a plain-text to-do list (`TASKS.md`); Minsky picks the most important unfinished task and asks a coding **agent** — Claude Code, Aider, or a local model — to do it.
 
-It hands you each result as a draft. It never merges on its own, never touches `main`, runs through the night, and restarts if it crashes. Everything runs on your machine, as you, so the work shows up under your name.
+It hands you each result as a draft. It never merges on its own, never touches `main`, runs through the night, and restarts if it crashes. Everything runs on your machine, as you.
 
 Minsky adds what a bare agent lacks: a task picker, 18 numbered rule-checks run as CI lints on every draft, and an experiment harness where each change states a measurable hypothesis before any code.
 
@@ -26,7 +26,7 @@ Minsky adds what a bare agent lacks: a task picker, 18 numbered rule-checks run 
 In the git repo Minsky should work on, tell Claude Code (or Codex):
 
 ```text
-Install or update Minsky on this machine by following https://github.com/fyodoriv/minsky/blob/HEAD/INSTALL.md (it updates an existing clone). Ask whether I only use Minsky or also contribute to it. Then run `bin/minsky daemon doctor` and fix every failing line with me. Audit the agent skills already on this machine against Minsky's and propose adopt or merge for each one. Then start Minsky for the first time on this repo and walk me through what it needs from me. At the end, list anything that could work better and offer an issue or PR for each.
+Install or update Minsky by following https://github.com/fyodoriv/minsky/blob/HEAD/INSTALL.md (it updates an existing clone). Ask whether I only use Minsky or also contribute to it. Then run `bin/minsky daemon doctor` and fix every failing line with me. Audit the agent skills already on this machine against Minsky's and propose adopt or merge for each one. Then start Minsky for the first time on this repo and walk me through what it needs from me. At the end, list anything that could work better and offer an issue or PR for each.
 ```
 
 No agent? One line, safe to rerun, ends with the doctor:
@@ -44,7 +44,7 @@ Or, inside a repo: `npx -y @fyodoriv/minsky`. **Uninstall:** `minsky uninstall -
 - **`minsky solve <id>`** — one round on one task.
 - **`minsky submit-finding`** — task submission of a finding.
 
-Each finished task arrives as a **draft pull request** to approve.
+Each finished task arrives as a **draft pull request** to approve. It reports stability and self-heals common failures.
 
 ## Safety
 
