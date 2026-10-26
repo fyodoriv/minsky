@@ -8,7 +8,7 @@
 
 ## What this is
 
-The canonical install runbook for Minsky. **Audience**: an AI coding agent (Claude Code, Cursor, Codex CLI, or any agent that can read files and run shell commands) acting on behalf of a human operator who said something like *"install minsky for this folder and start it"*. Follow it step by step. Ask the operator questions ONLY in the one round at Step 5 (telemetry consent, use or contribute), and when Step 5.6 or Step 5.7 needs their choice — every other step is yours to execute autonomously. A person who starts from the prompt at the top of [README.md](README.md) asks for every step below; it works on a new machine and for an update.
+The canonical install runbook for Minsky. **Audience**: an AI coding agent (Claude Code, Cursor, Codex CLI, or any agent that can read files and run shell commands) acting on behalf of a human operator who said something like *"install minsky for this folder and start it"*. Follow it step by step. Ask the operator questions ONLY in the one round at Step 5 (telemetry consent, use or contribute), and when Step 5.6 or Step 5.7 needs their choice; Step 6 walks them through the first run — every other step is yours to execute autonomously. A person who starts from the prompt at the top of [README.md](README.md) asks for every step below; it works on a new machine and for an update.
 
 **Where to read next after installing**:
 
@@ -75,7 +75,7 @@ If any prerequisite is missing or too old, tell the operator the exact missing p
 
 ## Step 1.5 — install the OpenHands SDK (automatic during `pnpm minsky:setup`)
 
-**Updated 2026-05-26 — operator directive "install openhands always".** Step 1.5 used to be a manual command; `pnpm minsky:setup` (Step 6 below) now does it automatically as part of the supervisor bootstrap. Skip ahead to Step 2.
+**Updated 2026-05-26 — operator directive "install openhands always".** Step 1.5 used to be a manual command; `pnpm minsky:setup` (the supervisor setup) now does it automatically as part of the supervisor bootstrap. Skip ahead to Step 2.
 
 For reference / debugging only — the equivalent manual command (what `pnpm minsky:setup` runs internally):
 
@@ -151,7 +151,8 @@ mkdir -p ~/.minsky
 # Detect which agent backend you (the installer agent) are
 AGENT="${MINSKY_AGENT_BACKEND:-claude}"  # honour env if set; default to claude
 
-cat > ~/.minsky/config.json <<EOF
+# On an update, keep the existing file (see the failure table); write it only when missing.
+[ -f ~/.minsky/config.json ] || cat > ~/.minsky/config.json <<EOF
 {
   "default_host": "$HOST_PATH",
   "agent": "$AGENT",
