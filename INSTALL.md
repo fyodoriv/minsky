@@ -8,7 +8,7 @@
 
 ## What this is
 
-The canonical install runbook for Minsky. **Audience**: an AI coding agent (Claude Code, Cursor, Codex CLI, or any agent that can read files and run shell commands) acting on behalf of a human operator who said something like *"install minsky for this folder and start it"*. Follow it step by step. Ask the operator a question ONLY at the explicit consent-prompt step (Step 5) — every other step is yours to execute autonomously.
+The canonical install runbook for Minsky. **Audience**: an AI coding agent (Claude Code, Cursor, Codex CLI, or any agent that can read files and run shell commands) acting on behalf of a human operator who said something like *"install minsky for this folder and start it"*. Follow it step by step. Ask the operator questions ONLY in the one round at Step 5 (telemetry consent, use or contribute), and when Step 5.6 or Step 5.7 needs their choice — every other step is yours to execute autonomously. A person who starts from the prompt at the top of [README.md](README.md) asks for every step below; it works on a new machine and for an update.
 
 **Where to read next after installing**:
 
@@ -123,7 +123,8 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/minsky}"
 mkdir -p "$(dirname "$INSTALL_DIR")"
 [ -d "$INSTALL_DIR" ] || git clone https://github.com/fyodoriv/minsky.git "$INSTALL_DIR"
 cd "$INSTALL_DIR"
-pnpm install
+git pull --ff-only   # an existing clone updates; a fresh one is a no-op
+pnpm install --frozen-lockfile
 ```
 
 Add Minsky's `bin/` to the operator's shell PATH. Detect their shell:
@@ -184,7 +185,36 @@ That single call:
 
 If `minsky` isn't yet on PATH for the current shell, use the explicit `$INSTALL_DIR/bin/minsky` form (as shown above) — Step 3 already set the absolute path in your shell variable.
 
-## Step 6 — install persistence and start the daemon
+In the same round, ask the second question: "Do you only use Minsky, or will you also change its code? A **contributor** setup runs the unit tests and the lint once, so you know this machine can test a change." Options: Use it (recommended) / Use and contribute. "Use and contribute" adds Step 5.5.
+
+## Step 5.5 — contributor setup (only when the operator contributes)
+
+```bash
+cd "$INSTALL_DIR"
+pnpm lint && pnpm typecheck && pnpm test   # commit first if you have local edits: see AGENTS.md Gotchas
+```
+
+Then point the operator at [AGENTS.md](AGENTS.md) (the rules every change follows) and `TASKS.md` (open work). The full gate is `pnpm check`.
+
+## Step 5.6 — check and fix with the doctor
+
+```bash
+cd "$HOST_PATH" && "$INSTALL_DIR/bin/minsky" daemon doctor
+```
+
+It prints one `PASS`, `WARN`, or `FAIL` line per check and ends with `doctor: ready` when nothing failed. Fix every `FAIL` line with the operator: each line names its fix. Run the doctor again until it shows no `FAIL` line, or until the only failures need the operator (a login, a token); say which. A `WARN daemon not running` line is expected here: Step 6 starts it.
+
+If agentbrew is installed, run `agentbrew sync --agentfile "$INSTALL_DIR/Agentfile.yaml"` so Minsky's skills reach every agent.
+
+## Step 5.7 — audit what the machine already has
+
+Skip this step if the operator does not use agent skills (no `~/.claude/skills/` or similar folder). Otherwise list the skills and commands already on this machine (for Claude Code: `~/.claude/skills/` and `~/.claude/commands/`; `agentbrew status --verbose` shows where each comes from). Compare each one with Minsky's `.claude/skills/` and `skill-plugins/`. For each overlap, propose one action and let the operator choose:
+
+- **adopt**: Minsky already does it; remove the local copy,
+- **merge**: the local copy does something Minsky's does not; offer to add it to Minsky,
+- **keep**: it is not Minsky's kind of work.
+
+## Step 6 — start Minsky for the first time
 
 ```bash
 "$INSTALL_DIR/bin/minsky" install-daemon "$HOST_PATH"
@@ -208,6 +238,8 @@ Wait up to 60 seconds and confirm an iteration has started by checking for eithe
 tail -50 ~/.minsky/daemon.log | grep -E 'iteration #|verdict=' | head -5
 ```
 
+Walk the operator through that first run, one item at a time: show the dashboard and what it says, run `"$INSTALL_DIR/bin/minsky" show tasks` and read the next pick to them, and if the host has no open task, help them write the first one in `TASKS.md` with the rule-9 fields from `vision.md`.
+
 ## Step 7 — confirm to the operator
 
 Tell the operator, in this exact format (substitute the bracketed values):
@@ -228,7 +260,11 @@ Next: add tasks to <HOST_PATH>/TASKS.md with the rule-9 fields documented at
 <INSTALL_DIR>/vision.md, and Minsky will pick them up.
 ```
 
-Then exit cleanly. Do not pick a task from the operator's host repo. Do not modify code in the host repo. Do not push to any remote. The daemon is now running and will do that work itself in the background.
+Then go to Step 8. Do not pick a task from the operator's host repo. Do not modify code in the host repo. Do not push to any remote. The daemon is now running and will do that work itself in the background.
+
+## Step 8 — offer improvements
+
+List anything in the install, the doctor, or the first run that could work better, and offer an issue or a PR for each on `github.com/fyodoriv/minsky`. Post nothing until the operator says yes, and show the exact text first; with agentbrew installed, `agentbrew report --repo fyodoriv/minsky` scrubs private details. Then exit cleanly.
 
 ### Switching a host to GitHub Issues (optional)
 
