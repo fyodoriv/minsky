@@ -39,6 +39,10 @@ Or, inside a repo: `npx -y @fyodoriv/minsky`. **Uninstall:** `minsky uninstall -
 - Reports stability, self-heals common failures, and restarts after a crash.
 - Runs on your machine, as you.
 
+## What this is
+
+A background program (a daemon) that drives a coding agent through the `TASKS.md` of a repo.
+
 ## What this is not
 
 - **Not an agent runtime.** It drives one, such as [OpenHands](https://github.com/All-Hands-AI/OpenHands).
