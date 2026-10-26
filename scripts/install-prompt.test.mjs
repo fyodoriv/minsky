@@ -46,6 +46,7 @@ describe("README one-prompt setup", () => {
     expect(line.endsWith("bin/minsky daemon doctor")).toBe(true);
   });
   test("the README order is start blocks, Use cases, Features, then the rest", () => {
+    /** @param {string} h */
     const at = (h) => README.indexOf(h);
     expect(at("```bash")).toBeGreaterThan(at("```text"));
     expect(at("\n## Use cases\n")).toBeGreaterThan(at("```bash"));
