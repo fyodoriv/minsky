@@ -45,6 +45,13 @@ describe("README one-prompt setup", () => {
     expect(line).toContain("pnpm install --frozen-lockfile");
     expect(line.endsWith("bin/minsky daemon doctor")).toBe(true);
   });
+  test("the README order is start blocks, Use cases, Features, then the rest", () => {
+    const at = (h) => README.indexOf(h);
+    expect(at("```bash")).toBeGreaterThan(at("```text"));
+    expect(at("\n## Use cases\n")).toBeGreaterThan(at("```bash"));
+    expect(at("\n## Features\n")).toBeGreaterThan(at("\n## Use cases\n"));
+    expect(README.indexOf("\n## ")).toBe(at("\n## Use cases\n"));
+  });
 });
 
 describe("INSTALL.md carries out each part of the prompt", () => {
