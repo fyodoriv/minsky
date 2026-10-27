@@ -958,7 +958,8 @@ if [ -z "${MINSKY_USAGE_CHILD:-}" ] && [ "${MINSKY_USAGE:-}" != "off" ] && [ -z 
     _u_t1=$(_u_now)
     _u_ms=$(awk -v a="$_u_t0" -v b="$_u_t1" 'BEGIN { printf "%d", (b - a) * 1000 }')
     node "$_u_repo/scripts/usage-events.mjs" record --command "${1:-}" --exit "$_u_rc" --duration-ms "$_u_ms" 2>/dev/null || true
-    node "$_u_repo/scripts/telemetry.mjs" notice 2>&1 >/dev/null | head -1 >&2 || true
+    # The one-time notice goes only to a terminal: scripts parse stdout/stderr.
+    if [ -t 2 ]; then node "$_u_repo/scripts/telemetry.mjs" notice || true; fi
     ( node "$_u_repo/scripts/telemetry.mjs" send --daily >/dev/null 2>&1 & )
     exit "$_u_rc"
   fi
