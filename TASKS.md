@@ -599,17 +599,31 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P1
 
-- [ ] Field telemetry sends anonymous usage counts to PostHog EU
-  - **ID**: field-telemetry-posthog
-  - **Tags**: proof, telemetry, privacy
-  - **Details**: Copy the shape of careerbrew PR #219 (`src/careerbrew/telemetry.py`). Send only allowlisted, content-free fields of this app's local usage events (event name, status, duration, counts, a random install id) to PostHog EU `/batch/`, with person profiles and GeoIP off. Send nothing without the owner-typed `posthog_key`. Off switches: `DO_NOT_TRACK=1` and `telemetry off`. A cursor stops repeats, and a failed send never fails a command. Commands: `telemetry status|on|off|send --dry-run`. Tests use fake endpoints only. The README Proof generator reads PostHog totals when a personal query key is set and falls back to the local aggregate.
-  - **Acceptance**: `telemetry send --dry-run` prints only allowlisted fields; a canary test proves no content, path, or name leaves the machine; the privacy doc lists the exit.
-  - **Hypothesis**: real-use totals from the owner's and Tope's machines replace "not measured yet" rows in the README Proof section.
-  - **Measurement**: `telemetry send --dry-run` plus the Proof generator's machine count n
-  - **Success**: n of 2 or more machines within 2 weeks of the key being set
-  - **Pivot**: PostHog's free tier or API cannot give per-event totals → a private git repo of aggregates
-  - **Anchor**: Homebrew analytics (docs.brew.sh/Analytics), opt-out anonymous usage counts
+- [ ] The Proof section measures draft PRs opened per work round
+  - **ID**: proof-draft-prs-per-round
+  - **Tags**: proof, telemetry
+  - **Competitive-goal**: protects `autonomous-merge-rate`: the README can only claim "a draft PR per round" with a real count behind it.
+  - **Details**: Add a content-free `prs_opened` count to the usage line of a work round (`run`, `solve`, `transform`, `iter-once`) in `scripts/usage-events.mjs`, read from the round's own result, and add a `draft_prs_per_round` metric to `scripts/proof.mjs`.
+  - **Touches**: scripts/usage-events.mjs,scripts/proof.mjs,scripts/proof.test.mjs,README.md,docs/proof/
+  - **Acceptance**: the README row "Ships each result as a draft PR" shows a number with its data kind, and `pnpm exec vitest run scripts/proof.test.mjs` passes.
+  - **Hypothesis**: one draft PR or more per ok work round on real machines.
+  - **Measurement**: `node scripts/proof.mjs collect && node scripts/proof.mjs render`
+  - **Success**: the row shows a number from 2 machines or more
+  - **Pivot**: a round cannot report its PR count without content → count PRs by `gh pr list --author @me --draft` per day instead
+  - **Anchor**: Forsgren, Humble, Kim, *Accelerate*, 2018 (deployment frequency)
 
+- [ ] The Proof section measures destructive commands blocked per work round
+  - **ID**: proof-destructive-blocks
+  - **Tags**: proof, telemetry, safety
+  - **Competitive-goal**: protects `autonomous-merge-rate`: a guardrail the README claims must be seen to fire.
+  - **Details**: Count blocks by the destructive-command guard (git shim) per work round as a content-free number in the usage line, and add a `destructive_blocks` metric to `scripts/proof.mjs`. Never record the blocked command text.
+  - **Touches**: scripts/usage-events.mjs,scripts/proof.mjs,scripts/proof.test.mjs,README.md,docs/proof/
+  - **Acceptance**: the README row "Blocks destructive operations" shows a number with its data kind; a canary test proves no command text is recorded.
+  - **Hypothesis**: the guard fires on real runs and no destructive command runs unblocked.
+  - **Measurement**: `node scripts/proof.mjs collect && node scripts/proof.mjs render`
+  - **Success**: a count from 2 machines or more
+  - **Pivot**: the guard cannot report counts without content → keep the row "not measured yet" and drop the claim
+  - **Anchor**: Reason, *Human Error*, 1990 (defence in depth)
 
 - [ ] `pnpm test` must never revert uncommitted changes in the checkout
   - **ID**: test-suite-reverts-uncommitted-edits

@@ -90,6 +90,7 @@ For the **moats as user stories** with chaos coverage + pre-registered umbrella 
 
 | Doc | What it covers |
 |---|---|
+| [docs/proof/README.md](proof/README.md) | How the README Proof numbers are made: field recording, opt-in PostHog telemetry, the generator. |
 | [docs/edge-cases.md](edge-cases.md) | What happens when the queue is empty, runtime limits hit, agents crash, etc. |
 | [docs/auto-merge.md](auto-merge.md) | Periodic gate-and-merge for daemon PRs (ON for Minsky itself, OFF for other repos). |
 | [docs/dependabot.md](dependabot.md) | Dependabot mechanics — schedule, grouping, local merge gate. |

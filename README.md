@@ -39,6 +39,25 @@ Or, inside a repo: `npx -y @fyodoriv/minsky`. **Uninstall:** `minsky uninstall -
 - Reports stability, self-heals common failures, and restarts after a crash.
 - Runs on your machine, as you.
 
+## Proof
+
+<!-- proof:start -->
+Numbers come from content-free usage counts ([how and privacy](docs/proof/README.md)). Until field data arrives, a row shows a local run and names it.
+
+| Claim | Theory | Metric | Result | Source |
+|---|---|---|---|---|
+| Works through `TASKS.md` unattended | Unattended rounds must finish ok; MTBF thinking (Nygard, *Release It!*, 2018) | Share of work rounds (`run`, `solve`, `transform`) that exit 0 | not measured yet (field recording on since 2026-10-26): 0 rounds | `docs/proof/metrics.json`, local run, 2026-10-26, machine d570f14f, n=1 |
+| Reports stability (restarts not measured yet) | Errors per real run should stay low (Google SRE, 2016, error budgets) | Share of all real `minsky` runs that exit 0 | 88.9 % of 9 runs | `docs/proof/metrics.json`, local run, 2026-10-26, machine d570f14f, n=1 |
+| Ships each result as a **draft PR** | A reviewable PR per round is the product (Forsgren et al., *Accelerate*, 2018) | Draft PRs opened per work round | not measured yet (field recording on since 2026-10-26); task `proof-draft-prs-per-round` | none |
+| Blocks destructive operations | Guardrails must fire, not only exist (Reason, *Human Error*, 1990) | Destructive commands blocked per work round | not measured yet (field recording on since 2026-10-26); task `proof-destructive-blocks` | none |
+
+```mermaid
+pie title Real minsky runs by exit (local run, 2026-10-26, machine d570f14f)
+  "ok" : 8
+  "error" : 1
+```
+<!-- proof:end -->
+
 ## What this is
 
 A background program (a daemon) that drives a coding agent through the `TASKS.md` of a repo.

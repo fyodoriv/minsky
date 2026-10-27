@@ -55,9 +55,15 @@ export const README_BYTE_BUDGET_TARGET = 3072;
  * 3072: this raises the enforced ceiling, it does not move the goal. When
  * the banner goes away, this constant should go back to the target.
  *
+ * Raised 3232 -> 4608 on 2026-10-26 for the `## Proof` section (owner
+ * goal: every README proves its claims with measured numbers, a table, and
+ * a chart, right after Features). Documented reason: the generated table
+ * and Mermaid chart need ~1.5 KB, and the proof of each claim outranks the
+ * <5-min-read goal. The TARGET stays 3072.
+ *
  * @type {number}
  */
-export const README_BYTE_BUDGET_HARD_LIMIT = 3232;
+export const README_BYTE_BUDGET_HARD_LIMIT = 4608;
 
 /**
  * @typedef {object} CheckResult
