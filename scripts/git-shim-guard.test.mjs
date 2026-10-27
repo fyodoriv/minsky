@@ -174,6 +174,8 @@ describe("git-shim canonical task measurement (indirect via script)", () => {
           ...process.env,
           BDB_TREE_KIND_OVERRIDE: "main",
           MINSKY_GIT_SHIM_REAL_GIT: NO_OP_GIT,
+          // A BASH_ENV startup file can put another `git` ahead of the shim.
+          BASH_ENV: "",
           PATH: `${shimDir}:${process.env["PATH"]}`,
         },
         stdio: ["ignore", "pipe", "pipe"],
@@ -198,6 +200,7 @@ describe("git-shim canonical task measurement (indirect via script)", () => {
             ...process.env,
             BDB_TREE_KIND_OVERRIDE: "worktree",
             MINSKY_GIT_SHIM_REAL_GIT: NO_OP_GIT,
+            BASH_ENV: "",
             PATH: `${shimDir}:${process.env["PATH"]}`,
           },
           stdio: ["ignore", "pipe", "pipe"],
