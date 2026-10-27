@@ -1,0 +1,75 @@
+{
+  "generated": "2026-10-26",
+  "metrics": {
+    "real_runs": {
+      "value": 9,
+      "unit": "runs",
+      "date": "2026-10-26",
+      "kind": "local run, 2026-10-26, machine d570f14f",
+      "command": "node scripts/proof.mjs collect",
+      "n": 1,
+      "history": [
+        {
+          "date": "2026-10-26",
+          "value": 9
+        }
+      ]
+    },
+    "run_success": {
+      "value": 88.9,
+      "unit": "%",
+      "date": "2026-10-26",
+      "kind": "local run, 2026-10-26, machine d570f14f",
+      "command": "node scripts/proof.mjs collect",
+      "n": 1,
+      "history": [
+        {
+          "date": "2026-10-26",
+          "value": 88.9
+        }
+      ]
+    },
+    "run_errors": {
+      "value": 1,
+      "unit": "runs",
+      "date": "2026-10-26",
+      "kind": "local run, 2026-10-26, machine d570f14f",
+      "command": "node scripts/proof.mjs collect",
+      "n": 1,
+      "history": [
+        {
+          "date": "2026-10-26",
+          "value": 1
+        }
+      ]
+    },
+    "work_rounds": {
+      "value": 0,
+      "unit": "rounds",
+      "date": "2026-10-26",
+      "kind": "local run, 2026-10-26, machine d570f14f",
+      "command": "node scripts/proof.mjs collect",
+      "n": 1,
+      "history": [
+        {
+          "date": "2026-10-26",
+          "value": 0
+        }
+      ]
+    },
+    "work_success": {
+      "value": 0,
+      "unit": "%",
+      "date": "2026-10-26",
+      "kind": "local run, 2026-10-26, machine d570f14f",
+      "command": "node scripts/proof.mjs collect",
+      "n": 1,
+      "history": [
+        {
+          "date": "2026-10-26",
+          "value": 0
+        }
+      ]
+    }
+  }
+}

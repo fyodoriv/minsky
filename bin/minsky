@@ -21,6 +21,8 @@
 #   minsky uninstall [--force]      → remove all per-machine state
 #   minsky reset [--hard]           → clear iteration store + claims + truncate logs
 #                                     (--hard also stops supervisor)
+#   minsky telemetry status|on|off|send [--dry-run]
+#                                   → opt-in usage counts to PostHog EU (needs a key)
 #
 #   ─── Run ───────────────────────────────────────────────────────
 #   minsky run                      → autonomous run (foreground, SIGHUP-immune)
@@ -933,6 +935,36 @@ TUSAGE
   return 0
 }
 
+# ── 0. Field recording (scripts/usage-events.mjs) ───────────
+#
+# Each real run appends one content-free usage line (command name, ok or
+# error, exit code, duration) to ~/.minsky/usage.jsonl, for the README
+# Proof section. The parent shell runs the command as a child, then records
+# its exit code: many branches below `exec`, so an EXIT trap would not fire.
+# Off: MINSKY_USAGE=off. Skipped inside vitest so tests never record or send,
+# and for `uninstall`, which removes the state dir (a line would recreate it).
+# After recording, scripts/telemetry.mjs may send the day's batch to PostHog
+# EU in the background, only when the owner stored a key (opt-in).
+if [ -z "${MINSKY_USAGE_CHILD:-}" ] && [ "${MINSKY_USAGE:-}" != "off" ] && [ -z "${VITEST:-}" ] \
+  && [ "${1:-}" != "uninstall" ] \
+  && command -v node >/dev/null 2>&1; then
+  _u_repo=$(dirname "$(dirname "$(_minsky_realpath "$0")")")
+  if [ -f "$_u_repo/scripts/usage-events.mjs" ]; then
+    _u_now() { perl -MTime::HiRes=time -e 'printf "%.3f", time' 2>/dev/null || date +%s; }
+    _u_t0=$(_u_now)
+    # `set -e` is on: capture a failing exit code instead of exiting here.
+    _u_rc=0
+    MINSKY_USAGE_CHILD=1 "$0" ${1+"$@"} || _u_rc=$?
+    _u_t1=$(_u_now)
+    _u_ms=$(awk -v a="$_u_t0" -v b="$_u_t1" 'BEGIN { printf "%d", (b - a) * 1000 }')
+    node "$_u_repo/scripts/usage-events.mjs" record --command "${1:-}" --exit "$_u_rc" --duration-ms "$_u_ms" 2>/dev/null || true
+    # The one-time notice goes only to a terminal: scripts parse stdout/stderr.
+    if [ -t 2 ]; then node "$_u_repo/scripts/telemetry.mjs" notice || true; fi
+    ( node "$_u_repo/scripts/telemetry.mjs" send --daily >/dev/null 2>&1 & )
+    exit "$_u_rc"
+  fi
+fi
+
 # ── 1. Handle subcommands that DON'T need the repo ──────────
 #
 # `minsky status` / `minsky stop` / `minsky logs` only need
@@ -940,6 +972,14 @@ TUSAGE
 # cost so a fresh machine without minsky checked out can still
 # report "no running process".
 case "${1:-}" in
+  telemetry)
+    # `minsky telemetry status|on|off|send [--dry-run]` — opt-in field
+    # telemetry to PostHog EU (scripts/telemetry.mjs, the one adapter).
+    # Agents: ask the owner before `send`; `send --dry-run` prints the body.
+    _tel_repo=$(dirname "$(dirname "$(_minsky_realpath "$0")")")
+    shift
+    exec node "$_tel_repo/scripts/telemetry.mjs" "$@"
+    ;;
   --help|-h)
     # Print the canonical usage block from the comment header at the
     # top of this file. Extracted via sed — the source-of-truth lives
