@@ -602,6 +602,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] Field telemetry sends anonymous usage counts to PostHog EU
   - **ID**: field-telemetry-posthog
   - **Tags**: proof, telemetry, privacy
+  - **Competitive-goal**: protects `autonomous-merge-rate`: real-use counts prove the README's claims.
   - **Details**: Copy the shape of careerbrew PR #219 (`src/careerbrew/telemetry.py`). Send only allowlisted, content-free fields of this app's local usage events (event name, status, duration, counts, a random install id) to PostHog EU `/batch/`, with person profiles and GeoIP off. Send nothing without the owner-typed `posthog_key`. Off switches: `DO_NOT_TRACK=1` and `telemetry off`. A cursor stops repeats, and a failed send never fails a command. Commands: `telemetry status|on|off|send --dry-run`. Tests use fake endpoints only. The README Proof generator reads PostHog totals when a personal query key is set and falls back to the local aggregate.
   - **Acceptance**: `telemetry send --dry-run` prints only allowlisted fields; a canary test proves no content, path, or name leaves the machine; the privacy doc lists the exit.
   - **Hypothesis**: real-use totals from the owner's and Tope's machines replace "not measured yet" rows in the README Proof section.
@@ -609,7 +610,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Success**: n of 2 or more machines within 2 weeks of the key being set
   - **Pivot**: PostHog's free tier or API cannot give per-event totals → a private git repo of aggregates
   - **Anchor**: Homebrew analytics (docs.brew.sh/Analytics), opt-out anonymous usage counts
-
 
 - [ ] `pnpm test` must never revert uncommitted changes in the checkout
   - **ID**: test-suite-reverts-uncommitted-edits

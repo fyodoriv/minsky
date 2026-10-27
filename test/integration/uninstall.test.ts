@@ -161,7 +161,8 @@ describe("bin/minsky uninstall — one-command flow", () => {
     // Non-existent dir: no "state dir" line in the preview.
     const r2 = runUninstall([], {
       stdin: "",
-      stateDir: join(tmpdir(), "minsky-nonexistent-xxx-yyy"),
+      // A unique path: a fixed name can exist from an earlier run.
+      stateDir: join(mkdtempSync(join(tmpdir(), "minsky-uninstall-")), "absent"),
     });
     expect(r2.stderr).not.toContain("state dir:");
   });
