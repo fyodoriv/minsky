@@ -7,7 +7,7 @@
 > **Archived (2026-11).** Minsky is no longer maintained. Its useful parts
 > moved to [agentbrew](https://github.com/fyodoriv/agentbrew),
 > [dotfiles](https://github.com/fyodoriv/dotfiles), and
-> [tasks.md](https://github.com/fyodoriv/tasks.md). [ABSORBED.md](ABSORBED.md)
+> [tasks.md](https://github.com/fyodoriv/tasks.md). [absorbed.md](absorbed.md)
 > says where each part went.
 
 In the git repo Minsky should work on, tell Claude Code (or Codex):

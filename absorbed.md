@@ -1,5 +1,7 @@
 # Where minsky went
 
+<!-- pattern: not-applicable — archive ledger, no runtime artefact -->
+
 minsky is archived. Its useful parts now live in three repos:
 
 - [agentbrew](https://github.com/fyodoriv/agentbrew): skills, docs, lint tasks.
@@ -184,7 +186,7 @@ PRs: [agentbrew#1120](https://github.com/fyodoriv/agentbrew/pull/1120) · [dotfi
 | `novel/tick-loop` | Dropped: orchestrator core loop |
 | `novel/mape-k-loop` | Dropped: orchestrator self-adaptation; MAPE-K citation kept in agentbrew docs |
 | `novel/observer` | Dropped: run observer |
-| `novel/dashboard-web` | Dropped: minsky dashboard |
+| `novel/dashboard-*` | Dropped: minsky dashboard |
 | `novel/cross-repo-runner` | Dropped: orchestrator runner; tasks.md `fleet` covers multi-repo |
 | `novel/human-loop` | Duplicate: agentbrew handoff / wrap-up |
 | `novel/personas` | Dropped: orchestrator personas |
@@ -229,7 +231,7 @@ PRs: [agentbrew#1120](https://github.com/fyodoriv/agentbrew/pull/1120) · [dotfi
 
 | Item | Disposition |
 |---|---|
-| `ABSORBED.md` | This file |
+| `absorbed.md` | This file |
 | `TASKS.md` | See "Open tasks" below |
 | `lefthook.yml` | Merged: piped + toolchain-first into agentbrew `new-project` lefthook template |
 | `vision.md` | Duplicate: rules 1, 3, 9, 10 in dotfiles constitution and tasks.md spec |

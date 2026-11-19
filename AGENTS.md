@@ -3,7 +3,7 @@
 > The agent runbook for the Minsky repo — setup, running, claiming tasks, and the constitutional rules every commit must honour.
 > **Repository status — archived (2026-11):** Minsky is read-only. Do not
 > start new work here. Its useful parts moved to agentbrew, dotfiles, and
-> tasks.md; [ABSORBED.md](ABSORBED.md) maps each part to its new home.
+> tasks.md; [absorbed.md](absorbed.md) maps each part to its new home.
 
 <!-- pattern: not-applicable — CLAUDE.md is a symlink to this file so Claude Code loads it; no new pattern -->
 

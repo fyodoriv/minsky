@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail when a tracked minsky item has no row in ABSORBED.md.
+"""Fail when a tracked minsky item has no row in absorbed.md.
 
 Items: repo-root entries, .claude/skills/*, bin/*, novel/*, novel/adapters/*,
 docs/*, scripts/* (git-tracked). A row's first backticked cell is a glob;
@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
-ledger = (root / "ABSORBED.md").read_text()
+ledger = (root / "absorbed.md").read_text()
 globs = re.findall(r"^\| `([^`]+)` \|", ledger, re.M)
 
 files = subprocess.run(["git", "ls-files"], cwd=root, capture_output=True,
