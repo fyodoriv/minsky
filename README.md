@@ -4,8 +4,11 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
-> **Maintenance mode.** Not under active development, but still usable.
-> Fixes and small changes are welcome — see [docs/DEPRECATED.md](docs/DEPRECATED.md).
+> **Archived (2026-11).** Minsky is no longer maintained. Its useful parts
+> moved to [agentbrew](https://github.com/fyodoriv/agentbrew),
+> [dotfiles](https://github.com/fyodoriv/dotfiles), and
+> [tasks.md](https://github.com/fyodoriv/tasks.md). [ABSORBED.md](ABSORBED.md)
+> says where each part went.
 
 In the git repo Minsky should work on, tell Claude Code (or Codex):
 
